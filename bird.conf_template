@@ -1,0 +1,95 @@
+################################################
+#               Variable header                #
+################################################
+
+define OWNAS =  4242421053;
+define ROUTERID = 169.254.233.2;
+define OWNIPv6 = fddf:8aef:1053::200;
+define OWNNETv6 = fddf:8aef:1053::/48;
+define OWNNETSETv6 = [fddf:8aef:1053::/48+];
+
+################################################
+#                 Header end                   #
+################################################
+
+router id ROUTERID;
+
+protocol device {
+    scan time 10;
+}
+
+/*
+ *  Utility functions
+ */
+
+function is_self_net_v6() -> bool {
+  return net ~ OWNNETSETv6;
+}
+
+roa6 table dn42_roa_v6;
+
+protocol static {
+    roa6 { table dn42_roa_v6; };
+    include "/etc/bird/roa_dn42_v6.conf";
+};
+
+function is_valid_network_v6() -> bool {
+  return net ~ [
+    fd00::/8{44,64} # ULA address space as per RFC 4193
+  ];
+}
+
+protocol kernel {
+    scan time 20;
+
+    ipv6 {
+        import none;
+        export filter {
+            if source = RTS_STATIC then reject;
+            krt_prefsrc = OWNIPv6;
+            accept;
+        };
+    };
+};
+
+protocol static {
+    route OWNNETv6 reject;
+
+    ipv6 {
+        import all;
+        export none;
+    };
+}
+
+template bgp dnpeers {
+    local as OWNAS;
+    path metric on;
+
+    ipv6 {
+        import filter {
+          if is_valid_network_v6() && !is_self_net_v6() then {
+            if (roa_check(dn42_roa_v6, net, bgp_path.last) != ROA_VALID) then {
+              # Reject when unknown or invalid according to ROA
+              print "[dn42] ROA check failed for ", net, " ASN ", bgp_path.last;
+              reject;
+            } else accept;
+          } else reject;
+        };
+        export filter { if is_valid_network_v6() && source ~ [RTS_STATIC, RTS_BGP] then accept; else reject; };
+        import limit 9000 action block;
+    };
+}
+
+template bgp ibgp_template {
+    local as OWNAS;
+    path metric on;
+
+    ipv6 {
+        import where source = RTS_BGP && is_valid_network_v6() && !is_self_net_v6();
+        export where source = RTS_BGP && is_valid_network_v6() && !is_self_net_v6();
+        next hop self;
+    };
+}
+
+include "/etc/bird/babel.conf";
+include "/etc/bird/peers/*";
