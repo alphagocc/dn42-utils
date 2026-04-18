@@ -1,0 +1,3 @@
+protocol bgp ibgp_shu_ftd2000 from dnpeers {
+    neighbor <neighbor ip> as OWNAS;
+};
