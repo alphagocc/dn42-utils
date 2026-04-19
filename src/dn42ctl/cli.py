@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import ipaddress
+import json
+import re
 import uuid
+from dataclasses import asdict
 from pathlib import Path
 
 import typer
@@ -22,8 +26,14 @@ from dn42ctl.services import (
     Dn42CtlError,
     create_bgp_peer,
     create_ibgp_peer,
+    delete_bgp_peer,
+    delete_ibgp_peer,
     init_node,
     modify_bgp_peer,
+    scan_local_configs,
+    show_bgp_peers,
+    show_ibgp_peers,
+    show_wg_tunnels,
 )
 
 
@@ -38,8 +48,52 @@ def _db_open_hint(db_path: Path) -> str:
     )
 
 
+_WG_PUBKEY_RE = re.compile(r"^[A-Za-z0-9+/]{42,44}={0,2}$")
+
+
+def _validate_pubkey(value: str) -> str:
+    """Validate a WireGuard public key: non-empty, base64 charset, ~44 chars."""
+    value = value.strip()
+    if not value:
+        raise typer.BadParameter("公钥不能为空")
+    if not _WG_PUBKEY_RE.match(value):
+        raise typer.BadParameter(f"公钥格式不合法 (base64, 需40~44字符): {value!r}")
+    return value
+
+
+def _validate_endpoint(value: str) -> str:
+    """Validate endpoint: allow empty, or require host:port with port 1-65535."""
+    value = value.strip()
+    if not value:
+        return value
+    # Support IPv6 bracket notation [::1]:port and plain host:port.
+    m = re.match(r"^(\[.+\]|[^:]+):(\d+)$", value)
+    if not m:
+        raise typer.BadParameter(
+            f"格式错误: 需要 host:port 或 [IPv6]:port 形式: {value!r}"
+        )
+    port = int(m.group(2))
+    if not (1 <= port <= 65535):
+        raise typer.BadParameter(f"Port 超出范围 (1-65535): {port}")
+    return value
+
+
+def _validate_peer_lla(value: str) -> str:
+    """Validate peer LLA: non-empty and parseable as an IPv6 address."""
+    value = value.strip()
+    if not value:
+        raise typer.BadParameter("Peer LLA 不能为空")
+    # Strip /prefix-length for validation.
+    addr_part = value.split("/", 1)[0]
+    try:
+        ipaddress.IPv6Address(addr_part)
+    except ValueError:
+        raise typer.BadParameter(f"不是合法的 IPv6 地址: {value!r}")
+    return value
+
+
 @app.callback()
-def _main(
+def main(
     ctx: typer.Context,
     config_path: Path = typer.Option(
         DEFAULT_CONFIG_PATH,
@@ -106,9 +160,11 @@ def cmd_init(
 
     if own_asn is None:
         own_asn = existing.own_asn if existing else typer.prompt("OWNAS", type=int)
+    assert own_asn is not None
 
     if own_ipv6 is None:
         own_ipv6 = existing.own_ipv6 if existing else typer.prompt("OWNIPv6")
+    assert own_ipv6 is not None
     if len(own_ipv6) == 4 and all(c in "0123456789abcdefABCDEF" for c in own_ipv6):
         own_ipv6 = f"fddf:8aef:1053::{own_ipv6.lower()}"
 
@@ -118,12 +174,14 @@ def cmd_init(
             if existing
             else typer.prompt("OWNNETv6", default="fddf:8aef:1053::/48")
         )
+    assert ownnet_v6 is not None
     if ownnetset_v6 is None:
         ownnetset_v6 = (
             existing.ownnetset_v6
             if existing
             else typer.prompt("OWNNETSETv6", default=f"[{ownnet_v6}+]")
         )
+    assert ownnetset_v6 is not None
 
     router_id = (
         existing.router_id
@@ -200,7 +258,62 @@ def cmd_init(
     typer.echo(f"node_id: {result.config.node_id}")
     typer.echo(f"Bird: {result.bird_conf_path}")
     typer.echo(f"Babel: {result.bird_babel_conf_path}")
+    typer.echo(f"ROA v6: {result.bird_roa_v6_conf_path}")
+    typer.echo(
+        "ROA systemd timer: "
+        + ("enabled" if result.systemd_roa_timer_enabled else "skipped")
+    )
     typer.echo(f"DB: {result.db_path}")
+
+    if result.warnings:
+        typer.echo("\n警告:")
+        for w in result.warnings:
+            typer.echo(f"- {w}")
+
+
+@app.command("scan")
+def cmd_scan(ctx: typer.Context) -> None:
+    appctx: AppContext = ctx.obj
+    try:
+        config = appctx.require_config()
+    except FileNotFoundError as exc:
+        typer.echo("错误: 未初始化，请先运行 dn42ctl init")
+        raise typer.Exit(2) from exc
+    except ConfigError as exc:
+        typer.echo(f"错误: 配置文件读取失败: {exc}")
+        raise typer.Exit(2) from exc
+
+    try:
+        res = scan_local_configs(config=config, db_path=appctx.db_path)
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}")
+        raise typer.Exit(1) from exc
+
+    typer.echo("scan 完成")
+    typer.echo(
+        f"inserted: {len(res.inserted)}  conflicts: {len(res.conflicts)}  skipped: {len(res.skipped)}"
+    )
+
+    if res.inserted:
+        typer.echo("\n已导入:")
+        for x in res.inserted:
+            typer.echo(
+                f"- [{x.kind}] {x.key} ifname={x.ifname} backend={x.net_backend}"
+            )
+    if res.conflicts:
+        typer.echo("\n冲突(已跳过):")
+        for x in res.conflicts:
+            typer.echo(
+                f"- [{x.kind}] {x.key} ifname={x.ifname} backend={x.net_backend}"
+            )
+    if res.skipped:
+        typer.echo("\n跳过:")
+        for s in res.skipped:
+            typer.echo(f"- {s}")
+    if res.warnings:
+        typer.echo("\n警告:")
+        for w in res.warnings:
+            typer.echo(f"- {w}")
 
 
 bgp_app = typer.Typer()
@@ -245,6 +358,20 @@ def cmd_bgp_peer(
         peer_lla = typer.prompt("Peer LLA (fe80::...)")
     if net_backend is None:
         net_backend = typer.prompt("网络后端", default="networkd")
+
+    assert peer_asn is not None
+    assert peer_public_key is not None
+    assert endpoint is not None
+    assert peer_lla is not None
+    assert net_backend is not None
+
+    try:
+        peer_public_key = _validate_pubkey(peer_public_key)
+        endpoint = _validate_endpoint(endpoint)
+        peer_lla = _validate_peer_lla(peer_lla)
+    except typer.BadParameter as exc:
+        typer.echo(f"输入错误: {exc}")
+        raise typer.Exit(2) from exc
 
     try:
         res = create_bgp_peer(
@@ -320,6 +447,20 @@ def cmd_bgp_peer_modify(
             "网络后端", default=str(row["net_backend"] or "networkd")
         )
 
+    assert peer_public_key is not None
+    assert endpoint is not None
+    assert peer_lla is not None
+    assert net_backend is not None
+
+    try:
+        peer_public_key = _validate_pubkey(peer_public_key)
+        endpoint = _validate_endpoint(endpoint)
+        if peer_lla:  # peer_lla may be empty string if user cleared it
+            peer_lla = _validate_peer_lla(peer_lla)
+    except typer.BadParameter as exc:
+        typer.echo(f"\u8f93\u5165\u9519\u8bef: {exc}")
+        raise typer.Exit(2) from exc
+
     try:
         res = modify_bgp_peer(
             config=config,
@@ -382,6 +523,20 @@ def cmd_ibgp_peer(
     if net_backend is None:
         net_backend = typer.prompt("网络后端", default="networkd")
 
+    assert name is not None
+    assert peer_public_key is not None
+    assert endpoint is not None
+    assert peer_lla is not None
+    assert net_backend is not None
+
+    try:
+        peer_public_key = _validate_pubkey(peer_public_key)
+        endpoint = _validate_endpoint(endpoint)
+        peer_lla = _validate_peer_lla(peer_lla)
+    except typer.BadParameter as exc:
+        typer.echo(f"输入错误: {exc}")
+        raise typer.Exit(2) from exc
+
     try:
         res = create_ibgp_peer(
             config=config,
@@ -406,3 +561,329 @@ def cmd_ibgp_peer(
 
 
 app.add_typer(ibgp_app, name="ibgp")
+
+
+show_app = typer.Typer()
+
+
+def _print_json(data: object) -> None:
+    typer.echo(json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def _print_file_statuses(files: list[dict[str, object]]) -> None:
+    for f in files:
+        path = str(f.get("path") or "")
+        exists = bool(f.get("exists"))
+        mark = "OK" if exists else "MISSING"
+        typer.echo(f"  - {mark}: {path}")
+
+
+@show_app.command("wg")
+def cmd_show_wg(
+    ctx: typer.Context,
+    as_json: bool = typer.Option(False, "--json", help="输出 JSON"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    try:
+        config = appctx.require_config()
+    except FileNotFoundError as exc:
+        typer.echo("错误: 未初始化，请先运行 dn42ctl init")
+        raise typer.Exit(2) from exc
+    except ConfigError as exc:
+        typer.echo(f"错误: 配置文件读取失败: {exc}")
+        raise typer.Exit(2) from exc
+
+    try:
+        tunnels = show_wg_tunnels(
+            config=config, db_path=appctx.db_path, include_live=True
+        )
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}")
+        raise typer.Exit(1) from exc
+
+    if as_json:
+        _print_json([asdict(x) for x in tunnels])
+        return
+
+    if not tunnels:
+        typer.echo("(空) 未找到任何 WireGuard 隧道")
+        return
+    for t in tunnels:
+        ident = f"AS{t.peer_asn}" if t.kind == "bgp" else f"{t.name}"
+        typer.echo(
+            f"[{t.kind}] {ident} ifname={t.ifname} backend={t.net_backend} port={t.listen_port}"
+        )
+        typer.echo(f"  peer_pubkey: {t.peer_public_key or ''}")
+        typer.echo(f"  endpoint: {t.endpoint or ''}")
+        typer.echo(f"  local_lla: {t.local_lla}  peer_lla: {t.peer_lla or ''}")
+        typer.echo(f"  allowed_ips: {', '.join(t.allowed_ips)}")
+        _print_file_statuses([asdict(f) for f in t.files])
+        if t.live_wg is not None:
+            typer.echo(f"  live(wg): {'OK' if t.live_wg.ok else 'UNAVAILABLE'}")
+
+
+@show_app.command("bgp")
+def cmd_show_bgp(
+    ctx: typer.Context,
+    as_json: bool = typer.Option(False, "--json", help="输出 JSON"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    try:
+        config = appctx.require_config()
+    except FileNotFoundError as exc:
+        typer.echo("错误: 未初始化，请先运行 dn42ctl init")
+        raise typer.Exit(2) from exc
+    except ConfigError as exc:
+        typer.echo(f"错误: 配置文件读取失败: {exc}")
+        raise typer.Exit(2) from exc
+
+    try:
+        peers = show_bgp_peers(config=config, db_path=appctx.db_path, include_live=True)
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}")
+        raise typer.Exit(1) from exc
+
+    if as_json:
+        _print_json([asdict(x) for x in peers])
+        return
+
+    if not peers:
+        typer.echo("(空) 未找到任何 BGP peer")
+        return
+    for p in peers:
+        typer.echo(
+            f"AS{p.peer_asn} ifname={p.ifname} backend={p.net_backend} port={p.listen_port}"
+        )
+        typer.echo(f"  peer_lla: {p.peer_lla or ''}")
+        typer.echo(f"  endpoint: {p.endpoint or ''}")
+        typer.echo(f"  peer_pubkey: {p.peer_public_key or ''}")
+        typer.echo(f"  wg_pubkey(local): {p.wg_public_key}")
+        _print_file_statuses([asdict(f) for f in p.files])
+        if p.live_wg is not None:
+            typer.echo(f"  live(wg): {'OK' if p.live_wg.ok else 'UNAVAILABLE'}")
+        if p.live_bird is not None:
+            typer.echo(f"  live(birdc): {'OK' if p.live_bird.ok else 'UNAVAILABLE'}")
+
+
+@show_app.command("ibgp")
+def cmd_show_ibgp(
+    ctx: typer.Context,
+    as_json: bool = typer.Option(False, "--json", help="输出 JSON"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    try:
+        config = appctx.require_config()
+    except FileNotFoundError as exc:
+        typer.echo("错误: 未初始化，请先运行 dn42ctl init")
+        raise typer.Exit(2) from exc
+    except ConfigError as exc:
+        typer.echo(f"错误: 配置文件读取失败: {exc}")
+        raise typer.Exit(2) from exc
+
+    try:
+        peers = show_ibgp_peers(
+            config=config, db_path=appctx.db_path, include_live=True
+        )
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}")
+        raise typer.Exit(1) from exc
+
+    if as_json:
+        _print_json([asdict(x) for x in peers])
+        return
+
+    if not peers:
+        typer.echo("(空) 未找到任何 iBGP peer")
+        return
+    for p in peers:
+        proto = f"ibgp_{p.name}"
+        typer.echo(
+            f"{p.name} proto={proto} ifname={p.ifname} backend={p.net_backend} port={p.listen_port}"
+        )
+        typer.echo(f"  peer_lla: {p.peer_lla or ''}")
+        typer.echo(f"  endpoint: {p.endpoint or ''}")
+        typer.echo(f"  peer_pubkey: {p.peer_public_key or ''}")
+        typer.echo(f"  wg_pubkey(local): {p.wg_public_key}")
+        _print_file_statuses([asdict(f) for f in p.files])
+        if p.live_wg is not None:
+            typer.echo(f"  live(wg): {'OK' if p.live_wg.ok else 'UNAVAILABLE'}")
+        if p.live_bird is not None:
+            typer.echo(f"  live(birdc): {'OK' if p.live_bird.ok else 'UNAVAILABLE'}")
+
+
+@show_app.command("all")
+def cmd_show_all(
+    ctx: typer.Context,
+    as_json: bool = typer.Option(False, "--json", help="输出 JSON"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    try:
+        config = appctx.require_config()
+    except FileNotFoundError as exc:
+        typer.echo("错误: 未初始化，请先运行 dn42ctl init")
+        raise typer.Exit(2) from exc
+    except ConfigError as exc:
+        typer.echo(f"错误: 配置文件读取失败: {exc}")
+        raise typer.Exit(2) from exc
+
+    try:
+        tunnels = show_wg_tunnels(
+            config=config, db_path=appctx.db_path, include_live=True
+        )
+        bgp = show_bgp_peers(config=config, db_path=appctx.db_path, include_live=True)
+        ibgp = show_ibgp_peers(config=config, db_path=appctx.db_path, include_live=True)
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}")
+        raise typer.Exit(1) from exc
+
+    payload: dict[str, object] = {
+        "node_id": config.node_id,
+        "wg": [asdict(x) for x in tunnels],
+        "bgp": [asdict(x) for x in bgp],
+        "ibgp": [asdict(x) for x in ibgp],
+    }
+    if as_json:
+        _print_json(payload)
+        return
+
+    typer.echo(f"node_id: {config.node_id}")
+
+    typer.echo("\n== wg ==")
+    if not tunnels:
+        typer.echo("(空) 未找到任何 WireGuard 隧道")
+    else:
+        for t in tunnels:
+            ident = f"AS{t.peer_asn}" if t.kind == "bgp" else f"{t.name}"
+            typer.echo(
+                f"[{t.kind}] {ident} ifname={t.ifname} backend={t.net_backend} port={t.listen_port}"
+            )
+            typer.echo(f"  peer_pubkey: {t.peer_public_key or ''}")
+            typer.echo(f"  endpoint: {t.endpoint or ''}")
+            typer.echo(f"  local_lla: {t.local_lla}  peer_lla: {t.peer_lla or ''}")
+            typer.echo(f"  allowed_ips: {', '.join(t.allowed_ips)}")
+            _print_file_statuses([asdict(f) for f in t.files])
+            if t.live_wg is not None:
+                typer.echo(f"  live(wg): {'OK' if t.live_wg.ok else 'UNAVAILABLE'}")
+
+    typer.echo("\n== bgp ==")
+    if not bgp:
+        typer.echo("(空) 未找到任何 BGP peer")
+    else:
+        for p in bgp:
+            typer.echo(
+                f"AS{p.peer_asn} ifname={p.ifname} backend={p.net_backend} port={p.listen_port}"
+            )
+            typer.echo(f"  peer_lla: {p.peer_lla or ''}")
+            typer.echo(f"  endpoint: {p.endpoint or ''}")
+            typer.echo(f"  peer_pubkey: {p.peer_public_key or ''}")
+            typer.echo(f"  wg_pubkey(local): {p.wg_public_key}")
+            _print_file_statuses([asdict(f) for f in p.files])
+            if p.live_wg is not None:
+                typer.echo(f"  live(wg): {'OK' if p.live_wg.ok else 'UNAVAILABLE'}")
+            if p.live_bird is not None:
+                typer.echo(
+                    f"  live(birdc): {'OK' if p.live_bird.ok else 'UNAVAILABLE'}"
+                )
+
+    typer.echo("\n== ibgp ==")
+    if not ibgp:
+        typer.echo("(空) 未找到任何 iBGP peer")
+    else:
+        for p in ibgp:
+            proto = f"ibgp_{p.name}"
+            typer.echo(
+                f"{p.name} proto={proto} ifname={p.ifname} backend={p.net_backend} port={p.listen_port}"
+            )
+            typer.echo(f"  peer_lla: {p.peer_lla or ''}")
+            typer.echo(f"  endpoint: {p.endpoint or ''}")
+            typer.echo(f"  peer_pubkey: {p.peer_public_key or ''}")
+            typer.echo(f"  wg_pubkey(local): {p.wg_public_key}")
+            _print_file_statuses([asdict(f) for f in p.files])
+            if p.live_wg is not None:
+                typer.echo(f"  live(wg): {'OK' if p.live_wg.ok else 'UNAVAILABLE'}")
+            if p.live_bird is not None:
+                typer.echo(
+                    f"  live(birdc): {'OK' if p.live_bird.ok else 'UNAVAILABLE'}"
+                )
+
+
+app.add_typer(show_app, name="show")
+
+
+del_app = typer.Typer()
+del_peer_app = typer.Typer()
+
+
+@del_peer_app.command("bgp")
+def cmd_del_peer_bgp(
+    ctx: typer.Context,
+    peer_asn: int = typer.Argument(..., help="Peer ASN"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    try:
+        config = appctx.require_config()
+    except FileNotFoundError as exc:
+        typer.echo("错误: 未初始化，请先运行 dn42ctl init")
+        raise typer.Exit(2) from exc
+    except ConfigError as exc:
+        typer.echo(f"错误: 配置文件读取失败: {exc}")
+        raise typer.Exit(2) from exc
+
+    if not typer.confirm(
+        f"确认删除 BGP peer AS{peer_asn}（DB + 配置文件）？", default=False
+    ):
+        typer.echo("已取消")
+        return
+
+    try:
+        res = delete_bgp_peer(config=config, db_path=appctx.db_path, peer_asn=peer_asn)
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}")
+        raise typer.Exit(1) from exc
+
+    typer.echo("删除完成")
+    for p in res.deleted_files:
+        typer.echo(f"删除: {p}")
+    for p in res.missing_files:
+        typer.echo(f"缺失: {p}")
+
+
+@del_peer_app.command("ibgp")
+def cmd_del_peer_ibgp(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="iBGP peer name"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    try:
+        config = appctx.require_config()
+    except FileNotFoundError as exc:
+        typer.echo("错误: 未初始化，请先运行 dn42ctl init")
+        raise typer.Exit(2) from exc
+    except ConfigError as exc:
+        typer.echo(f"错误: 配置文件读取失败: {exc}")
+        raise typer.Exit(2) from exc
+
+    if not typer.confirm(
+        f"确认删除 iBGP peer '{name}'（DB + 配置文件 + 重生成 babel.conf）？",
+        default=False,
+    ):
+        typer.echo("已取消")
+        return
+
+    try:
+        res = delete_ibgp_peer(config=config, db_path=appctx.db_path, name=name)
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}")
+        raise typer.Exit(1) from exc
+
+    typer.echo("删除完成")
+    for p in res.deleted_files:
+        typer.echo(f"删除: {p}")
+    for p in res.missing_files:
+        typer.echo(f"缺失: {p}")
+    for p in res.regenerated_files:
+        typer.echo(f"重生成: {p}")
+
+
+del_app.add_typer(del_peer_app, name="peer")
+app.add_typer(del_app, name="del")

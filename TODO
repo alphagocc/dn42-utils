@@ -1,27 +1,15 @@
-你需要设计一个合适的python cli程序，我们使用 uv 配置环境确保可复现。
-至少支持以下功能：
+添加以下功能
 
-1. init： 在一台机器上初始化 bird 配置，若必要信息缺失，应当提示用户输入
-2. bgp peer：首先确保已经初始化，然后创建 peer conf ，缺失的信息应当提示用户输入。你应当同时支持 systemd-networkd 和 NetworkManager。已经给出了 systemd-netword 的示例。注意禁止修改路由表。
-3. bgp peer modify：可能有些信息无法一次性填写完整，你需要读取已有的信息重新生成 peer
-4. ibgp peer 创建内网 ibgp peer conf，使用 babel 互联。使用 wg 创建虚拟隧道。你需要创建
-5. 你需要建立合适的 api，以便于以后接入 restful api。
-6. 内容需要写入 sqlite 数据库，方便多端管理，本地也需要保存一份。ibgp peer 和 bgp peer 应当在两个表。很多节点都会使用这个数据库，注意区分不同节点的配置。你要先设计合适的数据库表结构，然后再存入数据，表要求可以扩展。我们在未来会使用 cloudflare d1 (一个网络 sqlite 数据库)。
+1. show wg: 显示 wg 信息
+2. show bgp: 显示 bgp 信息
+3. show ibgp: 显示 ibgp 信息
+4. show all : 显示所有信息
+5. del peer: 删除 peer 信息
+6. 自动配置 v6 roa（init 时）
+7. 扫描本地已有配置，塞入数据库。你应当扫描 /etc/bird, /etc/bird6, /etc/wireguard, /etc/systemd/network, /etc/NetworkManager/system-connections
+
+注意所有操作都应当设计合适的接口，方便以后提供 restful api。
 
 为了完成上述任务，你需要创建一个更详细的plan，然后使用 askQuestion 等工具对用户进行提问，确保你的plan符合用户真实意图。
 
-一些你可能要知道的东西
-问: 你希望最终执行的命令名是什么？
-答: dn42ctl
-问: 同一个数据库会管理多台节点：你希望如何区分/选择当前节点？
-答: 本地保存默认 node_id（init 时写入本地配置）
-问: 生成的配置文件默认写到哪里？（可在命令行覆盖）
-答: 未提示则自动写入系统路径，注意提权。记住向用户展示公钥，lla 地址等必要信息方便与他人 peer
-问: OWNIPv6 你希望怎么输入？
-答: 默认我会输入4位 hex，表示最后4位，即 fddf:8aef:1053::xxxx，同时也需要接受完整v6方便自定义。
-问: “禁止修改路由表”你期望的策略是？（影响 AllowedIPs / NetworkManager 设置）
-答: AllowedIPs 照样写，比如说 wg quick 需要 Table=off，你需要在 networkd 和 networkmanager 中表达出同样的限制。或者这俩默认不修改路由表？你需要确认，然后作出判断，不懂的地方继续问我。此处使用 subagent 提取信息，避免污染上下文。
-问: 本工具如何产生本端 WireGuard 密钥？
-答: 调用系统 wg 命令（wg genkey / wg pubkey）
-问: SQLite 里是否要保存 WireGuard 私钥？（多端管理 vs 安全性）
-答: 保存（便于多端/未来D1集中管理）
+开始写代码前，你需要先修改 spec.md 确保设计已经文档化。

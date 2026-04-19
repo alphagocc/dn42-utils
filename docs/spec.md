@@ -62,6 +62,14 @@
   - Bird 主配置（从内置模板渲染、替换 include 路径与 define）。
   - `babel.conf`（初始为空接口列表）。
 
+- 自动配置 ROA v6（用于 Bird 的 `roa_check`）：
+  - 若 `bird_roa_v6_conf_path` 不存在：自动从 DN42 ROA 源下载并写入（IPv6 / Bird2 格式）。
+  - 安装并启用 systemd 定时更新（Linux/systemd 可用时）：
+    - 写入 `dn42-roa-v6.service` / `dn42-roa-v6.timer` 到 `/etc/systemd/system/`。
+    - 执行 `systemctl daemon-reload` 与 `systemctl enable --now dn42-roa-v6.timer`。
+    - service 内部使用 `curl` 定期刷新 ROA 文件，并在下载后尝试执行 `birdc configure`（失败不应导致 service 失败）。
+  - 若当前系统缺少 systemd（或 `systemctl` 不可用）：跳过定时器配置并给出提示。
+
 可通过参数覆盖输出路径：
 
 - `--bird-conf` / `--bird-peers-dir` / `--bird-babel-conf` / `--bird-roa-v6-conf`
@@ -123,6 +131,72 @@ WireGuard：
 - 写入 networkd 或 NetworkManager 的 wireguard 配置文件。
 - **重生成** `babel.conf`：从数据库读取该节点所有 iBGP peer 的接口列表，确定性、幂等地生成。
 
+### 5) `dn42ctl show`
+
+用途：展示当前节点（`node_id`）的配置状态，便于巡检与排障。
+
+子命令：
+
+- `dn42ctl show wg`：展示 WireGuard 维度信息（包含 BGP 与 iBGP 的隧道）。
+- `dn42ctl show bgp`：展示外部 BGP peers（按 `peer_asn`）。
+- `dn42ctl show ibgp`：展示 iBGP peers（按 `name`）。
+- `dn42ctl show all`：汇总展示所有信息。
+
+数据来源：
+
+- 主来源：SQLite（dn42ctl 管理的 peers）。
+- 额外：尽力附带“实时状态”（若系统命令可用）：
+  - `wg show`：显示握手/流量等运行态信息（按接口名）。
+  - `birdc`：显示 BGP protocol 运行态（按协议名）。
+  - 若命令不可用或失败：不应导致 show 失败，只提示该部分不可用。
+
+输出格式：
+
+- 默认：人类可读文本。
+- `--json`：输出结构化 JSON（便于未来 RESTful API 复用）。
+
+### 6) `dn42ctl del peer`
+
+用途：删除某个 peer（同时清理可推断的生成文件）。
+
+子命令：
+
+- `dn42ctl del peer bgp <ASN>`：删除外部 BGP peer。
+- `dn42ctl del peer ibgp <name>`：删除 iBGP peer。
+
+行为：
+
+- 删除前必须二次确认（交互 prompt）。
+- 删除数据库记录。
+- 删除生成文件（按记录与配置路径推断）：
+  - Bird peer conf（`bird_peers_dir/*.conf`）。
+  - networkd：`<ifname>.netdev` 与 `<ifname>.network`。
+  - NetworkManager：`<ifname>.nmconnection`。
+- 若删除的是 iBGP peer：删除后必须从 DB 幂等重生成 `babel.conf`。
+
+### 7) `dn42ctl scan`
+
+用途：扫描本地已有配置并导入 SQLite，便于“接管”已有环境。
+
+默认扫描范围（若目录存在则扫描）：
+
+- Bird: `/etc/bird` 与 `/etc/bird6`（主要读取 peers 片段目录）。
+- WireGuard: `/etc/wireguard`（wg-quick 配置）。
+- systemd-networkd: `/etc/systemd/network`。
+- NetworkManager: `/etc/NetworkManager/system-connections`。
+
+默认导入规则：
+
+- 仅导入接口名符合 dn42ctl 约定的 peer：
+  - BGP：`dn42_####`
+  - iBGP：`wg_<name>`
+- 尽力从 networkd/NM/wg-quick/Bird peers 中拼装出同一个 peer 的字段（例如 endpoint/keys/AllowedIPs/peer_lla 等）；缺失字段允许为空。
+- 冲突处理（DB 已存在同名 peer）：应提示用户手动处理（默认跳过，不静默覆盖）。
+
+实现约束：
+
+- 为了写入 DB 的 `wg_public_key`，当仅能获取 `wg_private_key` 时，需要调用系统 `wg pubkey` 计算公钥；若缺少 `wg` 命令，应提示安装 wireguard-tools。
+
 ## 网络后端细节
 
 ### systemd-networkd
@@ -169,6 +243,7 @@ WireGuard：
 
 - CLI 层：负责参数解析与交互提示。
 - Service 层：对外暴露可复用函数（例如 `init_node/create_bgp_peer/modify_bgp_peer/create_ibgp_peer`），未来 REST API 可直接复用。
+- 新增的 show/del/scan 同样必须以 service 函数对外暴露（返回结构化数据），CLI 仅负责格式化输出与交互（prompt/confirm）。
 - Render 层：纯文本渲染（Bird/Babel/networkd/NM），确保可测试与幂等。
 - DB 层：SQLite + migrations。
 

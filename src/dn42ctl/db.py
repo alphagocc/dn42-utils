@@ -125,6 +125,17 @@ class Database:
         except sqlite3.Error as exc:
             raise DatabaseError("Failed to query BGP peer") from exc
 
+    def list_bgp_peers(self, node_id: str) -> list[sqlite3.Row]:
+        try:
+            return list(
+                self._conn.execute(
+                    "SELECT * FROM bgp_peers WHERE node_id=? ORDER BY peer_asn",
+                    (node_id,),
+                ).fetchall()
+            )
+        except sqlite3.Error as exc:
+            raise DatabaseError("Failed to list BGP peers") from exc
+
     def insert_bgp_peer(self, record: BgpPeerRecord) -> None:
         now = _now_iso()
         try:
@@ -218,6 +229,45 @@ class Database:
             )
         except sqlite3.Error as exc:
             raise DatabaseError("Failed to list iBGP peers") from exc
+
+    def get_ibgp_peer(self, node_id: str, name: str) -> sqlite3.Row | None:
+        try:
+            return self._conn.execute(
+                "SELECT * FROM ibgp_peers WHERE node_id=? AND name=?",
+                (node_id, name),
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise DatabaseError("Failed to query iBGP peer") from exc
+
+    def delete_bgp_peer(self, node_id: str, peer_asn: int) -> sqlite3.Row | None:
+        try:
+            row = self.get_bgp_peer(node_id, peer_asn)
+            if row is None:
+                return None
+            self._conn.execute(
+                "DELETE FROM bgp_peers WHERE node_id=? AND peer_asn=?",
+                (node_id, peer_asn),
+            )
+            self._conn.commit()
+            return row
+        except sqlite3.Error as exc:
+            self._conn.rollback()
+            raise DatabaseError("Failed to delete BGP peer") from exc
+
+    def delete_ibgp_peer(self, node_id: str, name: str) -> sqlite3.Row | None:
+        try:
+            row = self.get_ibgp_peer(node_id, name)
+            if row is None:
+                return None
+            self._conn.execute(
+                "DELETE FROM ibgp_peers WHERE node_id=? AND name=?",
+                (node_id, name),
+            )
+            self._conn.commit()
+            return row
+        except sqlite3.Error as exc:
+            self._conn.rollback()
+            raise DatabaseError("Failed to delete iBGP peer") from exc
 
     def insert_ibgp_peer(self, record: IbgpPeerRecord) -> None:
         now = _now_iso()
