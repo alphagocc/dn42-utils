@@ -6,6 +6,7 @@
 
 - 可复现环境：使用 `uv` 锁定依赖与运行环境。
 - CLI 功能：支持 `init`、`bgp peer`、`bgp peer modify`、`ibgp peer`。
+- CLI 功能：支持 `init`、`genconf`、`bgp peer`、`bgp peer modify`、`ibgp peer`。
 - 网络后端：同时支持 `systemd-networkd` 与 `NetworkManager`。
 - 强制约束：WireGuard 的 AllowedIPs **必须写入**，但**禁止自动修改路由表**。
 - 数据落库：所有状态写入 SQLite，便于多端/多节点集中管理；以 `node_id` 区分节点；`bgp_peers` 与 `ibgp_peers` 分表；结构可扩展，未来可迁移到 Cloudflare D1。
@@ -31,7 +32,7 @@
 - 配置文件：`/etc/dn42ctl/config.toml`（可用 `--config-path` 覆盖）
 - SQLite：`/var/lib/dn42ctl/dn42.sqlite3`（可用 `--db-path` 覆盖）
 - Bird：
-  - 主配置：`/etc/bird/bird.conf`
+  - 主配置：`/etc/bird/bird.conf`（部分发行版也可能是 `/etc/bird.conf`）
   - peers 目录：`/etc/bird/peers/`
   - babel：`/etc/bird/babel.conf`
   - ROA v6 include：`/etc/bird/roa_dn42_v6.conf`
@@ -50,18 +51,36 @@
 
 ### 1) `dn42ctl init`
 
-用途：初始化本机节点配置与基础 Bird/Babel 配置。
+用途：初始化本机节点配置（config.toml）与 SQLite 基础结构。
 
 行为：
 
 - 若关键字段缺失，提示用户输入：`OWNAS`、`OWNIPv6`、`OWNNETv6`、`OWNNETSETv6`、`ROUTERID`。
+- `ROUTERID` 默认值应为随机生成的 `169.254.X.Y`（`X/Y` 为 1-254），并写入本地配置文件以保持稳定（后续重跑 init 不应变化）。
 - `OWNIPv6` 允许输入 4 位 hex（作为最后一段），自动扩展为 `fddf:8aef:1053::xxxx`；也接受完整 IPv6。
 - 写入本地配置文件（TOML）。
 - 初始化/迁移 SQLite（创建表 + `schema_migrations`）。
+- 默认情况下，`init` **不生成** Bird/Babel/ROA/systemd timer 等配置文件；需要显式运行 `dn42ctl genconf`，或在 init 时使用 `--genconf`。
+
+可通过参数覆盖输出路径：
+
+- `--bird-conf` / `--bird-peers-dir` / `--bird-babel-conf` / `--bird-roa-v6-conf`
+- `--networkd-dir` / `--nm-system-connections-dir`
+
+新增参数：
+
+- `--genconf/--no-genconf`：是否在 init 完成后立即生成配置文件（默认 `--no-genconf`）。
+
+### 1b) `dn42ctl genconf`
+
+用途：根据本地配置文件与 SQLite 状态，生成/刷新 Bird/Babel/ROA 等配置文件（可重复运行，尽量幂等）。
+
+行为：
+
 - 渲染并写入：
   - Bird 主配置（从内置模板渲染、替换 include 路径与 define）。
-  - `babel.conf`（初始为空接口列表）。
-
+  - `babel.conf`：从数据库读取该节点所有 iBGP peer 的接口列表，确定性、幂等地生成。
+- 确保 Bird peers 目录存在（若不存在则创建）。
 - 自动配置 ROA v6（用于 Bird 的 `roa_check`）：
   - 若 `bird_roa_v6_conf_path` 不存在：自动从 DN42 ROA 源下载并写入（IPv6 / Bird2 格式）。
   - 安装并启用 systemd 定时更新（Linux/systemd 可用时）：
@@ -69,11 +88,6 @@
     - 执行 `systemctl daemon-reload` 与 `systemctl enable --now dn42-roa-v6.timer`。
     - service 内部使用 `curl` 定期刷新 ROA 文件，并在下载后尝试执行 `birdc configure`（失败不应导致 service 失败）。
   - 若当前系统缺少 systemd（或 `systemctl` 不可用）：跳过定时器配置并给出提示。
-
-可通过参数覆盖输出路径：
-
-- `--bird-conf` / `--bird-peers-dir` / `--bird-babel-conf` / `--bird-roa-v6-conf`
-- `--networkd-dir` / `--nm-system-connections-dir`
 
 ### 2) `dn42ctl bgp peer`
 
@@ -185,6 +199,13 @@ WireGuard：
 - systemd-networkd: `/etc/systemd/network`。
 - NetworkManager: `/etc/NetworkManager/system-connections`。
 
+额外行为（bird.conf 识别 + 自动修正 paths）：
+
+- 扫描开始前，尽力读取当前系统的 Bird 主配置文件并识别 include 路径，用于修正本地 `config.toml` 的 `[paths]`：
+  - Bird 主配置候选路径：优先使用 `config.paths.bird_conf`，若不存在/不可读则尝试 `/etc/bird/bird.conf` 与 `/etc/bird.conf`。
+  - 从 bird.conf 中识别：peers include（推导 `bird_peers_dir`）、`babel.conf` include（推导 `bird_babel_conf_path`）、ROA v6 include（推导 `bird_roa_v6_conf_path`）。
+  - 若识别到的路径与本地 `config.toml` 不一致：**自动回写**到 `config.toml` 后再继续 scan。
+
 默认导入规则：
 
 - 仅导入接口名符合 dn42ctl 约定的 peer：
@@ -242,7 +263,7 @@ WireGuard：
 ## API 分层
 
 - CLI 层：负责参数解析与交互提示。
-- Service 层：对外暴露可复用函数（例如 `init_node/create_bgp_peer/modify_bgp_peer/create_ibgp_peer`），未来 REST API 可直接复用。
+- Service 层：对外暴露可复用函数（例如 `init_node/genconf/discover_bird_paths/create_bgp_peer/modify_bgp_peer/create_ibgp_peer`），未来 REST API 可直接复用。
 - 新增的 show/del/scan 同样必须以 service 函数对外暴露（返回结构化数据），CLI 仅负责格式化输出与交互（prompt/confirm）。
 - Render 层：纯文本渲染（Bird/Babel/networkd/NM），确保可测试与幂等。
 - DB 层：SQLite + migrations。

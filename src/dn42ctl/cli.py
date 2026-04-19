@@ -3,15 +3,16 @@ from __future__ import annotations
 import ipaddress
 import json
 import re
+import secrets
 import uuid
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import typer
 
 from dn42ctl.context import AppContext
 from dn42ctl.db import DatabaseError
-from dn42ctl.config import ConfigError
+from dn42ctl.config import ConfigError, save_config
 from dn42ctl.paths import (
     DEFAULT_BIRD_BABEL_CONF_PATH,
     DEFAULT_BIRD_CONF_PATH,
@@ -26,8 +27,10 @@ from dn42ctl.services import (
     Dn42CtlError,
     create_bgp_peer,
     create_ibgp_peer,
+    discover_bird_paths,
     delete_bgp_peer,
     delete_ibgp_peer,
+    genconf,
     init_node,
     modify_bgp_peer,
     scan_local_configs,
@@ -92,6 +95,12 @@ def _validate_peer_lla(value: str) -> str:
     return value
 
 
+def _default_router_id() -> str:
+    a = secrets.randbelow(254) + 1
+    b = secrets.randbelow(254) + 1
+    return f"169.254.{a}.{b}"
+
+
 @app.callback()
 def main(
     ctx: typer.Context,
@@ -148,6 +157,11 @@ def cmd_init(
         "--nm-system-connections-dir",
         help="NetworkManager system-connections 目录",
     ),
+    do_genconf: bool = typer.Option(
+        False,
+        "--genconf/--no-genconf",
+        help="init 完成后是否立即生成 Bird/Babel/ROA 等配置文件 (默认 no-genconf)",
+    ),
 ) -> None:
     appctx: AppContext = ctx.obj
     try:
@@ -186,7 +200,7 @@ def cmd_init(
     router_id = (
         existing.router_id
         if existing
-        else typer.prompt("ROUTERID", default="169.254.0.1")
+        else typer.prompt("ROUTERID", default=_default_router_id())
     )
 
     # Path precedence: CLI option > existing config > default.
@@ -219,20 +233,23 @@ def cmd_init(
             else DEFAULT_NM_SYSTEM_CONNECTIONS_DIR
         )
 
-    overwrite_bird = True
-    if bird_conf_path.exists():
-        overwrite_bird = typer.confirm(
-            f"{bird_conf_path} 已存在，覆盖？", default=False
-        )
+    overwrite_bird = False
+    overwrite_babel = False
+    if do_genconf:
+        overwrite_bird = True
+        if bird_conf_path.exists():
+            overwrite_bird = typer.confirm(
+                f"{bird_conf_path} 已存在，覆盖？", default=False
+            )
 
-    overwrite_babel = True
-    if bird_babel_conf_path.exists():
-        overwrite_babel = typer.confirm(
-            f"{bird_babel_conf_path} 已存在，覆盖？", default=False
-        )
+        overwrite_babel = True
+        if bird_babel_conf_path.exists():
+            overwrite_babel = typer.confirm(
+                f"{bird_babel_conf_path} 已存在，覆盖？", default=False
+            )
 
     try:
-        result = init_node(
+        init_res = init_node(
             config_path=appctx.config_path,
             db_path=appctx.db_path,
             node_id=node_id,
@@ -247,6 +264,73 @@ def cmd_init(
             bird_roa_v6_conf_path=bird_roa_v6_conf_path,
             networkd_dir=networkd_dir,
             nm_system_connections_dir=nm_system_connections_dir,
+        )
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}")
+        raise typer.Exit(1) from exc
+
+    gen_res = None
+    if do_genconf:
+        try:
+            gen_res = genconf(
+                config=init_res.config,
+                db_path=appctx.db_path,
+                overwrite_bird_conf=overwrite_bird,
+                overwrite_babel_conf=overwrite_babel,
+            )
+        except Dn42CtlError as exc:
+            typer.echo(f"错误: {exc}")
+            raise typer.Exit(1) from exc
+
+    typer.echo("初始化完成")
+    typer.echo(f"node_id: {init_res.config.node_id}")
+    typer.echo(f"Config: {init_res.config_path}")
+    typer.echo(f"DB: {init_res.db_path}")
+
+    if gen_res is not None:
+        typer.echo(f"Bird: {gen_res.bird_conf_path}")
+        typer.echo(f"Babel: {gen_res.bird_babel_conf_path}")
+        typer.echo(f"ROA v6: {gen_res.bird_roa_v6_conf_path}")
+        typer.echo(
+            "ROA systemd timer: "
+            + ("enabled" if gen_res.systemd_roa_timer_enabled else "skipped")
+        )
+
+        if gen_res.warnings:
+            typer.echo("\n警告:")
+            for w in gen_res.warnings:
+                typer.echo(f"- {w}")
+
+
+@app.command("genconf")
+def cmd_genconf(ctx: typer.Context) -> None:
+    appctx: AppContext = ctx.obj
+    try:
+        config = appctx.require_config()
+    except FileNotFoundError as exc:
+        typer.echo("错误: 未初始化，请先运行 dn42ctl init")
+        raise typer.Exit(2) from exc
+    except ConfigError as exc:
+        typer.echo(f"错误: 配置文件读取失败: {exc}")
+        raise typer.Exit(2) from exc
+
+    bird_conf_path = Path(config.bird_conf_path)
+    bird_babel_conf_path = Path(config.bird_babel_conf_path)
+
+    overwrite_bird = True
+    if bird_conf_path.exists():
+        overwrite_bird = typer.confirm(f"{bird_conf_path} 已存在，覆盖？", default=False)
+
+    overwrite_babel = True
+    if bird_babel_conf_path.exists():
+        overwrite_babel = typer.confirm(
+            f"{bird_babel_conf_path} 已存在，覆盖？", default=False
+        )
+
+    try:
+        res = genconf(
+            config=config,
+            db_path=appctx.db_path,
             overwrite_bird_conf=overwrite_bird,
             overwrite_babel_conf=overwrite_babel,
         )
@@ -254,20 +338,18 @@ def cmd_init(
         typer.echo(f"错误: {exc}")
         raise typer.Exit(1) from exc
 
-    typer.echo("初始化完成")
-    typer.echo(f"node_id: {result.config.node_id}")
-    typer.echo(f"Bird: {result.bird_conf_path}")
-    typer.echo(f"Babel: {result.bird_babel_conf_path}")
-    typer.echo(f"ROA v6: {result.bird_roa_v6_conf_path}")
+    typer.echo("genconf 完成")
+    typer.echo(f"Bird: {res.bird_conf_path}")
+    typer.echo(f"Babel: {res.bird_babel_conf_path}")
+    typer.echo(f"ROA v6: {res.bird_roa_v6_conf_path}")
     typer.echo(
         "ROA systemd timer: "
-        + ("enabled" if result.systemd_roa_timer_enabled else "skipped")
+        + ("enabled" if res.systemd_roa_timer_enabled else "skipped")
     )
-    typer.echo(f"DB: {result.db_path}")
 
-    if result.warnings:
+    if res.warnings:
         typer.echo("\n警告:")
-        for w in result.warnings:
+        for w in res.warnings:
             typer.echo(f"- {w}")
 
 
@@ -283,8 +365,53 @@ def cmd_scan(ctx: typer.Context) -> None:
         typer.echo(f"错误: 配置文件读取失败: {exc}")
         raise typer.Exit(2) from exc
 
+    discovery = discover_bird_paths(
+        candidate_bird_conf_paths=[
+            Path(config.bird_conf_path),
+            Path("/etc/bird/bird.conf"),
+            Path("/etc/bird.conf"),
+        ]
+    )
+
+    updated_config = config
+    updated = False
+    if discovery.bird_conf_path is not None and str(discovery.bird_conf_path) != str(
+        config.bird_conf_path
+    ):
+        updated_config = replace(updated_config, bird_conf_path=str(discovery.bird_conf_path))
+        updated = True
+    if discovery.bird_peers_dir is not None and str(discovery.bird_peers_dir) != str(
+        config.bird_peers_dir
+    ):
+        updated_config = replace(updated_config, bird_peers_dir=str(discovery.bird_peers_dir))
+        updated = True
+    if discovery.bird_babel_conf_path is not None and str(
+        discovery.bird_babel_conf_path
+    ) != str(config.bird_babel_conf_path):
+        updated_config = replace(
+            updated_config, bird_babel_conf_path=str(discovery.bird_babel_conf_path)
+        )
+        updated = True
+    if discovery.bird_roa_v6_conf_path is not None and str(
+        discovery.bird_roa_v6_conf_path
+    ) != str(config.bird_roa_v6_conf_path):
+        updated_config = replace(
+            updated_config, bird_roa_v6_conf_path=str(discovery.bird_roa_v6_conf_path)
+        )
+        updated = True
+
+    updated_msg: str | None = None
+    if updated:
+        updated_msg = "已根据 bird.conf 自动更新 config.toml 的 [paths]"
+        try:
+            save_config(appctx.config_path, updated_config)
+        except OSError as exc:
+            updated_msg = (
+                f"无法回写 config.toml（但将继续使用识别到的路径进行 scan）: {exc}"
+            )
+
     try:
-        res = scan_local_configs(config=config, db_path=appctx.db_path)
+        res = scan_local_configs(config=updated_config, db_path=appctx.db_path)
     except Dn42CtlError as exc:
         typer.echo(f"错误: {exc}")
         raise typer.Exit(1) from exc
@@ -310,9 +437,14 @@ def cmd_scan(ctx: typer.Context) -> None:
         typer.echo("\n跳过:")
         for s in res.skipped:
             typer.echo(f"- {s}")
-    if res.warnings:
+    warnings_to_print: list[str] = []
+    if updated_msg:
+        warnings_to_print.append(updated_msg)
+    warnings_to_print.extend(discovery.warnings)
+    warnings_to_print.extend(res.warnings)
+    if warnings_to_print:
         typer.echo("\n警告:")
-        for w in res.warnings:
+        for w in warnings_to_print:
             typer.echo(f"- {w}")
 
 

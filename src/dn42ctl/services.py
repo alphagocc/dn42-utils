@@ -131,6 +131,15 @@ class ScanResult:
     warnings: list[str]
 
 
+@dataclass(frozen=True)
+class BirdPathsDiscovery:
+    bird_conf_path: Path | None
+    bird_peers_dir: Path | None
+    bird_babel_conf_path: Path | None
+    bird_roa_v6_conf_path: Path | None
+    warnings: list[str]
+
+
 def _permission_hint() -> str:
     return (
         "请确认当前用户对该路径有写权限；"
@@ -140,9 +149,15 @@ def _permission_hint() -> str:
 
 
 @dataclass(frozen=True)
-class InitResult:
+class InitConfigResult:
     config: AppConfig
     config_path: Path
+    db_path: Path
+
+
+@dataclass(frozen=True)
+class GenConfResult:
+    config: AppConfig
     db_path: Path
     bird_conf_path: Path
     bird_babel_conf_path: Path
@@ -308,9 +323,7 @@ def init_node(
     bird_roa_v6_conf_path: Path,
     networkd_dir: Path,
     nm_system_connections_dir: Path,
-    overwrite_bird_conf: bool,
-    overwrite_babel_conf: bool,
-) -> InitResult:
+) -> InitConfigResult:
     config = AppConfig(
         node_id=node_id,
         own_asn=own_asn,
@@ -340,14 +353,36 @@ def init_node(
     except DatabaseError as exc:
         raise Dn42CtlError(str(exc)) from exc
 
+    return InitConfigResult(config=config, config_path=config_path, db_path=db_path)
+
+
+def genconf(
+    *,
+    config: AppConfig,
+    db_path: Path,
+    overwrite_bird_conf: bool,
+    overwrite_babel_conf: bool,
+) -> GenConfResult:
+    node_id = config.node_id
+    bird_conf_path = Path(config.bird_conf_path)
+    bird_peers_dir = Path(config.bird_peers_dir)
+    bird_babel_conf_path = Path(config.bird_babel_conf_path)
+    bird_roa_v6_conf_path = Path(config.bird_roa_v6_conf_path)
+
+    db = _open_db(db_path)
+    try:
+        db.ensure_node(node_id)
+    except DatabaseError as exc:
+        raise Dn42CtlError(str(exc)) from exc
+
     template_text = load_template("bird.conf_template")
     bird_conf_text = render_bird_main_conf(
         template_text=template_text,
-        own_asn=own_asn,
-        router_id=router_id,
-        own_ipv6=own_ipv6,
-        ownnet_v6=ownnet_v6,
-        ownnetset_v6=ownnetset_v6,
+        own_asn=config.own_asn,
+        router_id=config.router_id,
+        own_ipv6=config.own_ipv6,
+        ownnet_v6=config.ownnet_v6,
+        ownnetset_v6=config.ownnetset_v6,
         bird_babel_conf_path=bird_babel_conf_path,
         bird_peers_dir=bird_peers_dir,
         bird_roa_v6_conf_path=bird_roa_v6_conf_path,
@@ -359,7 +394,12 @@ def init_node(
 
     _ensure_dir(bird_peers_dir)
 
-    babel_text = render_babel_conf(interface_names=[])
+    # Regenerate babel.conf deterministically from DB iBGP peers.
+    try:
+        interface_names = [str(r["ifname"]) for r in db.list_ibgp_peers(node_id)]
+    except DatabaseError as exc:
+        raise Dn42CtlError(str(exc)) from exc
+    babel_text = render_babel_conf(interface_names=interface_names)
     if bird_babel_conf_path.exists() and not overwrite_babel_conf:
         raise Dn42CtlError(f"babel.conf 已存在且未允许覆盖: {bird_babel_conf_path}")
     _write_text(bird_babel_conf_path, babel_text)
@@ -449,14 +489,122 @@ def init_node(
     else:
         warnings.append("当前系统不支持 systemd：已跳过 ROA 定时器配置")
 
-    return InitResult(
+    return GenConfResult(
         config=config,
-        config_path=config_path,
         db_path=db_path,
         bird_conf_path=bird_conf_path,
         bird_babel_conf_path=bird_babel_conf_path,
         bird_roa_v6_conf_path=bird_roa_v6_conf_path,
         systemd_roa_timer_enabled=systemd_enabled,
+        warnings=warnings,
+    )
+
+
+_BIRD_INCLUDE_RE = re.compile(
+    r"^\s*include\s+([\"'])([^\"']+)\1\s*;\s*(?:#.*)?$",
+    flags=re.MULTILINE,
+)
+
+
+def discover_bird_paths(
+    *,
+    candidate_bird_conf_paths: list[Path],
+) -> BirdPathsDiscovery:
+    """Best-effort parse bird.conf to infer include paths.
+
+    The primary use is `scan`: detect non-standard peers/babel/roa locations.
+    """
+
+    warnings: list[str] = []
+
+    def _try_read(path: Path) -> str | None:
+        try:
+            if not path.exists():
+                return None
+        except OSError as exc:
+            warnings.append(f"无法访问 bird.conf: {path} ({exc})")
+            return None
+        try:
+            return path.read_text(encoding="utf-8", errors="replace")
+        except PermissionError:
+            warnings.append(f"权限不足: 无法读取 bird.conf: {path}")
+            return None
+        except OSError as exc:
+            warnings.append(f"读取 bird.conf 失败: {path} ({exc})")
+            return None
+
+    seen: set[str] = set()
+    best: BirdPathsDiscovery | None = None
+
+    for p in candidate_bird_conf_paths:
+        key = str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        text = _try_read(p)
+        if text is None:
+            continue
+
+        peers_dir: Path | None = None
+        babel_path: Path | None = None
+        roa_v6_path: Path | None = None
+
+        for m in _BIRD_INCLUDE_RE.finditer(text):
+            inc = m.group(2).strip()
+            if not inc:
+                continue
+
+            inc_path = Path(inc)
+            name = inc_path.name
+            normalized = inc.replace("\\", "/")
+
+            if babel_path is None and name == "babel.conf":
+                babel_path = inc_path
+            if roa_v6_path is None and name == "roa_dn42_v6.conf":
+                roa_v6_path = inc_path
+
+            if peers_dir is None and "*" in inc:
+                # Heuristic: prefer an include that clearly targets a peers dir.
+                if "/peers/" in normalized or "/peers" in normalized:
+                    peers_dir = inc_path.parent
+
+        discovery = BirdPathsDiscovery(
+            bird_conf_path=p,
+            bird_peers_dir=peers_dir,
+            bird_babel_conf_path=babel_path,
+            bird_roa_v6_conf_path=roa_v6_path,
+            warnings=[],
+        )
+
+        if peers_dir or babel_path or roa_v6_path:
+            # Found useful paths; return immediately.
+            return BirdPathsDiscovery(
+                bird_conf_path=p,
+                bird_peers_dir=peers_dir,
+                bird_babel_conf_path=babel_path,
+                bird_roa_v6_conf_path=roa_v6_path,
+                warnings=warnings,
+            )
+
+        # Keep as fallback if we at least managed to read a candidate.
+        if best is None:
+            best = discovery
+
+    if best is not None:
+        return BirdPathsDiscovery(
+            bird_conf_path=best.bird_conf_path,
+            bird_peers_dir=best.bird_peers_dir,
+            bird_babel_conf_path=best.bird_babel_conf_path,
+            bird_roa_v6_conf_path=best.bird_roa_v6_conf_path,
+            warnings=warnings,
+        )
+
+    return BirdPathsDiscovery(
+        bird_conf_path=None,
+        bird_peers_dir=None,
+        bird_babel_conf_path=None,
+        bird_roa_v6_conf_path=None,
         warnings=warnings,
     )
 

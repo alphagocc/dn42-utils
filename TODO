@@ -1,12 +1,7 @@
-添加以下功能
+添加或修改以下功能
 
-1. show wg: 显示 wg 信息
-2. show bgp: 显示 bgp 信息
-3. show ibgp: 显示 ibgp 信息
-4. show all : 显示所有信息
-5. del peer: 删除 peer 信息
-6. 自动配置 v6 roa（init 时）
-7. 扫描本地已有配置，塞入数据库。你应当扫描 /etc/bird, /etc/bird6, /etc/wireguard, /etc/systemd/network, /etc/NetworkManager/system-connections
+1. genconf : init 只初始化配置文件，不生成配置。
+2. scan: 似乎也可以扫一下目前的 bird.conf 等识别一下内容。以及 bird.conf 有可能在 /etc/bird.conf 或者 /etc/bird/bird.conf。
 
 注意所有操作都应当设计合适的接口，方便以后提供 restful api。
 
