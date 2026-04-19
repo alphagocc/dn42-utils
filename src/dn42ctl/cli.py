@@ -131,48 +131,35 @@ def cmd_init(
         else typer.prompt("ROUTERID", default="169.254.0.1")
     )
 
-    bird_conf_path = (
-        Path(existing.bird_conf_path)
-        if existing
-        else DEFAULT_BIRD_CONF_PATH if bird_conf_path is None else bird_conf_path
-    )
-    bird_peers_dir = (
-        Path(existing.bird_peers_dir)
-        if existing
-        else DEFAULT_BIRD_PEERS_DIR if bird_peers_dir is None else bird_peers_dir
-    )
-    bird_babel_conf_path = (
-        Path(existing.bird_babel_conf_path)
-        if existing
-        else (
-            DEFAULT_BIRD_BABEL_CONF_PATH
-            if bird_babel_conf_path is None
-            else bird_babel_conf_path
+    # Path precedence: CLI option > existing config > default.
+    if bird_conf_path is None:
+        bird_conf_path = (
+            Path(existing.bird_conf_path) if existing else DEFAULT_BIRD_CONF_PATH
         )
-    )
-    bird_roa_v6_conf_path = (
-        Path(existing.bird_roa_v6_conf_path)
-        if existing
-        else (
-            DEFAULT_BIRD_ROA_V6_CONF_PATH
-            if bird_roa_v6_conf_path is None
-            else bird_roa_v6_conf_path
+    if bird_peers_dir is None:
+        bird_peers_dir = (
+            Path(existing.bird_peers_dir) if existing else DEFAULT_BIRD_PEERS_DIR
         )
-    )
-    networkd_dir = (
-        Path(existing.networkd_dir)
-        if existing
-        else DEFAULT_NETWORKD_DIR if networkd_dir is None else networkd_dir
-    )
-    nm_system_connections_dir = (
-        Path(existing.nm_system_connections_dir)
-        if existing
-        else (
-            DEFAULT_NM_SYSTEM_CONNECTIONS_DIR
-            if nm_system_connections_dir is None
-            else nm_system_connections_dir
+    if bird_babel_conf_path is None:
+        bird_babel_conf_path = (
+            Path(existing.bird_babel_conf_path)
+            if existing
+            else DEFAULT_BIRD_BABEL_CONF_PATH
         )
-    )
+    if bird_roa_v6_conf_path is None:
+        bird_roa_v6_conf_path = (
+            Path(existing.bird_roa_v6_conf_path)
+            if existing
+            else DEFAULT_BIRD_ROA_V6_CONF_PATH
+        )
+    if networkd_dir is None:
+        networkd_dir = Path(existing.networkd_dir) if existing else DEFAULT_NETWORKD_DIR
+    if nm_system_connections_dir is None:
+        nm_system_connections_dir = (
+            Path(existing.nm_system_connections_dir)
+            if existing
+            else DEFAULT_NM_SYSTEM_CONNECTIONS_DIR
+        )
 
     overwrite_bird = True
     if bird_conf_path.exists():

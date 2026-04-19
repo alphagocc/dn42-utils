@@ -75,6 +75,8 @@ def render_bird_main_conf(
 
 
 def render_bird_bgp_peer_conf(*, ifname: str, peer_lla: str, peer_asn: int) -> str:
+    if not peer_lla:
+        raise ValueError(f"peer_lla must not be empty for BGP peer {ifname}")
     return (
         f"protocol bgp {ifname} from dnpeers {{\n"
         "    bfd graceful;\n"
@@ -87,6 +89,8 @@ def render_bird_bgp_peer_conf(*, ifname: str, peer_lla: str, peer_asn: int) -> s
 
 
 def render_bird_ibgp_peer_conf(*, name: str, ifname: str, peer_lla: str) -> str:
+    if not peer_lla:
+        raise ValueError(f"peer_lla must not be empty for iBGP peer {ifname}")
     proto = f"ibgp_{name}"
     return (
         f"protocol bgp {proto} from ibgp_template {{\n"
@@ -132,6 +136,8 @@ def render_networkd_netdev(
     allowed_ips: list[str],
 ) -> str:
     allowed = "\n".join([f"AllowedIPs={cidr}" for cidr in allowed_ips])
+    # Omit Endpoint line entirely when not provided; an empty Endpoint= is invalid.
+    endpoint_line = f"Endpoint={endpoint}\n" if endpoint else ""
     return (
         "[NetDev]\n"
         f"Name={ifname}\n"
@@ -142,7 +148,7 @@ def render_networkd_netdev(
         "RouteTable=off\n\n"
         "[WireGuardPeer]\n"
         f"PublicKey={peer_public_key}\n"
-        f"Endpoint={endpoint}\n"
+        f"{endpoint_line}"
         f"{allowed}\n"
     )
 
@@ -162,10 +168,6 @@ def render_networkd_network(*, ifname: str, local_lla_cidr: str, peer_lla: str) 
         f"Peer={peer_lla}\n"
     )
 
-
-def new_nm_uuid() -> str:
-    # Backward-compatible helper (prefer nm_uuid_for).
-    return str(uuid.uuid4())
 
 
 NM_UUID_NAMESPACE = uuid.UUID("4b45d197-2d1f-4c65-9a2b-4efb5a2c602f")
@@ -189,13 +191,14 @@ def render_nmconnection_wireguard(
     local_ipv6_cidr: str,
     persistent_keepalive: int | None = None,
 ) -> str:
-    # NOTE: peer-routes=false is mandatory to satisfy “禁止修改路由表”.
-    allowed = ";".join(allowed_ips)
-    peer_parts = [
-        peer_public_key,
-        f"endpoint={endpoint}",
-        f"allowed-ips={allowed}",
-    ]
+    # NOTE: peer-routes=false is mandatory to satisfy "禁止修改路由表".
+    # Trailing semicolon is the strict NM terminator convention for list fields.
+    allowed = ";".join(allowed_ips) + ";"
+    peer_parts = [peer_public_key]
+    # Omit endpoint= entirely when empty; an empty value is invalid in NM keyfiles.
+    if endpoint:
+        peer_parts.append(f"endpoint={endpoint}")
+    peer_parts.append(f"allowed-ips={allowed}")
     if persistent_keepalive is not None:
         peer_parts.append(f"persistent-keepalive={persistent_keepalive}")
     peers = " ".join(peer_parts)

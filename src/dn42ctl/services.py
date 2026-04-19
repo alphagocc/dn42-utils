@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import random
 import re
@@ -100,11 +101,14 @@ def _open_db(db_path: Path) -> Database:
 
 def _pick_unused_port(used: set[int]) -> int:
     # Keep away from the well-known/default WG port; prefer high ports.
-    for _ in range(2000):
+    candidate = random.randint(20000, 65535)
+    attempts = 0
+    while candidate in used:
         candidate = random.randint(20000, 65535)
-        if candidate not in used:
-            return candidate
-    raise Dn42CtlError("无法自动选择未占用端口，请手动指定")
+        attempts += 1
+        if attempts > 2000:
+            raise Dn42CtlError("无法自动选择未占用端口，请手动指定")
+    return candidate
 
 
 def sanitize_name(name: str) -> str:
@@ -113,6 +117,75 @@ def sanitize_name(name: str) -> str:
     if not cleaned:
         raise Dn42CtlError("名称不能为空")
     return cleaned.lower()
+
+
+def _write_net_backend_files(
+    *,
+    config: AppConfig,
+    node_id: str,
+    backend: str,
+    ifname: str,
+    private_key: str,
+    listen_port: int,
+    peer_public_key: str,
+    endpoint: str,
+    allowed_ips: list[str],
+    local_lla: str,
+    peer_lla: str,
+    generated: list[Path],
+) -> None:
+    """Write networkd or NetworkManager wireguard config files."""
+    if backend == "networkd":
+        netdev_path = Path(config.networkd_dir) / f"{ifname}.netdev"
+        network_path = Path(config.networkd_dir) / f"{ifname}.network"
+        _write_text(
+            netdev_path,
+            render_networkd_netdev(
+                ifname=ifname,
+                private_key=private_key,
+                listen_port=listen_port,
+                peer_public_key=peer_public_key,
+                endpoint=endpoint,
+                allowed_ips=allowed_ips,
+            ),
+            mode=0o600,
+        )
+        _write_text(
+            network_path,
+            render_networkd_network(
+                ifname=ifname,
+                local_lla_cidr=local_lla,
+                peer_lla=peer_lla,
+            ),
+        )
+        generated.extend([netdev_path, network_path])
+    elif backend == "nm":
+        nm_path = Path(config.nm_system_connections_dir) / f"{ifname}.nmconnection"
+        _write_text(
+            nm_path,
+            render_nmconnection_wireguard(
+                conn_id=ifname,
+                ifname=ifname,
+                conn_uuid=nm_uuid_for(node_id=node_id, ifname=ifname),
+                private_key=private_key,
+                listen_port=listen_port,
+                peer_public_key=peer_public_key,
+                endpoint=endpoint,
+                allowed_ips=allowed_ips,
+                local_ipv6_cidr=local_lla,
+            ),
+            mode=0o600,
+        )
+        generated.append(nm_path)
+
+
+def normalize_net_backend(net_backend: str) -> str:
+    backend = net_backend.strip().lower()
+    if backend == "networkd":
+        return "networkd"
+    if backend in {"nm", "networkmanager"}:
+        return "nm"
+    raise Dn42CtlError("net_backend 必须是 networkd 或 nm")
 
 
 def init_node(
@@ -206,6 +279,8 @@ def create_bgp_peer(
     peer_lla: str,
     net_backend: str,
 ) -> PeerResult:
+    backend = normalize_net_backend(net_backend)
+
     node_id = config.node_id
     db = _open_db(db_path)
     try:
@@ -220,8 +295,8 @@ def create_bgp_peer(
         raise Dn42CtlError(str(exc)) from exc
 
     as_str = str(peer_asn)
-    as_last4 = as_str[-4:] if len(as_str) >= 4 else as_str
-    as_last5 = as_str[-5:] if len(as_str) >= 5 else as_str
+    as_last4 = as_str[-4:]
+    as_last5 = as_str[-5:]
 
     ifname = f"dn42_{as_last4}"
     listen_port = int(as_last5)
@@ -250,7 +325,7 @@ def create_bgp_peer(
                 peer_lla=peer_lla,
                 listen_port=listen_port,
                 allowed_ips=allowed_ips,
-                net_backend=net_backend,
+                net_backend=backend,
             )
         )
     except DatabaseError as exc:
@@ -259,56 +334,29 @@ def create_bgp_peer(
     generated: list[Path] = []
 
     bird_peer_path = Path(config.bird_peers_dir) / f"{ifname}.conf"
-    _write_text(
-        bird_peer_path,
-        render_bird_bgp_peer_conf(ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn),
-    )
+    try:
+        bird_conf_text = render_bird_bgp_peer_conf(
+            ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn
+        )
+    except ValueError as exc:
+        raise Dn42CtlError(str(exc)) from exc
+    _write_text(bird_peer_path, bird_conf_text)
     generated.append(bird_peer_path)
 
-    backend = net_backend.lower()
-    if backend == "networkd":
-        netdev_path = Path(config.networkd_dir) / f"{ifname}.netdev"
-        network_path = Path(config.networkd_dir) / f"{ifname}.network"
-        _write_text(
-            netdev_path,
-            render_networkd_netdev(
-                ifname=ifname,
-                private_key=private_key,
-                listen_port=listen_port,
-                peer_public_key=peer_public_key,
-                endpoint=endpoint,
-                allowed_ips=allowed_ips,
-            ),
-        )
-        _write_text(
-            network_path,
-            render_networkd_network(
-                ifname=ifname,
-                local_lla_cidr=local_lla,
-                peer_lla=peer_lla,
-            ),
-        )
-        generated.extend([netdev_path, network_path])
-    elif backend in {"nm", "networkmanager"}:
-        nm_path = Path(config.nm_system_connections_dir) / f"{ifname}.nmconnection"
-        _write_text(
-            nm_path,
-            render_nmconnection_wireguard(
-                conn_id=ifname,
-                ifname=ifname,
-                conn_uuid=nm_uuid_for(node_id=node_id, ifname=ifname),
-                private_key=private_key,
-                listen_port=listen_port,
-                peer_public_key=peer_public_key,
-                endpoint=endpoint,
-                allowed_ips=allowed_ips,
-                local_ipv6_cidr=local_lla,
-            ),
-            mode=0o600,
-        )
-        generated.append(nm_path)
-    else:
-        raise Dn42CtlError("net_backend 必须是 networkd 或 nm")
+    _write_net_backend_files(
+        config=config,
+        node_id=node_id,
+        backend=backend,
+        ifname=ifname,
+        private_key=private_key,
+        listen_port=listen_port,
+        peer_public_key=peer_public_key,
+        endpoint=endpoint,
+        allowed_ips=allowed_ips,
+        local_lla=local_lla,
+        peer_lla=peer_lla,
+        generated=generated,
+    )
 
     return PeerResult(
         ifname=ifname,
@@ -329,6 +377,8 @@ def modify_bgp_peer(
     peer_lla: str,
     net_backend: str,
 ) -> PeerResult:
+    backend = normalize_net_backend(net_backend)
+
     node_id = config.node_id
     db = _open_db(db_path)
     try:
@@ -348,7 +398,10 @@ def modify_bgp_peer(
     public_key = str(row["wg_public_key"])
     listen_port = int(row["listen_port"])
     local_lla = str(row["local_lla"])
-    allowed_ips = DEFAULT_ALLOWED_IPS
+    # Restore the stored allowed_ips instead of silently falling back to DEFAULT;
+    # this prevents overwriting user-customised AllowedIPs on every modify.
+    raw_ips = row["allowed_ips_json"]
+    allowed_ips: list[str] = json.loads(raw_ips) if raw_ips else DEFAULT_ALLOWED_IPS
 
     try:
         db.update_bgp_peer(
@@ -358,63 +411,36 @@ def modify_bgp_peer(
             endpoint=endpoint,
             peer_lla=peer_lla,
             allowed_ips=allowed_ips,
-            net_backend=net_backend,
+            net_backend=backend,
         )
     except DatabaseError as exc:
         raise Dn42CtlError(str(exc)) from exc
 
     generated: list[Path] = []
     bird_peer_path = Path(config.bird_peers_dir) / f"{ifname}.conf"
-    _write_text(
-        bird_peer_path,
-        render_bird_bgp_peer_conf(ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn),
-    )
+    try:
+        bird_conf_text = render_bird_bgp_peer_conf(
+            ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn
+        )
+    except ValueError as exc:
+        raise Dn42CtlError(str(exc)) from exc
+    _write_text(bird_peer_path, bird_conf_text)
     generated.append(bird_peer_path)
 
-    backend = net_backend.lower()
-    if backend == "networkd":
-        netdev_path = Path(config.networkd_dir) / f"{ifname}.netdev"
-        network_path = Path(config.networkd_dir) / f"{ifname}.network"
-        _write_text(
-            netdev_path,
-            render_networkd_netdev(
-                ifname=ifname,
-                private_key=private_key,
-                listen_port=listen_port,
-                peer_public_key=peer_public_key,
-                endpoint=endpoint,
-                allowed_ips=allowed_ips,
-            ),
-        )
-        _write_text(
-            network_path,
-            render_networkd_network(
-                ifname=ifname,
-                local_lla_cidr=local_lla,
-                peer_lla=peer_lla,
-            ),
-        )
-        generated.extend([netdev_path, network_path])
-    elif backend in {"nm", "networkmanager"}:
-        nm_path = Path(config.nm_system_connections_dir) / f"{ifname}.nmconnection"
-        _write_text(
-            nm_path,
-            render_nmconnection_wireguard(
-                conn_id=ifname,
-                ifname=ifname,
-                conn_uuid=nm_uuid_for(node_id=node_id, ifname=ifname),
-                private_key=private_key,
-                listen_port=listen_port,
-                peer_public_key=peer_public_key,
-                endpoint=endpoint,
-                allowed_ips=allowed_ips,
-                local_ipv6_cidr=local_lla,
-            ),
-            mode=0o600,
-        )
-        generated.append(nm_path)
-    else:
-        raise Dn42CtlError("net_backend 必须是 networkd 或 nm")
+    _write_net_backend_files(
+        config=config,
+        node_id=node_id,
+        backend=backend,
+        ifname=ifname,
+        private_key=private_key,
+        listen_port=listen_port,
+        peer_public_key=peer_public_key,
+        endpoint=endpoint,
+        allowed_ips=allowed_ips,
+        local_lla=local_lla,
+        peer_lla=peer_lla,
+        generated=generated,
+    )
 
     return PeerResult(
         ifname=ifname,
@@ -435,6 +461,8 @@ def create_ibgp_peer(
     peer_lla: str,
     net_backend: str,
 ) -> PeerResult:
+    backend = normalize_net_backend(net_backend)
+
     node_id = config.node_id
     db = _open_db(db_path)
     try:
@@ -475,7 +503,7 @@ def create_ibgp_peer(
                 peer_lla=peer_lla,
                 listen_port=listen_port,
                 allowed_ips=allowed_ips,
-                net_backend=net_backend,
+                net_backend=backend,
             )
         )
     except DatabaseError as exc:
@@ -484,56 +512,29 @@ def create_ibgp_peer(
     generated: list[Path] = []
 
     bird_peer_path = Path(config.bird_peers_dir) / f"ibgp_{peer_name}.conf"
-    _write_text(
-        bird_peer_path,
-        render_bird_ibgp_peer_conf(name=peer_name, ifname=ifname, peer_lla=peer_lla),
-    )
+    try:
+        bird_conf_text = render_bird_ibgp_peer_conf(
+            name=peer_name, ifname=ifname, peer_lla=peer_lla
+        )
+    except ValueError as exc:
+        raise Dn42CtlError(str(exc)) from exc
+    _write_text(bird_peer_path, bird_conf_text)
     generated.append(bird_peer_path)
 
-    backend = net_backend.lower()
-    if backend == "networkd":
-        netdev_path = Path(config.networkd_dir) / f"{ifname}.netdev"
-        network_path = Path(config.networkd_dir) / f"{ifname}.network"
-        _write_text(
-            netdev_path,
-            render_networkd_netdev(
-                ifname=ifname,
-                private_key=private_key,
-                listen_port=listen_port,
-                peer_public_key=peer_public_key,
-                endpoint=endpoint,
-                allowed_ips=allowed_ips,
-            ),
-        )
-        _write_text(
-            network_path,
-            render_networkd_network(
-                ifname=ifname,
-                local_lla_cidr=local_lla,
-                peer_lla=peer_lla,
-            ),
-        )
-        generated.extend([netdev_path, network_path])
-    elif backend in {"nm", "networkmanager"}:
-        nm_path = Path(config.nm_system_connections_dir) / f"{ifname}.nmconnection"
-        _write_text(
-            nm_path,
-            render_nmconnection_wireguard(
-                conn_id=ifname,
-                ifname=ifname,
-                conn_uuid=nm_uuid_for(node_id=node_id, ifname=ifname),
-                private_key=private_key,
-                listen_port=listen_port,
-                peer_public_key=peer_public_key,
-                endpoint=endpoint,
-                allowed_ips=allowed_ips,
-                local_ipv6_cidr=local_lla,
-            ),
-            mode=0o600,
-        )
-        generated.append(nm_path)
-    else:
-        raise Dn42CtlError("net_backend 必须是 networkd 或 nm")
+    _write_net_backend_files(
+        config=config,
+        node_id=node_id,
+        backend=backend,
+        ifname=ifname,
+        private_key=private_key,
+        listen_port=listen_port,
+        peer_public_key=peer_public_key,
+        endpoint=endpoint,
+        allowed_ips=allowed_ips,
+        local_lla=local_lla,
+        peer_lla=peer_lla,
+        generated=generated,
+    )
 
     # Regenerate babel.conf deterministically from DB.
     try:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -17,7 +18,7 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
-@dataclass
+@dataclass(frozen=True)
 class BgpPeerRecord:
     node_id: str
     peer_asn: int
@@ -33,7 +34,7 @@ class BgpPeerRecord:
     net_backend: str
 
 
-@dataclass
+@dataclass(frozen=True)
 class IbgpPeerRecord:
     node_id: str
     name: str
@@ -65,6 +66,12 @@ class Database:
 
         db = cls(conn)
         db.migrate()
+
+        # DB may store WireGuard private keys; try to restrict permissions.
+        try:
+            os.chmod(db_path, 0o600)
+        except OSError:
+            pass
         return db
 
     def close(self) -> None:
@@ -98,12 +105,11 @@ class Database:
         now = _now_iso()
         try:
             self._conn.execute(
-                "INSERT OR IGNORE INTO nodes(node_id, created_at, updated_at) VALUES (?,?,?)",
+                """
+                INSERT INTO nodes(node_id, created_at, updated_at) VALUES (?,?,?)
+                ON CONFLICT(node_id) DO UPDATE SET updated_at=excluded.updated_at
+                """.strip(),
                 (node_id, now, now),
-            )
-            self._conn.execute(
-                "UPDATE nodes SET updated_at=? WHERE node_id=?",
-                (now, node_id),
             )
             self._conn.commit()
         except sqlite3.Error as exc:
@@ -171,7 +177,7 @@ class Database:
     ) -> None:
         now = _now_iso()
         try:
-            self._conn.execute(
+            cur = self._conn.execute(
                 """
                 UPDATE bgp_peers
                 SET peer_public_key=?, endpoint=?, peer_lla=?,
@@ -189,8 +195,14 @@ class Database:
                     peer_asn,
                 ),
             )
-            if self._conn.total_changes == 0:
-                raise DatabaseError("BGP peer not found")
+            if cur.rowcount == 0:
+                # SQLite may report 0 if values are unchanged; disambiguate by existence.
+                exists = self._conn.execute(
+                    "SELECT 1 FROM bgp_peers WHERE node_id=? AND peer_asn=?",
+                    (node_id, peer_asn),
+                ).fetchone()
+                if exists is None:
+                    raise DatabaseError("BGP peer not found")
             self._conn.commit()
         except sqlite3.Error as exc:
             self._conn.rollback()
