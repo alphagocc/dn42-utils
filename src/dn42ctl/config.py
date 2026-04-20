@@ -10,6 +10,8 @@ try:
 except ModuleNotFoundError as exc:  # pragma: no cover
     raise RuntimeError("Python 3.11+ is required (tomllib missing)") from exc
 
+import tomli_w
+
 
 @dataclass(frozen=True)
 class AppConfig:
@@ -29,11 +31,6 @@ class AppConfig:
 
 class ConfigError(RuntimeError):
     pass
-
-
-def _toml_quote(value: str) -> str:
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
 
 
 def _require_str(data: dict[str, Any], key: str) -> str:
@@ -85,24 +82,26 @@ def load_config(path: Path) -> AppConfig:
 def save_config(path: Path, config: AppConfig) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    lines = [
-        f"node_id = {_toml_quote(config.node_id)}",
-        f"own_asn = {config.own_asn}",
-        f"router_id = {_toml_quote(config.router_id)}",
-        f"own_ipv6 = {_toml_quote(config.own_ipv6)}",
-        f"ownnet_v6 = {_toml_quote(config.ownnet_v6)}",
-        f"ownnetset_v6 = {_toml_quote(config.ownnetset_v6)}",
-        "",
-        "[paths]",
-        f"bird_conf = {_toml_quote(config.bird_conf_path)}",
-        f"bird_peers_dir = {_toml_quote(config.bird_peers_dir)}",
-        f"bird_babel_conf = {_toml_quote(config.bird_babel_conf_path)}",
-        f"bird_roa_v6_conf = {_toml_quote(config.bird_roa_v6_conf_path)}",
-        f"networkd_dir = {_toml_quote(config.networkd_dir)}",
-        f"nm_system_connections_dir = {_toml_quote(config.nm_system_connections_dir)}",
-        "",
-    ]
-    path.write_text("\n".join(lines), encoding="utf-8", newline="\n")
+    data = {
+        "node_id": config.node_id,
+        "own_asn": config.own_asn,
+        "router_id": config.router_id,
+        "own_ipv6": config.own_ipv6,
+        "ownnet_v6": config.ownnet_v6,
+        "ownnetset_v6": config.ownnetset_v6,
+        "paths": {
+            "bird_conf": config.bird_conf_path,
+            "bird_peers_dir": config.bird_peers_dir,
+            "bird_babel_conf": config.bird_babel_conf_path,
+            "bird_roa_v6_conf": config.bird_roa_v6_conf_path,
+            "networkd_dir": config.networkd_dir,
+            "nm_system_connections_dir": config.nm_system_connections_dir,
+        },
+    }
+
+    with path.open("wb") as f:
+        tomli_w.dump(data, f)
+
     try:
         os.chmod(path, 0o600)
     except OSError:

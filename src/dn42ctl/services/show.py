@@ -230,12 +230,13 @@ def show_wg_tunnels(
     include_live: bool = True,
 ) -> list[WgTunnelView]:
     tunnels: list[WgTunnelView] = []
-    for p in show_bgp_peers(config=config, db_path=db_path, include_live=include_live):
+
+    def _show(kind: str, p: BgpPeerView | IbgpPeerView) -> None:
         tunnels.append(
             WgTunnelView(
-                kind="bgp",
-                peer_asn=p.peer_asn,
-                name=None,
+                kind=kind,
+                peer_asn=getattr(p, "peer_asn", None),
+                name=getattr(p, "name", None),
                 ifname=p.ifname,
                 peer_public_key=p.peer_public_key,
                 endpoint=p.endpoint,
@@ -249,23 +250,14 @@ def show_wg_tunnels(
                 live_wg=p.live_wg,
             )
         )
-    for p in show_ibgp_peers(config=config, db_path=db_path, include_live=include_live):
-        tunnels.append(
-            WgTunnelView(
-                kind="ibgp",
-                peer_asn=None,
-                name=p.name,
-                ifname=p.ifname,
-                peer_public_key=p.peer_public_key,
-                endpoint=p.endpoint,
-                allowed_ips=p.allowed_ips,
-                listen_port=p.listen_port,
-                local_lla=p.local_lla,
-                peer_lla=p.peer_lla,
-                net_backend=p.net_backend,
-                wg_public_key=p.wg_public_key,
-                files=p.files,
-                live_wg=p.live_wg,
-            )
-        )
+
+    for bgp in show_bgp_peers(
+        config=config, db_path=db_path, include_live=include_live
+    ):
+        _show("bgp", bgp)
+    for ibgp in show_ibgp_peers(
+        config=config, db_path=db_path, include_live=include_live
+    ):
+        _show("ibgp", ibgp)
+
     return tunnels
