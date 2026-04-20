@@ -40,6 +40,7 @@ from dn42ctl.services import (
     show_wg_tunnels,
 )
 from dn42ctl.services.core import sanitize_name
+from dn42ctl.wg import WireGuardError, generate_random_lla_cidr, generate_wg_keypair
 
 
 app = typer.Typer(add_completion=False)
@@ -502,14 +503,30 @@ def cmd_bgp_peer(
 
     if peer_asn is None:
         peer_asn = typer.prompt("Peer ASN", type=int)
+    if net_backend is None:
+        net_backend = typer.prompt("网络后端", default="networkd")
+
+    prepared_private_key: str | None = None
+    prepared_public_key: str | None = None
+    prepared_local_lla: str | None = None
+    if peer_public_key is None or endpoint is None or peer_lla is None:
+        try:
+            prepared_private_key, prepared_public_key = generate_wg_keypair()
+            prepared_local_lla = generate_random_lla_cidr()
+        except WireGuardError as exc:
+            typer.echo(f"错误: {exc}")
+            raise typer.Exit(1) from exc
+
+        typer.echo("本端信息（无需对端提供，先发给对端）：")
+        typer.echo(f"本端 WG 公钥: {prepared_public_key}")
+        typer.echo(f"本端 LLA: {prepared_local_lla}")
+
     if peer_public_key is None:
         peer_public_key = typer.prompt("Peer 公钥")
     if endpoint is None:
         endpoint = typer.prompt("Peer Endpoint (IP:Port)")
     if peer_lla is None:
         peer_lla = typer.prompt("Peer LLA (fe80::...)")
-    if net_backend is None:
-        net_backend = typer.prompt("网络后端", default="networkd")
 
     assert peer_asn is not None
     assert peer_public_key is not None
@@ -535,6 +552,9 @@ def cmd_bgp_peer(
             peer_lla=peer_lla,
             net_backend=net_backend,
             listen_port=listen_port,
+            wg_private_key=prepared_private_key,
+            wg_public_key=prepared_public_key,
+            local_lla=prepared_local_lla,
         )
     except Dn42CtlError as exc:
         typer.echo(f"错误: {exc}")
@@ -685,16 +705,32 @@ def cmd_ibgp_peer(
 
     if name is None:
         name = typer.prompt("iBGP peer 名称")
+    if net_backend is None:
+        net_backend = typer.prompt("网络后端", default="networkd")
+    if babel_rxcost is None:
+        babel_rxcost = typer.prompt("Babel rxcost", type=int)
+
+    prepared_private_key: str | None = None
+    prepared_public_key: str | None = None
+    prepared_local_lla: str | None = None
+    if peer_public_key is None or endpoint is None or peer_lla is None:
+        try:
+            prepared_private_key, prepared_public_key = generate_wg_keypair()
+            prepared_local_lla = generate_random_lla_cidr()
+        except WireGuardError as exc:
+            typer.echo(f"错误: {exc}")
+            raise typer.Exit(1) from exc
+
+        typer.echo("本端信息（无需对端提供，先发给对端）：")
+        typer.echo(f"本端 WG 公钥: {prepared_public_key}")
+        typer.echo(f"本端 LLA: {prepared_local_lla}")
+
     if peer_public_key is None:
         peer_public_key = typer.prompt("Peer 公钥")
     if endpoint is None:
         endpoint = typer.prompt("Peer Endpoint (IP:Port)")
     if peer_lla is None:
         peer_lla = typer.prompt("Peer LLA (fe80::...)")
-    if net_backend is None:
-        net_backend = typer.prompt("网络后端", default="networkd")
-    if babel_rxcost is None:
-        babel_rxcost = typer.prompt("Babel rxcost", type=int)
 
     assert name is not None
     assert peer_public_key is not None
@@ -723,6 +759,9 @@ def cmd_ibgp_peer(
             net_backend=net_backend,
             babel_rxcost=babel_rxcost,
             listen_port=listen_port,
+            wg_private_key=prepared_private_key,
+            wg_public_key=prepared_public_key,
+            local_lla=prepared_local_lla,
         )
     except Dn42CtlError as exc:
         typer.echo(f"错误: {exc}")

@@ -13,6 +13,8 @@
 
 > `--rxcost` 未提供时，CLI 应通过交互提示要求用户输入。
 
+> 交互模式下：如果 `--pubkey/--endpoint/--peer-lla` 缺失，CLI 会先生成并输出本端 WG 公钥与本端 LLA，便于先发给对端；随后再提示输入对端信息。
+
 ### 派生规则
 
 - `ifname`：`wg_<sanitize(name)>`（长度不得超过 15）

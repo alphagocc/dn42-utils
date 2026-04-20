@@ -34,6 +34,9 @@ def create_ibgp_peer(
     net_backend: str,
     babel_rxcost: int,
     listen_port: int | None = None,
+    wg_private_key: str | None = None,
+    wg_public_key: str | None = None,
+    local_lla: str | None = None,
 ) -> PeerResult:
     backend = normalize_net_backend(net_backend)
 
@@ -71,12 +74,18 @@ def create_ibgp_peer(
     if babel_rxcost < 0 or babel_rxcost > 65535:
         raise Dn42CtlError(f"rxcost 超出范围 (0-65535): {babel_rxcost}")
 
-    try:
-        private_key, public_key = generate_wg_keypair()
-    except WireGuardError as exc:
-        raise Dn42CtlError(str(exc)) from exc
+    if wg_private_key is None and wg_public_key is None:
+        try:
+            private_key, public_key = generate_wg_keypair()
+        except WireGuardError as exc:
+            raise Dn42CtlError(str(exc)) from exc
+    elif wg_private_key is not None and wg_public_key is not None:
+        private_key = wg_private_key
+        public_key = wg_public_key
+    else:
+        raise Dn42CtlError("内部错误: 必须同时提供 wg_private_key 与 wg_public_key")
 
-    local_lla = generate_random_lla_cidr()
+    local_lla_cidr = local_lla or generate_random_lla_cidr()
     allowed_ips = DEFAULT_ALLOWED_IPS
 
     try:
@@ -89,7 +98,7 @@ def create_ibgp_peer(
                 wg_public_key=public_key,
                 peer_public_key=peer_public_key,
                 endpoint=endpoint,
-                local_lla=local_lla,
+                local_lla=local_lla_cidr,
                 peer_lla=peer_lla,
                 listen_port=listen_port,
                 allowed_ips=allowed_ips,
@@ -122,7 +131,7 @@ def create_ibgp_peer(
         peer_public_key=peer_public_key,
         endpoint=endpoint,
         allowed_ips=allowed_ips,
-        local_lla=local_lla,
+        local_lla=local_lla_cidr,
         peer_lla=peer_lla,
         generated=generated,
     )
@@ -144,7 +153,7 @@ def create_ibgp_peer(
         ifname=ifname,
         listen_port=listen_port,
         wg_public_key=public_key,
-        local_lla=local_lla,
+        local_lla=local_lla_cidr,
         generated_files=generated,
     )
 
