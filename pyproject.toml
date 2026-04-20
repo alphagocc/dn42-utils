@@ -9,6 +9,7 @@ description = "DN42 configuration helper CLI"
 requires-python = ">=3.11"
 dependencies = [
   "typer>=0.12.3",
+  "jinja2>=3.0.0",
 ]
 
 [project.scripts]

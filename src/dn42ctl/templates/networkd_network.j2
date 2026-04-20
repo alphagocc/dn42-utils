@@ -1,0 +1,14 @@
+[Match]
+Name={{ ifname }}
+
+[Network]
+DHCP=no
+IPv6AcceptRA=false
+IPForward=yes
+IPv4ReversePathFilter=no
+
+KeepConfiguration=yes
+
+[Address]
+Address={{ local_lla_cidr }}
+Peer={{ peer_lla }}

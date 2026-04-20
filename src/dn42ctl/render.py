@@ -1,23 +1,25 @@
 from __future__ import annotations
 
-import re
 import uuid
-from importlib import resources
 from pathlib import Path
 
+from jinja2 import Environment, PackageLoader, StrictUndefined
 
-def load_template(template_name: str) -> str:
-    return (
-        resources.files("dn42ctl")
-        .joinpath("templates")
-        .joinpath(template_name)
-        .read_text(encoding="utf-8")
-    )
+
+_JINJA_ENV = Environment(
+    loader=PackageLoader("dn42ctl", "templates"),
+    autoescape=False,
+    undefined=StrictUndefined,
+    keep_trailing_newline=True,
+)
+
+
+def _render_template(template_name: str, **context: object) -> str:
+    return _JINJA_ENV.get_template(template_name).render(**context)
 
 
 def render_bird_main_conf(
     *,
-    template_text: str,
     own_asn: int,
     router_id: str,
     own_ipv6: str,
@@ -27,103 +29,44 @@ def render_bird_main_conf(
     bird_peers_dir: Path,
     bird_roa_v6_conf_path: Path,
 ) -> str:
-    out = template_text
-    out = re.sub(
-        r"^define\s+OWNAS\s*=\s*.*?;\s*(?:#.*)?$",
-        f"define OWNAS =  {own_asn};",
-        out,
-        flags=re.MULTILINE,
+    return _render_template(
+        "bird.conf.j2",
+        own_asn=own_asn,
+        router_id=router_id,
+        own_ipv6=own_ipv6,
+        ownnet_v6=ownnet_v6,
+        ownnetset_v6=ownnetset_v6,
+        bird_babel_conf_path=bird_babel_conf_path,
+        bird_roa_v6_conf_path=bird_roa_v6_conf_path,
+        bird_peers_include=(bird_peers_dir / "*"),
     )
-    out = re.sub(
-        r"^define\s+ROUTERID\s*=\s*.*?;\s*(?:#.*)?$",
-        f"define ROUTERID = {router_id};",
-        out,
-        flags=re.MULTILINE,
-    )
-    out = re.sub(
-        r"^define\s+OWNIPv6\s*=\s*.*?;\s*(?:#.*)?$",
-        f"define OWNIPv6 = {own_ipv6};",
-        out,
-        flags=re.MULTILINE,
-    )
-    out = re.sub(
-        r"^define\s+OWNNETv6\s*=\s*.*?;\s*(?:#.*)?$",
-        f"define OWNNETv6 = {ownnet_v6};",
-        out,
-        flags=re.MULTILINE,
-    )
-    out = re.sub(
-        r"^define\s+OWNNETSETv6\s*=\s*.*?;\s*(?:#.*)?$",
-        f"define OWNNETSETv6 = {ownnetset_v6};",
-        out,
-        flags=re.MULTILINE,
-    )
-
-    out = out.replace(
-        'include "/etc/bird/roa_dn42_v6.conf";',
-        f'include "{bird_roa_v6_conf_path}";',
-    )
-    out = out.replace(
-        'include "/etc/bird/babel.conf";',
-        f'include "{bird_babel_conf_path}";',
-    )
-    out = out.replace(
-        'include "/etc/bird/peers/*";',
-        f'include "{bird_peers_dir / "*"}";',
-    )
-    return out
 
 
 def render_bird_bgp_peer_conf(*, ifname: str, peer_lla: str, peer_asn: int) -> str:
     if not peer_lla:
         raise ValueError(f"peer_lla must not be empty for BGP peer {ifname}")
-    return (
-        f"protocol bgp {ifname} from dnpeers {{\n"
-        "    bfd graceful;\n"
-        "    bfd {\n"
-        "        interval 10s;\n"
-        "    };\n"
-        f"    neighbor {peer_lla}%{ifname} as {peer_asn};\n"
-        "}\n"
+    return _render_template(
+        "bird_bgp_peer.conf.j2",
+        ifname=ifname,
+        peer_lla=peer_lla,
+        peer_asn=peer_asn,
     )
 
 
 def render_bird_ibgp_peer_conf(*, name: str, ifname: str, peer_lla: str) -> str:
     if not peer_lla:
         raise ValueError(f"peer_lla must not be empty for iBGP peer {ifname}")
-    proto = f"ibgp_{name}"
-    return (
-        f"protocol bgp {proto} from ibgp_template {{\n"
-        f"    neighbor {peer_lla}%{ifname} as OWNAS;\n"
-        "};\n"
+    return _render_template(
+        "bird_ibgp_peer.conf.j2",
+        name=name,
+        ifname=ifname,
+        peer_lla=peer_lla,
     )
 
 
 def render_babel_conf(*, interface_names: list[str]) -> str:
     # Generated file: keep it deterministic and idempotent.
-    interfaces = "\n".join(
-        [
-            f'    interface "{name}" {{\n        rxcost 120;\n    }};'
-            for name in interface_names
-        ]
-    )
-    if interfaces:
-        interfaces = interfaces + "\n"
-
-    return (
-        "protocol direct {\n"
-        "    ipv4;\n"
-        "    ipv6;\n"
-        '    interface "dn42-dummy";\n'
-        "};\n\n"
-        "protocol babel intra_babel {\n"
-        "    ipv6 {\n"
-        "        import where source != RTS_BGP && is_self_net_v6();\n"
-        "        export where source != RTS_BGP && is_self_net_v6();\n"
-        "    };\n"
-        f"{interfaces}"
-        "};\n"
-    )
+    return _render_template("babel.conf.j2", interface_names=interface_names)
 
 
 def render_networkd_netdev(
@@ -135,41 +78,24 @@ def render_networkd_netdev(
     endpoint: str,
     allowed_ips: list[str],
 ) -> str:
-    allowed = "\n".join([f"AllowedIPs={cidr}" for cidr in allowed_ips])
-    # Omit Endpoint line entirely when not provided; an empty Endpoint= is invalid.
-    endpoint_line = f"Endpoint={endpoint}\n" if endpoint else ""
-    # ListenPort is optional. Use 0 as a sentinel meaning "unset".
-    listen_port_line = f"ListenPort={listen_port}\n" if listen_port > 0 else ""
-    return (
-        "[NetDev]\n"
-        f"Name={ifname}\n"
-        "Kind=wireguard\n\n"
-        "[WireGuard]\n"
-        f"PrivateKey={private_key}\n"
-        f"{listen_port_line}"
-        "RouteTable=off\n\n"
-        "[WireGuardPeer]\n"
-        f"PublicKey={peer_public_key}\n"
-        f"{endpoint_line}"
-        f"{allowed}\n"
+    return _render_template(
+        "networkd_netdev.j2",
+        ifname=ifname,
+        private_key=private_key,
+        listen_port=listen_port,
+        peer_public_key=peer_public_key,
+        endpoint=endpoint,
+        allowed_ips=allowed_ips,
     )
 
 
 def render_networkd_network(*, ifname: str, local_lla_cidr: str, peer_lla: str) -> str:
-    return (
-        "[Match]\n"
-        f"Name={ifname}\n\n"
-        "[Network]\n"
-        "DHCP=no\n"
-        "IPv6AcceptRA=false\n"
-        "IPForward=yes\n"
-        "IPv4ReversePathFilter=no\n\n"
-        "KeepConfiguration=yes\n\n"
-        "[Address]\n"
-        f"Address={local_lla_cidr}\n"
-        f"Peer={peer_lla}\n"
+    return _render_template(
+        "networkd_network.j2",
+        ifname=ifname,
+        local_lla_cidr=local_lla_cidr,
+        peer_lla=peer_lla,
     )
-
 
 
 NM_UUID_NAMESPACE = uuid.UUID("4b45d197-2d1f-4c65-9a2b-4efb5a2c602f")
@@ -193,36 +119,16 @@ def render_nmconnection_wireguard(
     local_ipv6_cidr: str,
     persistent_keepalive: int | None = None,
 ) -> str:
-    # NOTE: peer-routes=false is mandatory to satisfy "禁止修改路由表".
-    # Trailing semicolon is the strict NM terminator convention for list fields.
-    allowed = ";".join(allowed_ips) + ";"
-    peer_parts = [peer_public_key]
-    # Omit endpoint= entirely when empty; an empty value is invalid in NM keyfiles.
-    if endpoint:
-        peer_parts.append(f"endpoint={endpoint}")
-    peer_parts.append(f"allowed-ips={allowed}")
-    if persistent_keepalive is not None:
-        peer_parts.append(f"persistent-keepalive={persistent_keepalive}")
-    peers = " ".join(peer_parts)
-
-    # listen-port is optional. Use 0 as a sentinel meaning "unset".
-    listen_port_line = f"listen-port={listen_port}\n" if listen_port > 0 else ""
-
-    return (
-        "[connection]\n"
-        f"id={conn_id}\n"
-        f"uuid={conn_uuid}\n"
-        "type=wireguard\n"
-        f"interface-name={ifname}\n"
-        "autoconnect=true\n\n"
-        "[wireguard]\n"
-        f"private-key={private_key}\n"
-        f"{listen_port_line}"
-        "peer-routes=false\n"
-        f"peers={peers}\n\n"
-        "[ipv4]\n"
-        "method=disabled\n\n"
-        "[ipv6]\n"
-        "method=manual\n"
-        f"address1={local_ipv6_cidr}\n"
+    return _render_template(
+        "nmconnection.j2",
+        conn_id=conn_id,
+        ifname=ifname,
+        conn_uuid=conn_uuid,
+        private_key=private_key,
+        listen_port=listen_port,
+        peer_public_key=peer_public_key,
+        endpoint=endpoint,
+        allowed_ips=allowed_ips,
+        local_ipv6_cidr=local_ipv6_cidr,
+        persistent_keepalive=persistent_keepalive,
     )

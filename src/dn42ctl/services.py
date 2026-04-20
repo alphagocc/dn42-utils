@@ -17,7 +17,6 @@ from typing import cast
 from dn42ctl.config import AppConfig, save_config
 from dn42ctl.db import BgpPeerRecord, Database, DatabaseError, IbgpPeerRecord
 from dn42ctl.render import (
-    load_template,
     nm_uuid_for,
     render_babel_conf,
     render_bird_bgp_peer_conf,
@@ -374,10 +373,7 @@ def genconf(
         db.ensure_node(node_id)
     except DatabaseError as exc:
         raise Dn42CtlError(str(exc)) from exc
-
-    template_text = load_template("bird.conf_template")
     bird_conf_text = render_bird_main_conf(
-        template_text=template_text,
         own_asn=config.own_asn,
         router_id=config.router_id,
         own_ipv6=config.own_ipv6,

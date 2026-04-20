@@ -1,0 +1,7 @@
+protocol bgp {{ ifname }} from dnpeers {
+    bfd graceful;
+    bfd {
+        interval 10s;
+    };
+    neighbor {{ peer_lla }}%{{ ifname }} as {{ peer_asn }};
+}

@@ -1,0 +1,3 @@
+protocol bgp ibgp_{{ name }} from ibgp_template {
+    neighbor {{ peer_lla }}%{{ ifname }} as OWNAS;
+};

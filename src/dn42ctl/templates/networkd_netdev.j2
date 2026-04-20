@@ -1,0 +1,14 @@
+[NetDev]
+Name={{ ifname }}
+Kind=wireguard
+
+[WireGuard]
+PrivateKey={{ private_key }}
+{% if listen_port > 0 %}ListenPort={{ listen_port }}
+{% endif %}RouteTable=off
+
+[WireGuardPeer]
+PublicKey={{ peer_public_key }}
+{% if endpoint %}Endpoint={{ endpoint }}
+{% endif %}{% for cidr in allowed_ips %}AllowedIPs={{ cidr }}
+{% endfor %}
