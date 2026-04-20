@@ -9,9 +9,9 @@ protocol babel intra_babel {
         import where source != RTS_BGP && is_self_net_v6();
         export where source != RTS_BGP && is_self_net_v6();
     };
-{% for name in interface_names %}
+{% for name, rxcost in interfaces %}
     interface "{{ name }}" {
-        rxcost 120;
+        rxcost {{ rxcost }};
     };
 {% endfor %}
 };

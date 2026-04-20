@@ -64,9 +64,12 @@ def render_bird_ibgp_peer_conf(*, name: str, ifname: str, peer_lla: str) -> str:
     )
 
 
-def render_babel_conf(*, interface_names: list[str]) -> str:
-    # Generated file: keep it deterministic and idempotent.
-    return _render_template("babel.conf.j2", interface_names=interface_names)
+def render_babel_conf(*, interfaces: list[tuple[str, int]]) -> str:
+    """Render babel.conf.
+
+    `interfaces` is a deterministic list of (ifname, rxcost) pairs.
+    """
+    return _render_template("babel.conf.j2", interfaces=interfaces)
 
 
 def render_networkd_netdev(

@@ -1,25 +1,6 @@
-# dn42ctl 规格说明（Spec）
-
-## 目标
-
-`dn42ctl` 是一个用于生成/维护 DN42 相关配置的 Python CLI 工具，核心目标：
-
-- 可复现环境：使用 `uv` 锁定依赖与运行环境。
-- CLI 功能：支持 `init`、`bgp peer`、`bgp peer modify`、`ibgp peer`。
-- CLI 功能：支持 `init`、`genconf`、`bgp peer`、`bgp peer modify`、`ibgp peer`。
-- 网络后端：同时支持 `systemd-networkd` 与 `NetworkManager`。
-- 强制约束：WireGuard 的 AllowedIPs **必须写入**，但**禁止自动修改路由表**。
-- 数据落库：所有状态写入 SQLite，便于多端/多节点集中管理；以 `node_id` 区分节点；`bgp_peers` 与 `ibgp_peers` 分表；结构可扩展，未来可迁移到 Cloudflare D1。
-- 可复用 API：业务逻辑与 CLI 解耦，便于未来接入 RESTful API。
-
-## 运行环境与安装
-
-- Python：3.11+（使用标准库 `tomllib` 读取 TOML）。
-- 依赖管理：`uv`。
-
 # dn42ctl 规格说明（Index）
 
-本文件是 `dn42ctl` 的“总索引（Index）”。详细的命令与架构规范已拆分到 `docs/commands/` 与 `docs/architecture/`。
+本文件是 `dn42ctl` 的“总索引（Index）”。详细的命令与架构规范拆分在 `docs/commands/` 与 `docs/architecture/`。
 
 ## 目标
 
@@ -43,7 +24,7 @@
 - 安装（可编辑模式）：`uv pip install -e .`
 - 运行：`uv run dn42ctl --help`
 
-> `bgp peer`/`ibgp peer` 会调用系统 `wg` 命令生成密钥，需要安装 wireguard-tools。
+> `bgp peer`/`ibgp peer`/`scan` 会调用系统 `wg` 命令（生成密钥或从私钥推导公钥），需要安装 wireguard-tools。
 
 ## 默认路径与提权
 
@@ -67,7 +48,14 @@
   - networkd：`RouteTable=off`
   - NetworkManager：`peer-routes=false`
 - `scan` 仅支持 `systemd-networkd` 与 `NetworkManager`（不支持 wg-quick `/etc/wireguard` 扫描）。
-- 渲染引擎将升级为 Jinja2；验收以“语义一致”为准（允许空白差异）。
+- 渲染引擎使用 Jinja2；验收以“语义一致”为准（允许空白差异）。
+
+## Babel rxcost 设计
+
+- `babel.conf` 的 `rxcost` 按 **iBGP peer 粒度**配置并存储在 SQLite（`ibgp_peers.babel_rxcost`）。
+- 创建 iBGP peer 时必须提供 `rxcost`（命令行参数或交互提示）。
+- 修改 iBGP peer 的 `rxcost` 后应重生成 `babel.conf`（幂等）。
+- `scan` 会从现有 `babel.conf` 中尽力解析各接口的 `rxcost` 并导入 SQLite；解析失败会给出 warning 并回退到默认值（保持原来行为）。
 
 ## 详细规范索引
 
@@ -84,4 +72,3 @@
 - ibgp peer：`docs/commands/ibgp_peer.md`
 - show / del：`docs/commands/show_and_del.md`
 - scan：`docs/commands/scan.md`
-  - 安装并启用 systemd 定时更新（Linux/systemd 可用时）：

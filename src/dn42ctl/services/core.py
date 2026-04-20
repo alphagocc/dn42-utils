@@ -58,6 +58,7 @@ class BgpPeerView:
 class IbgpPeerView:
     name: str
     ifname: str
+    babel_rxcost: int
     peer_public_key: str | None
     endpoint: str | None
     peer_lla: str | None

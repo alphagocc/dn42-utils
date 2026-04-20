@@ -59,5 +59,12 @@ MIGRATIONS: list[tuple[int, str]] = [
             FOREIGN KEY(node_id) REFERENCES nodes(node_id) ON DELETE CASCADE
         );
         """.strip(),
-    )
+    ),
+    (
+        2,
+        """
+        ALTER TABLE ibgp_peers
+        ADD COLUMN babel_rxcost INTEGER NOT NULL DEFAULT 120;
+        """.strip(),
+    ),
 ]

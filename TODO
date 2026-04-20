@@ -1,9 +1,6 @@
 添加或修改以下功能
 
-1. genconf : init 只初始化配置文件，不生成配置。
-2. scan: 似乎也可以扫一下目前的 bird.conf 等识别一下内容。以及 bird.conf 有可能在 /etc/bird.conf 或者 /etc/bird/bird.conf。
-
-注意所有操作都应当设计合适的接口，方便以后提供 restful api。
+1. babel rxcost 应当被自定义。
 
 为了完成上述任务，你需要创建一个更详细的plan，然后使用 askQuestion 等工具对用户进行提问，确保你的plan符合用户真实意图。
 

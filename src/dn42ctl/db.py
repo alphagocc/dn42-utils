@@ -48,6 +48,7 @@ class IbgpPeerRecord:
     listen_port: int
     allowed_ips: list[str]
     net_backend: str
+    babel_rxcost: int
 
 
 class Database:
@@ -283,8 +284,9 @@ class Database:
                     peer_public_key, endpoint,
                     local_lla, peer_lla, listen_port,
                     allowed_ips_json, net_backend,
+                    babel_rxcost,
                     created_at, updated_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """.strip(),
                 (
                     record.node_id,
@@ -299,6 +301,7 @@ class Database:
                     record.listen_port,
                     json.dumps(record.allowed_ips, ensure_ascii=False),
                     record.net_backend,
+                    record.babel_rxcost,
                     now,
                     now,
                 ),
@@ -310,6 +313,35 @@ class Database:
         except sqlite3.Error as exc:
             self._conn.rollback()
             raise DatabaseError("Failed to insert iBGP peer") from exc
+
+    def update_ibgp_peer_rxcost(
+        self,
+        *,
+        node_id: str,
+        name: str,
+        babel_rxcost: int,
+    ) -> None:
+        now = _now_iso()
+        try:
+            cur = self._conn.execute(
+                """
+                UPDATE ibgp_peers
+                SET babel_rxcost=?, updated_at=?
+                WHERE node_id=? AND name=?
+                """.strip(),
+                (babel_rxcost, now, node_id, name),
+            )
+            if cur.rowcount == 0:
+                exists = self._conn.execute(
+                    "SELECT 1 FROM ibgp_peers WHERE node_id=? AND name=?",
+                    (node_id, name),
+                ).fetchone()
+                if exists is None:
+                    raise DatabaseError("iBGP peer not found")
+            self._conn.commit()
+        except sqlite3.Error as exc:
+            self._conn.rollback()
+            raise DatabaseError("Failed to update iBGP peer rxcost") from exc
 
     def get_used_listen_ports(self, node_id: str) -> set[int]:
         ports: set[int] = set()

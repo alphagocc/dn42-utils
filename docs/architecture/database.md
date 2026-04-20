@@ -11,7 +11,7 @@
 - 使用 `schema_migrations(version)` 记录迁移版本。
 - 启动/初始化时应自动执行迁移，保证旧库可直接升级。
 
-## Schema（v1）
+## Schema（v2）
 
 ### 1) schema_migrations
 
@@ -44,6 +44,7 @@
 内网 iBGP peer（wireguard 隧道 + bird peers + babel 互联），字段与 `bgp_peers` 类似，额外包含：
 
 - `name`
+- `babel_rxcost`（生成 `babel.conf` 时写入对应 `interface` 段的 `rxcost`）
 
 约束：
 

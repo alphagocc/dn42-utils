@@ -291,6 +291,31 @@ def _parse_bird_ibgp_peer_conf(text: str, ifname: str) -> str | None:
     return m.group(1)
 
 
+_BABEL_INTERFACE_BLOCK_RE = re.compile(
+    r"interface\s+\"([^\"]+)\"\s*\{([^}]*)\}\s*;",
+    flags=re.MULTILINE,
+)
+_BABEL_RXCOST_RE = re.compile(r"\brxcost\s+(\d+)\s*;", flags=re.MULTILINE)
+
+
+def _parse_babel_conf_rxcost(text: str) -> dict[str, int]:
+    """Best-effort parse of per-interface rxcost from babel.conf."""
+    out: dict[str, int] = {}
+    for m in _BABEL_INTERFACE_BLOCK_RE.finditer(text):
+        ifname = m.group(1).strip()
+        body = m.group(2)
+        if not ifname:
+            continue
+        m2 = _BABEL_RXCOST_RE.search(body)
+        if not m2:
+            continue
+        try:
+            out[ifname] = int(m2.group(1))
+        except ValueError:
+            continue
+    return out
+
+
 def _wg_pubkey_from_private(private_key: str) -> str:
     try:
         return subprocess.check_output(
@@ -342,6 +367,25 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
     bird_peers_dirs = _dedup(bird_peers_dirs)
     networkd_dirs = _dedup(networkd_dirs)
     nm_dirs = _dedup(nm_dirs)
+
+    # Optional: parse babel.conf to import per-interface rxcost for iBGP peers.
+    babel_rxcost_by_ifname: dict[str, int] = {}
+    missing_rxcost_ifnames: list[str] = []
+    babel_path = Path(config.bird_babel_conf_path)
+    try:
+        if babel_path.exists():
+            try:
+                babel_text = _read_text(babel_path)
+            except Dn42CtlError as exc:
+                warnings.append(f"读取 babel.conf 失败: {exc}")
+            else:
+                babel_rxcost_by_ifname = _parse_babel_conf_rxcost(babel_text)
+        else:
+            warnings.append(
+                f"未找到 babel.conf: {babel_path}（无法探测 rxcost，将使用默认值）"
+            )
+    except OSError as exc:
+        warnings.append(f"无法访问 babel.conf: {babel_path} ({exc})")
 
     # Candidate interfaces from known config file names.
     candidates: set[str] = set()
@@ -578,6 +622,7 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
                         listen_port=listen_port,
                         allowed_ips=allowed_ips_list,
                         net_backend=backend,
+                        babel_rxcost=babel_rxcost_by_ifname.get(ifname, 120),
                     )
                 )
                 inserted.append(
@@ -599,9 +644,23 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
                 )
                 warnings.append(f"{ifname}: 写入 DB 失败: {exc}")
 
+            if ifname not in babel_rxcost_by_ifname:
+                missing_rxcost_ifnames.append(ifname)
+
     if conflicts:
         warnings.append(
             "存在冲突（DB 已有记录）：默认已跳过。可先使用 'dn42ctl del peer ...' 删除后再 scan。"
+        )
+
+    if missing_rxcost_ifnames:
+        preview = ", ".join(missing_rxcost_ifnames[:8])
+        extra = (
+            ""
+            if len(missing_rxcost_ifnames) <= 8
+            else f" ... (+{len(missing_rxcost_ifnames) - 8})"
+        )
+        warnings.append(
+            "babel.conf 未提供部分接口的 rxcost：" f"{preview}{extra}；已使用默认值 120"
         )
 
     return ScanResult(

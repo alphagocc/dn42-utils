@@ -32,6 +32,7 @@ def create_ibgp_peer(
     endpoint: str,
     peer_lla: str,
     net_backend: str,
+    babel_rxcost: int,
     listen_port: int | None = None,
 ) -> PeerResult:
     backend = normalize_net_backend(net_backend)
@@ -67,6 +68,9 @@ def create_ibgp_peer(
             if listen_port in used_ports:
                 raise Dn42CtlError(f"ListenPort 已被占用: {listen_port}")
 
+    if babel_rxcost < 0 or babel_rxcost > 65535:
+        raise Dn42CtlError(f"rxcost 超出范围 (0-65535): {babel_rxcost}")
+
     try:
         private_key, public_key = generate_wg_keypair()
     except WireGuardError as exc:
@@ -90,6 +94,7 @@ def create_ibgp_peer(
                 listen_port=listen_port,
                 allowed_ips=allowed_ips,
                 net_backend=backend,
+                babel_rxcost=babel_rxcost,
             )
         )
     except DatabaseError as exc:
@@ -124,10 +129,13 @@ def create_ibgp_peer(
 
     # Regenerate babel.conf deterministically from DB.
     try:
-        interface_names = [str(r["ifname"]) for r in db.list_ibgp_peers(node_id)]
+        interfaces = [
+            (str(r["ifname"]), int(r["babel_rxcost"]))
+            for r in db.list_ibgp_peers(node_id)
+        ]
     except DatabaseError as exc:
         raise Dn42CtlError(str(exc)) from exc
-    babel_text = render_babel_conf(interface_names=interface_names)
+    babel_text = render_babel_conf(interfaces=interfaces)
     babel_path = Path(config.bird_babel_conf_path)
     write_text(babel_path, babel_text)
     generated.append(babel_path)
@@ -179,10 +187,13 @@ def delete_ibgp_peer(
 
     # Regenerate babel.conf deterministically from DB.
     try:
-        interface_names = [str(r["ifname"]) for r in db.list_ibgp_peers(node_id)]
+        interfaces = [
+            (str(r["ifname"]), int(r["babel_rxcost"]))
+            for r in db.list_ibgp_peers(node_id)
+        ]
     except DatabaseError as exc:
         raise Dn42CtlError(str(exc)) from exc
-    babel_text = render_babel_conf(interface_names=interface_names)
+    babel_text = render_babel_conf(interfaces=interfaces)
     write_text(babel_path, babel_text)
 
     return DeleteResult(
@@ -192,4 +203,53 @@ def delete_ibgp_peer(
         deleted_files=deleted,
         missing_files=missing,
         regenerated_files=[str(babel_path)],
+    )
+
+
+def modify_ibgp_peer_rxcost(
+    *,
+    config: AppConfig,
+    db_path: Path,
+    name: str,
+    babel_rxcost: int,
+) -> PeerResult:
+    if babel_rxcost < 0 or babel_rxcost > 65535:
+        raise Dn42CtlError(f"rxcost 超出范围 (0-65535): {babel_rxcost}")
+
+    db = open_db(db_path)
+    node_id = config.node_id
+
+    peer_name = sanitize_name(name)
+    try:
+        row = db.get_ibgp_peer(node_id, peer_name)
+    except DatabaseError as exc:
+        raise Dn42CtlError(str(exc)) from exc
+    if row is None:
+        raise Dn42CtlError("该 iBGP peer 不存在")
+
+    try:
+        db.update_ibgp_peer_rxcost(
+            node_id=node_id, name=peer_name, babel_rxcost=babel_rxcost
+        )
+    except DatabaseError as exc:
+        raise Dn42CtlError(str(exc)) from exc
+
+    # Regenerate babel.conf deterministically from DB.
+    try:
+        interfaces = [
+            (str(r["ifname"]), int(r["babel_rxcost"]))
+            for r in db.list_ibgp_peers(node_id)
+        ]
+    except DatabaseError as exc:
+        raise Dn42CtlError(str(exc)) from exc
+    babel_text = render_babel_conf(interfaces=interfaces)
+    babel_path = Path(config.bird_babel_conf_path)
+    write_text(babel_path, babel_text)
+
+    return PeerResult(
+        ifname=str(row["ifname"]),
+        listen_port=int(row["listen_port"]),
+        wg_public_key=str(row["wg_public_key"]),
+        local_lla=str(row["local_lla"]),
+        generated_files=[babel_path],
     )

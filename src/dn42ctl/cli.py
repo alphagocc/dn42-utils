@@ -33,11 +33,13 @@ from dn42ctl.services import (
     genconf,
     init_node,
     modify_bgp_peer,
+    modify_ibgp_peer_rxcost,
     scan_local_configs,
     show_bgp_peers,
     show_ibgp_peers,
     show_wg_tunnels,
 )
+from dn42ctl.services.core import sanitize_name
 
 
 app = typer.Typer(add_completion=False)
@@ -90,8 +92,14 @@ def _validate_peer_lla(value: str) -> str:
     addr_part = value.split("/", 1)[0]
     try:
         ipaddress.IPv6Address(addr_part)
-    except ValueError:
-        raise typer.BadParameter(f"不是合法的 IPv6 地址: {value!r}")
+    except ValueError as exc:
+        raise typer.BadParameter(f"不是合法的 IPv6 地址: {value!r}") from exc
+    return value
+
+
+def _validate_rxcost(value: int) -> int:
+    if value < 0 or value > 65535:
+        raise typer.BadParameter(f"rxcost 超出范围 (0-65535): {value}")
     return value
 
 
@@ -635,9 +643,10 @@ app.add_typer(bgp_app, name="bgp")
 
 
 ibgp_app = typer.Typer()
+ibgp_peer_app = typer.Typer(invoke_without_command=True)
 
 
-@ibgp_app.command("peer")
+@ibgp_peer_app.callback(invoke_without_command=True)
 def cmd_ibgp_peer(
     ctx: typer.Context,
     name: str | None = typer.Option(
@@ -651,12 +660,18 @@ def cmd_ibgp_peer(
     ),
     peer_lla: str | None = typer.Option(None, "--peer-lla", help="Peer LLA (IPv6)"),
     net_backend: str | None = typer.Option(None, "--net", help="networkd 或 nm"),
+    babel_rxcost: int | None = typer.Option(
+        None, "--rxcost", help="Babel rxcost (0-65535)"
+    ),
     listen_port: int | None = typer.Option(
         None,
         "--listen-port",
         help="本端 ListenPort (0 表示不设置；留空则自动选择未占用端口)",
     ),
 ) -> None:
+    if ctx.invoked_subcommand is not None:
+        return
+
     appctx: AppContext = ctx.obj
     try:
         config = appctx.require_config()
@@ -677,17 +692,21 @@ def cmd_ibgp_peer(
         peer_lla = typer.prompt("Peer LLA (fe80::...)")
     if net_backend is None:
         net_backend = typer.prompt("网络后端", default="networkd")
+    if babel_rxcost is None:
+        babel_rxcost = typer.prompt("Babel rxcost", type=int)
 
     assert name is not None
     assert peer_public_key is not None
     assert endpoint is not None
     assert peer_lla is not None
     assert net_backend is not None
+    assert babel_rxcost is not None
 
     try:
         peer_public_key = _validate_pubkey(peer_public_key)
         endpoint = _validate_endpoint(endpoint)
         peer_lla = _validate_peer_lla(peer_lla)
+        babel_rxcost = _validate_rxcost(babel_rxcost)
     except typer.BadParameter as exc:
         typer.echo(f"输入错误: {exc}")
         raise typer.Exit(2) from exc
@@ -701,6 +720,7 @@ def cmd_ibgp_peer(
             endpoint=endpoint,
             peer_lla=peer_lla,
             net_backend=net_backend,
+            babel_rxcost=babel_rxcost,
             listen_port=listen_port,
         )
     except Dn42CtlError as exc:
@@ -716,6 +736,75 @@ def cmd_ibgp_peer(
         typer.echo(f"写入: {p}")
 
 
+@ibgp_peer_app.command("modify")
+def cmd_ibgp_peer_modify(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="iBGP peer name"),
+    babel_rxcost: int | None = typer.Option(
+        None, "--rxcost", help="Babel rxcost (0-65535)"
+    ),
+) -> None:
+    appctx: AppContext = ctx.obj
+    try:
+        config = appctx.require_config()
+    except FileNotFoundError as exc:
+        typer.echo("错误: 未初始化，请先运行 dn42ctl init")
+        raise typer.Exit(2) from exc
+    except ConfigError as exc:
+        typer.echo(f"错误: 配置文件读取失败: {exc}")
+        raise typer.Exit(2) from exc
+
+    try:
+        db = appctx.open_db()
+    except (PermissionError, OSError) as exc:
+        typer.echo(f"错误: 权限不足/路径不可写 ({exc})")
+        typer.echo(_db_open_hint(appctx.db_path))
+        raise typer.Exit(1) from exc
+    except DatabaseError as exc:
+        typer.echo(f"错误: {exc}")
+        typer.echo(_db_open_hint(appctx.db_path))
+        raise typer.Exit(1) from exc
+    try:
+        peer_name = sanitize_name(name)
+    except Dn42CtlError as exc:
+        typer.echo(f"输入错误: {exc}")
+        raise typer.Exit(2) from exc
+
+    row = db.get_ibgp_peer(config.node_id, peer_name)
+    if row is None:
+        typer.echo("错误: 该 peer 不存在")
+        raise typer.Exit(2)
+
+    if babel_rxcost is None:
+        babel_rxcost = typer.prompt(
+            "Babel rxcost", default=int(row["babel_rxcost"])
+        )
+
+    assert babel_rxcost is not None
+
+    try:
+        babel_rxcost = _validate_rxcost(babel_rxcost)
+    except typer.BadParameter as exc:
+        typer.echo(f"输入错误: {exc}")
+        raise typer.Exit(2) from exc
+
+    try:
+        res = modify_ibgp_peer_rxcost(
+            config=config,
+            db_path=appctx.db_path,
+            name=peer_name,
+            babel_rxcost=babel_rxcost,
+        )
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}")
+        raise typer.Exit(1) from exc
+
+    typer.echo("iBGP peer 已更新 rxcost")
+    for p in res.generated_files:
+        typer.echo(f"写入: {p}")
+
+
+ibgp_app.add_typer(ibgp_peer_app, name="peer")
 app.add_typer(ibgp_app, name="ibgp")
 
 
@@ -856,6 +945,7 @@ def cmd_show_ibgp(
         typer.echo(
             f"{p.name} proto={proto} ifname={p.ifname} backend={p.net_backend} port={p.listen_port}"
         )
+        typer.echo(f"  babel_rxcost: {p.babel_rxcost}")
         typer.echo(f"  peer_lla: {p.peer_lla or ''}")
         typer.echo(f"  endpoint: {p.endpoint or ''}")
         typer.echo(f"  peer_pubkey: {p.peer_public_key or ''}")
@@ -950,6 +1040,7 @@ def cmd_show_all(
             typer.echo(
                 f"{p.name} proto={proto} ifname={p.ifname} backend={p.net_backend} port={p.listen_port}"
             )
+            typer.echo(f"  babel_rxcost: {p.babel_rxcost}")
             typer.echo(f"  peer_lla: {p.peer_lla or ''}")
             typer.echo(f"  endpoint: {p.endpoint or ''}")
             typer.echo(f"  peer_pubkey: {p.peer_public_key or ''}")

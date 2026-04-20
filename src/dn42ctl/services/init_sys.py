@@ -109,10 +109,13 @@ def genconf(
 
     # Regenerate babel.conf deterministically from DB iBGP peers.
     try:
-        interface_names = [str(r["ifname"]) for r in db.list_ibgp_peers(node_id)]
+        interfaces = [
+            (str(r["ifname"]), int(r["babel_rxcost"]))
+            for r in db.list_ibgp_peers(node_id)
+        ]
     except DatabaseError as exc:
         raise Dn42CtlError(str(exc)) from exc
-    babel_text = render_babel_conf(interface_names=interface_names)
+    babel_text = render_babel_conf(interfaces=interfaces)
     if bird_babel_conf_path.exists() and not overwrite_babel_conf:
         raise Dn42CtlError(f"babel.conf 已存在且未允许覆盖: {bird_babel_conf_path}")
     write_text(bird_babel_conf_path, babel_text)

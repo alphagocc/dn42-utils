@@ -137,6 +137,45 @@
 
 ---
 
+## 阶段五：Babel `rxcost` 可自定义 (Per-iBGP Peer)
+
+**背景**: 目前 `babel.conf` 模板将 `rxcost` 写死为常量，无法反映不同链路质量/成本。
+
+**设计约束（本阶段新增）**:
+
+- `rxcost` 按 iBGP peer 粒度存储在 SQLite：`ibgp_peers.babel_rxcost`。
+- 创建 iBGP peer 时必须提供 `rxcost`（命令行参数或交互提示）。
+- 允许后续修改 `rxcost`，并只需重生成 `babel.conf` 即可生效。
+- `scan` 需从现有 `babel.conf` 中尽力解析 `rxcost` 并导入 DB，保证“接管”已有环境时尽量不改变语义。
+
+**执行步骤**:
+
+1. **文档先行**:
+   - 更新 `docs/spec.md`（Index）：补充 Babel `rxcost` 设计摘要。
+   - 更新 `docs/commands/ibgp_peer.md`：增加 `--rxcost` 与 `ibgp peer modify` 行为。
+   - 更新 `docs/commands/genconf.md`：说明 `babel.conf` 由 DB 的接口列表 + `rxcost` 生成。
+   - 更新 `docs/commands/scan.md`：说明会从 `babel.conf` 探测并导入 `rxcost`。
+   - 更新 `docs/architecture/database.md`：记录 `ibgp_peers.babel_rxcost` 字段。
+2. **DB 迁移**:
+   - 添加新的迁移版本，为 `ibgp_peers` 增加 `babel_rxcost` 列（对旧库默认值保持兼容）。
+3. **Render/Template**:
+   - `render_babel_conf` 支持为每个 interface 渲染不同的 `rxcost`。
+   - `babel.conf.j2` 从变量渲染 `rxcost`（不再写死）。
+4. **Services/CLI**:
+   - `create_ibgp_peer` 写入 `babel_rxcost`，并在重生成 `babel.conf` 时带出该值。
+   - 新增 `ibgp peer modify`：更新 `babel_rxcost` 并重生成 `babel.conf`。
+5. **Scan**:
+   - 读取 `config.paths.bird_babel_conf`，解析 `interface "..." { rxcost N; }`，匹配到 iBGP ifname 后写入 DB。
+
+**阶段验收**:
+
+- `dn42ctl ibgp peer` 创建时会要求输入 `rxcost`。
+- `dn42ctl ibgp peer modify <name> --rxcost ...` 生效且会重生成 `babel.conf`。
+- `dn42ctl genconf` 生成的 `babel.conf` 对每个 interface 使用 DB 中的 `babel_rxcost`。
+- `dn42ctl scan` 能尽力从现有 `babel.conf` 解析并导入 `rxcost`（失败会给 warning，但不致命）。
+
+---
+
 ## 验收标准 (Acceptance Criteria)
 
 1. 运行 `uv run dn42ctl --help` 正常。
