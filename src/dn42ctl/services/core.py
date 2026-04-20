@@ -317,9 +317,6 @@ def peer_files_for_backend(
     elif net_backend == "nm":
         nmdir = Path(config.nm_system_connections_dir)
         files.append(nmdir / f"{ifname}.nmconnection")
-    elif net_backend == "wgquick":
-        # Imported legacy setups may store wg-quick configs here.
-        files.append(Path("/etc/wireguard") / f"{ifname}.conf")
 
     return files
 

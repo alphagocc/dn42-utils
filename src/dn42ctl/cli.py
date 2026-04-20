@@ -184,12 +184,6 @@ def cmd_init(
         own_asn = existing.own_asn if existing else typer.prompt("OWNAS", type=int)
     assert own_asn is not None
 
-    if own_ipv6 is None:
-        own_ipv6 = existing.own_ipv6 if existing else typer.prompt("OWNIPv6")
-    assert own_ipv6 is not None
-    if len(own_ipv6) == 4 and all(c in "0123456789abcdefABCDEF" for c in own_ipv6):
-        own_ipv6 = f"fddf:8aef:1053::{own_ipv6.lower()}"
-
     if ownnet_v6 is None:
         ownnet_v6 = (
             existing.ownnet_v6
@@ -197,6 +191,7 @@ def cmd_init(
             else typer.prompt("OWNNETv6", default="fddf:8aef:1053::/48")
         )
     assert ownnet_v6 is not None
+
     if ownnetset_v6 is None:
         ownnetset_v6 = (
             existing.ownnetset_v6
@@ -204,6 +199,12 @@ def cmd_init(
             else typer.prompt("OWNNETSETv6", default=f"[{ownnet_v6}+]")
         )
     assert ownnetset_v6 is not None
+
+    if own_ipv6 is None:
+        own_ipv6 = existing.own_ipv6 if existing else typer.prompt("OWNIPv6")
+    assert own_ipv6 is not None
+    if len(own_ipv6) <= 4 and all(c in "0123456789abcdefABCDEF" for c in own_ipv6):
+        own_ipv6 = f"fddf:8aef:1053::{own_ipv6.lower()}"
 
     router_id = (
         existing.router_id
@@ -776,9 +777,7 @@ def cmd_ibgp_peer_modify(
         raise typer.Exit(2)
 
     if babel_rxcost is None:
-        babel_rxcost = typer.prompt(
-            "Babel rxcost", default=int(row["babel_rxcost"])
-        )
+        babel_rxcost = typer.prompt("Babel rxcost", default=int(row["babel_rxcost"]))
 
     assert babel_rxcost is not None
 
