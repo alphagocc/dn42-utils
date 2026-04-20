@@ -138,13 +138,15 @@ def render_networkd_netdev(
     allowed = "\n".join([f"AllowedIPs={cidr}" for cidr in allowed_ips])
     # Omit Endpoint line entirely when not provided; an empty Endpoint= is invalid.
     endpoint_line = f"Endpoint={endpoint}\n" if endpoint else ""
+    # ListenPort is optional. Use 0 as a sentinel meaning "unset".
+    listen_port_line = f"ListenPort={listen_port}\n" if listen_port > 0 else ""
     return (
         "[NetDev]\n"
         f"Name={ifname}\n"
         "Kind=wireguard\n\n"
         "[WireGuard]\n"
         f"PrivateKey={private_key}\n"
-        f"ListenPort={listen_port}\n"
+        f"{listen_port_line}"
         "RouteTable=off\n\n"
         "[WireGuardPeer]\n"
         f"PublicKey={peer_public_key}\n"
@@ -203,6 +205,9 @@ def render_nmconnection_wireguard(
         peer_parts.append(f"persistent-keepalive={persistent_keepalive}")
     peers = " ".join(peer_parts)
 
+    # listen-port is optional. Use 0 as a sentinel meaning "unset".
+    listen_port_line = f"listen-port={listen_port}\n" if listen_port > 0 else ""
+
     return (
         "[connection]\n"
         f"id={conn_id}\n"
@@ -212,7 +217,7 @@ def render_nmconnection_wireguard(
         "autoconnect=true\n\n"
         "[wireguard]\n"
         f"private-key={private_key}\n"
-        f"listen-port={listen_port}\n"
+        f"{listen_port_line}"
         "peer-routes=false\n"
         f"peers={peers}\n\n"
         "[ipv4]\n"

@@ -618,6 +618,7 @@ def create_bgp_peer(
     endpoint: str,
     peer_lla: str,
     net_backend: str,
+    listen_port: int | None = None,
 ) -> PeerResult:
     backend = normalize_net_backend(net_backend)
 
@@ -639,9 +640,13 @@ def create_bgp_peer(
     as_last5 = as_str[-5:]
 
     ifname = f"dn42_{as_last4}"
-    listen_port = int(as_last5)
-    if listen_port > 65535:
-        raise Dn42CtlError(f"由 ASN 推导的 ListenPort 超出范围: {listen_port}")
+    if listen_port is None:
+        listen_port = int(as_last5)
+        if listen_port > 65535:
+            raise Dn42CtlError(f"由 ASN 推导的 ListenPort 超出范围: {listen_port}")
+    else:
+        if listen_port < 0 or listen_port > 65535:
+            raise Dn42CtlError(f"ListenPort 超出范围 (0/1-65535): {listen_port}")
 
     try:
         private_key, public_key = generate_wg_keypair()
@@ -716,6 +721,7 @@ def modify_bgp_peer(
     endpoint: str,
     peer_lla: str,
     net_backend: str,
+    listen_port: int | None = None,
 ) -> PeerResult:
     backend = normalize_net_backend(net_backend)
 
@@ -736,7 +742,20 @@ def modify_bgp_peer(
     ifname = str(row["ifname"])
     private_key = str(row["wg_private_key"])
     public_key = str(row["wg_public_key"])
-    listen_port = int(row["listen_port"])
+    current_listen_port = int(row["listen_port"])
+    new_listen_port = current_listen_port if listen_port is None else listen_port
+    if new_listen_port < 0 or new_listen_port > 65535:
+        raise Dn42CtlError(f"ListenPort 超出范围 (0/1-65535): {new_listen_port}")
+    if listen_port is not None and new_listen_port > 0 and new_listen_port != current_listen_port:
+        # Avoid port conflicts within this node (best-effort).
+        try:
+            used_ports = db.get_used_listen_ports(node_id)
+        except DatabaseError as exc:
+            raise Dn42CtlError(str(exc)) from exc
+        used_ports.discard(0)
+        used_ports.discard(current_listen_port)
+        if new_listen_port in used_ports:
+            raise Dn42CtlError(f"ListenPort 已被占用: {new_listen_port}")
     local_lla = str(row["local_lla"])
     # Restore the stored allowed_ips instead of silently falling back to DEFAULT;
     # this prevents overwriting user-customised AllowedIPs on every modify.
@@ -750,6 +769,7 @@ def modify_bgp_peer(
             peer_public_key=peer_public_key,
             endpoint=endpoint,
             peer_lla=peer_lla,
+            listen_port=new_listen_port,
             allowed_ips=allowed_ips,
             net_backend=backend,
         )
@@ -773,7 +793,7 @@ def modify_bgp_peer(
         backend=backend,
         ifname=ifname,
         private_key=private_key,
-        listen_port=listen_port,
+        listen_port=new_listen_port,
         peer_public_key=peer_public_key,
         endpoint=endpoint,
         allowed_ips=allowed_ips,
@@ -784,7 +804,7 @@ def modify_bgp_peer(
 
     return PeerResult(
         ifname=ifname,
-        listen_port=listen_port,
+        listen_port=new_listen_port,
         wg_public_key=public_key,
         local_lla=local_lla,
         generated_files=generated,
@@ -800,6 +820,7 @@ def create_ibgp_peer(
     endpoint: str,
     peer_lla: str,
     net_backend: str,
+    listen_port: int | None = None,
 ) -> PeerResult:
     backend = normalize_net_backend(net_backend)
 
@@ -815,11 +836,24 @@ def create_ibgp_peer(
     if len(ifname) > 15:
         raise Dn42CtlError("接口名过长，请使用更短的 name")
 
-    try:
-        used_ports = db.get_used_listen_ports(node_id)
-    except DatabaseError as exc:
-        raise Dn42CtlError(str(exc)) from exc
-    listen_port = _pick_unused_port(used_ports)
+    if listen_port is None:
+        try:
+            used_ports = db.get_used_listen_ports(node_id)
+        except DatabaseError as exc:
+            raise Dn42CtlError(str(exc)) from exc
+        used_ports.discard(0)
+        listen_port = _pick_unused_port(used_ports)
+    else:
+        if listen_port < 0 or listen_port > 65535:
+            raise Dn42CtlError(f"ListenPort 超出范围 (0/1-65535): {listen_port}")
+        if listen_port > 0:
+            try:
+                used_ports = db.get_used_listen_ports(node_id)
+            except DatabaseError as exc:
+                raise Dn42CtlError(str(exc)) from exc
+            used_ports.discard(0)
+            if listen_port in used_ports:
+                raise Dn42CtlError(f"ListenPort 已被占用: {listen_port}")
 
     try:
         private_key, public_key = generate_wg_keypair()
@@ -1581,8 +1615,10 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
             except ValueError:
                 listen_port = 0
         if listen_port <= 0:
-            skipped.append(f"{ifname}: 缺少/无效 ListenPort")
-            continue
+            # ListenPort is optional for some setups (e.g. behind NAT/firewall).
+            # Store 0 as a sentinel meaning "unset".
+            warnings.append(f"{ifname}: 未找到 ListenPort，将以 0(未设置) 导入")
+            listen_port = 0
 
         local_lla = str(data.get("local_lla") or "").strip()
         if not local_lla:

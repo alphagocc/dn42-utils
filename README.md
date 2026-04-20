@@ -70,6 +70,7 @@ sudo uv run dn42ctl bgp peer --asn 424242xxxx --pubkey <PEER_PUBKEY> --endpoint 
 ```
 
 - 若参数缺失会进入交互提示。
+- 可选：`--listen-port 0` 表示不设置 ListenPort（适用于仅出站、位于防火墙/NAT 后的场景）。
 - `AllowedIPs` 默认包含 `fe80::/64` 与 `fd00::/8`，但不会自动添加路由。
 
 ### 4) 修改 BGP peer（重生成配置）
@@ -88,6 +89,7 @@ sudo uv run dn42ctl ibgp peer --name <NAME> --pubkey <PEER_PUBKEY> --endpoint <H
 
 - `ifname` 为 `wg_<sanitize(name)>`（长度 ≤ 15）。
 - `ListenPort` 自动从高端口选择并避免冲突。
+- 可选：`--listen-port 0` 表示不设置 ListenPort。
 - 会在写入 peer 配置后 **幂等重生成** `babel.conf`。
 
 ### 6) 扫描本机已有配置并导入 DB（接管现有环境）

@@ -319,7 +319,9 @@ def cmd_genconf(ctx: typer.Context) -> None:
 
     overwrite_bird = True
     if bird_conf_path.exists():
-        overwrite_bird = typer.confirm(f"{bird_conf_path} 已存在，覆盖？", default=False)
+        overwrite_bird = typer.confirm(
+            f"{bird_conf_path} 已存在，覆盖？", default=False
+        )
 
     overwrite_babel = True
     if bird_babel_conf_path.exists():
@@ -378,12 +380,16 @@ def cmd_scan(ctx: typer.Context) -> None:
     if discovery.bird_conf_path is not None and str(discovery.bird_conf_path) != str(
         config.bird_conf_path
     ):
-        updated_config = replace(updated_config, bird_conf_path=str(discovery.bird_conf_path))
+        updated_config = replace(
+            updated_config, bird_conf_path=str(discovery.bird_conf_path)
+        )
         updated = True
     if discovery.bird_peers_dir is not None and str(discovery.bird_peers_dir) != str(
         config.bird_peers_dir
     ):
-        updated_config = replace(updated_config, bird_peers_dir=str(discovery.bird_peers_dir))
+        updated_config = replace(
+            updated_config, bird_peers_dir=str(discovery.bird_peers_dir)
+        )
         updated = True
     if discovery.bird_babel_conf_path is not None and str(
         discovery.bird_babel_conf_path
@@ -466,6 +472,11 @@ def cmd_bgp_peer(
     net_backend: str | None = typer.Option(
         None, "--net", help="networkd 或 nm (NetworkManager)"
     ),
+    listen_port: int | None = typer.Option(
+        None,
+        "--listen-port",
+        help="本端 ListenPort (0 表示不设置；留空则按 ASN 规则推导)",
+    ),
 ) -> None:
     if ctx.invoked_subcommand is not None:
         return
@@ -514,6 +525,7 @@ def cmd_bgp_peer(
             endpoint=endpoint,
             peer_lla=peer_lla,
             net_backend=net_backend,
+            listen_port=listen_port,
         )
     except Dn42CtlError as exc:
         typer.echo(f"错误: {exc}")
@@ -540,6 +552,11 @@ def cmd_bgp_peer_modify(
     ),
     peer_lla: str | None = typer.Option(None, "--peer-lla", help="Peer LLA (IPv6)"),
     net_backend: str | None = typer.Option(None, "--net", help="networkd 或 nm"),
+    listen_port: int | None = typer.Option(
+        None,
+        "--listen-port",
+        help="本端 ListenPort (0 表示不设置；留空则保持不变)",
+    ),
 ) -> None:
     appctx: AppContext = ctx.obj
     try:
@@ -602,6 +619,7 @@ def cmd_bgp_peer_modify(
             endpoint=endpoint,
             peer_lla=peer_lla,
             net_backend=net_backend,
+            listen_port=listen_port,
         )
     except Dn42CtlError as exc:
         typer.echo(f"错误: {exc}")
@@ -633,6 +651,11 @@ def cmd_ibgp_peer(
     ),
     peer_lla: str | None = typer.Option(None, "--peer-lla", help="Peer LLA (IPv6)"),
     net_backend: str | None = typer.Option(None, "--net", help="networkd 或 nm"),
+    listen_port: int | None = typer.Option(
+        None,
+        "--listen-port",
+        help="本端 ListenPort (0 表示不设置；留空则自动选择未占用端口)",
+    ),
 ) -> None:
     appctx: AppContext = ctx.obj
     try:
@@ -678,6 +701,7 @@ def cmd_ibgp_peer(
             endpoint=endpoint,
             peer_lla=peer_lla,
             net_backend=net_backend,
+            listen_port=listen_port,
         )
     except Dn42CtlError as exc:
         typer.echo(f"错误: {exc}")

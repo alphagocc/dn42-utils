@@ -96,12 +96,13 @@
 输入：
 
 - `--asn`、`--pubkey`、`--endpoint`、`--peer-lla`、`--net`（`networkd` 或 `nm`）。
+- 可选：`--listen-port`（`0` 表示不设置；留空则按规则推导）。
 - 缺失时会提示用户输入。
 
 派生规则：
 
 - `ifname`：`dn42_<ASN后4位>`
-- `ListenPort`：`ASN后5位`（超出范围则报错）
+- `ListenPort`：默认 `ASN后5位`（超出范围则报错）；也允许通过 `--listen-port` 覆盖，或设置为 `0` 表示不设置（让系统自行选择端口，适用于仅出站/防火墙后场景）。
 
 WireGuard：
 
@@ -133,11 +134,12 @@ WireGuard：
 输入：
 
 - `--name`、`--pubkey`、`--endpoint`、`--peer-lla`、`--net`。
+- 可选：`--listen-port`（`0` 表示不设置；留空则自动选择未占用端口）。
 
 派生规则：
 
 - `ifname`：`wg_<sanitize(name)>`（长度不得超过 15）。
-- `ListenPort`：从高端口随机选择且避免与当前节点已有端口冲突。
+- `ListenPort`：默认从高端口随机选择且避免与当前节点已有端口冲突；也允许通过 `--listen-port` 覆盖，或设置为 `0` 表示不设置。
 
 输出：
 
@@ -212,6 +214,7 @@ WireGuard：
   - BGP：`dn42_####`
   - iBGP：`wg_<name>`
 - 尽力从 networkd/NM/wg-quick/Bird peers 中拼装出同一个 peer 的字段（例如 endpoint/keys/AllowedIPs/peer_lla 等）；缺失字段允许为空。
+- `ListenPort` 可能缺失（例如仅出站连接、位于防火墙/NAT 后的场景）；scan 应允许缺失并以“未设置”状态入库（例如使用 0 作为哨兵值），后续重生成配置时应省略对应字段。
 - 冲突处理（DB 已存在同名 peer）：应提示用户手动处理（默认跳过，不静默覆盖）。
 
 实现约束：
@@ -251,9 +254,9 @@ WireGuard：
   - `wg_private_key`、`wg_public_key`
   - `peer_public_key`、`endpoint`
   - `local_lla`、`peer_lla`
-  - `listen_port`、`allowed_ips_json`、`net_backend`
+  - `listen_port`（允许为 0 表示未设置）、`allowed_ips_json`、`net_backend`
   - `created_at`、`updated_at`
-- `ibgp_peers`：内网 iBGP peer，字段与 `bgp_peers` 类似，额外包含 `name`。
+- `ibgp_peers`：内网 iBGP peer，字段与 `bgp_peers` 类似（`listen_port` 允许为 0 表示未设置），额外包含 `name`。
 
 约束：
 

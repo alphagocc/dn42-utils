@@ -183,6 +183,7 @@ class Database:
         peer_public_key: str | None,
         endpoint: str | None,
         peer_lla: str | None,
+        listen_port: int,
         allowed_ips: list[str],
         net_backend: str,
     ) -> None:
@@ -192,6 +193,7 @@ class Database:
                 """
                 UPDATE bgp_peers
                 SET peer_public_key=?, endpoint=?, peer_lla=?,
+                    listen_port=?,
                     allowed_ips_json=?, net_backend=?, updated_at=?
                 WHERE node_id=? AND peer_asn=?
                 """.strip(),
@@ -199,6 +201,7 @@ class Database:
                     peer_public_key,
                     endpoint,
                     peer_lla,
+                    listen_port,
                     json.dumps(allowed_ips, ensure_ascii=False),
                     net_backend,
                     now,
