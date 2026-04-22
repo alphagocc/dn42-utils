@@ -5,22 +5,25 @@ from pathlib import Path
 from dn42ctl.config import AppConfig
 from dn42ctl.constants import MAX_PORT
 from dn42ctl.db import DatabaseError, IbgpPeerRecord
-from dn42ctl.render import render_babel_conf, render_bird_ibgp_peer_conf
-from dn42ctl.wg import WireGuardError, generate_random_lla_cidr, generate_wg_keypair
+from dn42ctl.render import render_bird_ibgp_peer_conf
+from dn42ctl.wg import generate_random_lla_cidr
 
 from dn42ctl.services.core import (
     DEFAULT_ALLOWED_IPS,
     DeleteResult,
     Dn42CtlError,
     PeerResult,
-    open_db,
-    pick_unused_port,
-    write_net_backend_files,
-    write_text,
     delete_files_and_collect_status,
     normalize_net_backend,
+    open_db,
+    open_db_and_ensure_node,
     peer_files_for_backend,
+    pick_unused_port,
+    regenerate_babel_conf,
+    resolve_wg_keypair,
     sanitize_name,
+    write_net_backend_files,
+    write_text,
 )
 
 
@@ -42,11 +45,7 @@ def create_ibgp_peer(
     backend = normalize_net_backend(net_backend)
 
     node_id = config.node_id
-    db = open_db(db_path)
-    try:
-        db.ensure_node(node_id)
-    except DatabaseError as exc:
-        raise Dn42CtlError(str(exc)) from exc
+    db = open_db_and_ensure_node(db_path, node_id)
 
     peer_name = sanitize_name(name)
     ifname = f"wg_{peer_name}"
@@ -75,16 +74,7 @@ def create_ibgp_peer(
     if babel_rxcost < 0 or babel_rxcost > MAX_PORT:
         raise Dn42CtlError(f"rxcost 超出范围 (0-{MAX_PORT}): {babel_rxcost}")
 
-    if wg_private_key is None and wg_public_key is None:
-        try:
-            private_key, public_key = generate_wg_keypair()
-        except WireGuardError as exc:
-            raise Dn42CtlError(str(exc)) from exc
-    elif wg_private_key is not None and wg_public_key is not None:
-        private_key = wg_private_key
-        public_key = wg_public_key
-    else:
-        raise Dn42CtlError("内部错误: 必须同时提供 wg_private_key 与 wg_public_key")
+    private_key, public_key = resolve_wg_keypair(wg_private_key, wg_public_key)
 
     local_lla_cidr = local_lla or generate_random_lla_cidr()
     allowed_ips = DEFAULT_ALLOWED_IPS
@@ -137,17 +127,7 @@ def create_ibgp_peer(
         generated=generated,
     )
 
-    # Regenerate babel.conf deterministically from DB.
-    try:
-        interfaces = [
-            (str(r["ifname"]), int(r["babel_rxcost"]))
-            for r in db.list_ibgp_peers(node_id)
-        ]
-    except DatabaseError as exc:
-        raise Dn42CtlError(str(exc)) from exc
-    babel_text = render_babel_conf(interfaces=interfaces)
-    babel_path = Path(config.bird_babel_conf_path)
-    write_text(babel_path, babel_text)
+    babel_path = regenerate_babel_conf(config=config, db=db, node_id=node_id)
     generated.append(babel_path)
 
     return PeerResult(
@@ -195,16 +175,7 @@ def delete_ibgp_peer(
     except DatabaseError as exc:
         raise Dn42CtlError(str(exc)) from exc
 
-    # Regenerate babel.conf deterministically from DB.
-    try:
-        interfaces = [
-            (str(r["ifname"]), int(r["babel_rxcost"]))
-            for r in db.list_ibgp_peers(node_id)
-        ]
-    except DatabaseError as exc:
-        raise Dn42CtlError(str(exc)) from exc
-    babel_text = render_babel_conf(interfaces=interfaces)
-    write_text(babel_path, babel_text)
+    regenerate_babel_conf(config=config, db=db, node_id=node_id)
 
     return DeleteResult(
         kind="ibgp",
@@ -244,17 +215,7 @@ def modify_ibgp_peer_rxcost(
     except DatabaseError as exc:
         raise Dn42CtlError(str(exc)) from exc
 
-    # Regenerate babel.conf deterministically from DB.
-    try:
-        interfaces = [
-            (str(r["ifname"]), int(r["babel_rxcost"]))
-            for r in db.list_ibgp_peers(node_id)
-        ]
-    except DatabaseError as exc:
-        raise Dn42CtlError(str(exc)) from exc
-    babel_text = render_babel_conf(interfaces=interfaces)
-    babel_path = Path(config.bird_babel_conf_path)
-    write_text(babel_path, babel_text)
+    babel_path = regenerate_babel_conf(config=config, db=db, node_id=node_id)
 
     return PeerResult(
         ifname=str(row["ifname"]),

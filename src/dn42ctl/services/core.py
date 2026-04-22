@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import random
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from dn42ctl.config import AppConfig
 from dn42ctl.constants import FILE_MODE_PRIVATE, WG_PORT_RANGE
@@ -11,10 +13,13 @@ from dn42ctl.db import Database, DatabaseError
 from dn42ctl.fs import chmod_best_effort
 from dn42ctl.render import (
     nm_uuid_for,
+    render_babel_conf,
+    render_bird_bgp_peer_conf,
     render_networkd_netdev,
     render_networkd_network,
     render_nmconnection_wireguard,
 )
+from dn42ctl.wg import WireGuardError, generate_wg_keypair
 
 
 DEFAULT_ALLOWED_IPS = ["fe80::/64", "fd00::/8"]
@@ -346,3 +351,71 @@ def delete_files_and_collect_status(
         else:
             missing.append(str(p))
     return deleted, missing
+
+
+def regenerate_babel_conf(*, config: AppConfig, db: Database, node_id: str) -> Path:
+    try:
+        interfaces = [
+            (str(r["ifname"]), int(r["babel_rxcost"]))
+            for r in db.list_ibgp_peers(node_id)
+        ]
+    except DatabaseError as exc:
+        raise Dn42CtlError(str(exc)) from exc
+    babel_text = render_babel_conf(interfaces=interfaces)
+    babel_path = Path(config.bird_babel_conf_path)
+    write_text(babel_path, babel_text)
+    return babel_path
+
+
+def resolve_wg_keypair(
+    wg_private_key: str | None, wg_public_key: str | None
+) -> tuple[str, str]:
+    if wg_private_key is None and wg_public_key is None:
+        try:
+            return generate_wg_keypair()
+        except WireGuardError as exc:
+            raise Dn42CtlError(str(exc)) from exc
+    elif wg_private_key is not None and wg_public_key is not None:
+        return wg_private_key, wg_public_key
+    else:
+        raise Dn42CtlError("内部错误: 必须同时提供 wg_private_key 与 wg_public_key")
+
+
+def open_db_and_ensure_node(db_path: Path, node_id: str) -> Database:
+    db = open_db(db_path)
+    try:
+        db.ensure_node(node_id)
+    except DatabaseError as exc:
+        raise Dn42CtlError(str(exc)) from exc
+    return db
+
+
+def parse_allowed_ips_json(raw: str | None) -> list[str]:
+    if not raw:
+        return DEFAULT_ALLOWED_IPS
+    try:
+        loaded: object = json.loads(raw)
+    except json.JSONDecodeError:
+        return DEFAULT_ALLOWED_IPS
+    if isinstance(loaded, list):
+        ips: list[str] = []
+        for item in cast(list[object], loaded):
+            if not isinstance(item, str):
+                return DEFAULT_ALLOWED_IPS
+            ips.append(item)
+        return ips
+    return DEFAULT_ALLOWED_IPS
+
+
+def write_bird_bgp_peer(
+    *, config: AppConfig, ifname: str, peer_lla: str, peer_asn: int, generated: list[Path]
+) -> None:
+    bird_peer_path = Path(config.bird_peers_dir) / f"{ifname}.conf"
+    try:
+        bird_conf_text = render_bird_bgp_peer_conf(
+            ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn
+        )
+    except ValueError as exc:
+        raise Dn42CtlError(str(exc)) from exc
+    write_text(bird_peer_path, bird_conf_text)
+    generated.append(bird_peer_path)

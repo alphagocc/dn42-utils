@@ -3,13 +3,13 @@ from __future__ import annotations
 import configparser
 import re
 import shutil
-import subprocess
 from pathlib import Path
 from typing import cast
 
 from dn42ctl.config import AppConfig
 from dn42ctl.constants import BABEL_DEFAULT_RXCOST, IFNAME_PREFIX_BGP, IFNAME_PREFIX_IBGP
 from dn42ctl.db import BgpPeerRecord, DatabaseError, IbgpPeerRecord
+from dn42ctl.wg import WireGuardError, pubkey_from_private
 
 from dn42ctl.services.core import (
     DEFAULT_ALLOWED_IPS,
@@ -17,7 +17,7 @@ from dn42ctl.services.core import (
     Dn42CtlError,
     ScanImported,
     ScanResult,
-    open_db,
+    open_db_and_ensure_node,
     sanitize_name,
 )
 
@@ -317,20 +317,6 @@ def _parse_babel_conf_rxcost(text: str) -> dict[str, int]:
     return out
 
 
-def _wg_pubkey_from_private(private_key: str) -> str:
-    try:
-        return subprocess.check_output(
-            ["wg", "pubkey"], input=private_key, text=True, stderr=subprocess.STDOUT
-        ).strip()
-    except FileNotFoundError as exc:
-        raise Dn42CtlError("未找到 'wg' 命令，请先安装 wireguard-tools") from exc
-    except subprocess.CalledProcessError as exc:
-        detail = exc.output.strip() if isinstance(exc.output, str) else ""
-        raise Dn42CtlError(
-            f"wg pubkey 执行失败 (exit={exc.returncode}){': ' + detail if detail else ''}"
-        ) from exc
-
-
 def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
     warnings: list[str] = []
     inserted: list[ScanImported] = []
@@ -411,11 +397,7 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
     _collect_stems(networkd_dirs, ".network")
     _collect_stems(nm_dirs, ".nmconnection")
 
-    db = open_db(db_path)
-    try:
-        db.ensure_node(config.node_id)
-    except DatabaseError as exc:
-        raise Dn42CtlError(str(exc)) from exc
+    db = open_db_and_ensure_node(db_path, config.node_id)
 
     for ifname in sorted(candidates):
         kind = "bgp" if ifname.startswith(IFNAME_PREFIX_BGP) else "ibgp"
@@ -524,8 +506,8 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
                 raise Dn42CtlError(str(exc)) from exc
 
             try:
-                wg_public_key = _wg_pubkey_from_private(private_key)
-            except Dn42CtlError as exc:
+                wg_public_key = pubkey_from_private(private_key)
+            except WireGuardError as exc:
                 skipped.append(f"{ifname}: wg pubkey 失败: {exc}")
                 continue
             try:
@@ -604,8 +586,8 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
                 raise Dn42CtlError(str(exc)) from exc
 
             try:
-                wg_public_key = _wg_pubkey_from_private(private_key)
-            except Dn42CtlError as exc:
+                wg_public_key = pubkey_from_private(private_key)
+            except WireGuardError as exc:
                 skipped.append(f"{ifname}: wg pubkey 失败: {exc}")
                 continue
             try:

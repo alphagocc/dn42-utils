@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-import json
 import subprocess
 from concurrent.futures import Future, as_completed
 from concurrent.futures.thread import ThreadPoolExecutor
 from pathlib import Path
-from typing import cast
 
 from dn42ctl.config import AppConfig
 from dn42ctl.constants import LIVE_CMD_TIMEOUT
 from dn42ctl.db import DatabaseError
 
 from dn42ctl.services.core import (
-    DEFAULT_ALLOWED_IPS,
     BgpPeerView,
     CommandOutput,
     Dn42CtlError,
@@ -20,6 +17,7 @@ from dn42ctl.services.core import (
     IbgpPeerView,
     WgTunnelView,
     open_db,
+    parse_allowed_ips_json,
     peer_files_for_backend,
 )
 
@@ -81,23 +79,6 @@ def _run_cmd_best_effort(cmd: list[str]) -> CommandOutput:
         )
 
 
-def _parse_allowed_ips_json(raw: str | None) -> list[str]:
-    if not raw:
-        return DEFAULT_ALLOWED_IPS
-    try:
-        loaded: object = json.loads(raw)
-    except json.JSONDecodeError:
-        return DEFAULT_ALLOWED_IPS
-    if isinstance(loaded, list):
-        ips: list[str] = []
-        for item in cast(list[object], loaded):
-            if not isinstance(item, str):
-                return DEFAULT_ALLOWED_IPS
-            ips.append(item)
-        return ips
-    return DEFAULT_ALLOWED_IPS
-
-
 def _file_status(paths: list[Path]) -> list[FileStatus]:
     out: list[FileStatus] = []
     for p in paths:
@@ -149,7 +130,7 @@ def show_bgp_peers(
                 peer_lla=row["peer_lla"],
                 local_lla=str(row["local_lla"]),
                 listen_port=int(row["listen_port"]),
-                allowed_ips=_parse_allowed_ips_json(
+                allowed_ips=parse_allowed_ips_json(
                     str(row["allowed_ips_json"]) if row["allowed_ips_json"] else None
                 ),
                 net_backend=net_backend,
@@ -208,7 +189,7 @@ def show_ibgp_peers(
                 peer_lla=row["peer_lla"],
                 local_lla=str(row["local_lla"]),
                 listen_port=int(row["listen_port"]),
-                allowed_ips=_parse_allowed_ips_json(
+                allowed_ips=parse_allowed_ips_json(
                     str(row["allowed_ips_json"]) if row["allowed_ips_json"] else None
                 ),
                 net_backend=net_backend,

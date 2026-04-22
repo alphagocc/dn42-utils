@@ -8,15 +8,15 @@ import urllib.request
 from pathlib import Path
 
 from dn42ctl.config import AppConfig, save_config
-from dn42ctl.db import DatabaseError
-from dn42ctl.render import render_babel_conf, render_bird_main_conf
+from dn42ctl.render import render_bird_main_conf
 
 from dn42ctl.services.core import (
     Dn42CtlError,
     GenConfResult,
     InitConfigResult,
     ensure_dir,
-    open_db,
+    open_db_and_ensure_node,
+    regenerate_babel_conf,
     write_text,
 )
 
@@ -62,11 +62,7 @@ def init_node(
     except OSError as exc:
         raise Dn42CtlError(f"写入配置失败: {config_path} ({exc})") from exc
 
-    db = open_db(db_path)
-    try:
-        db.ensure_node(node_id)
-    except DatabaseError as exc:
-        raise Dn42CtlError(str(exc)) from exc
+    db = open_db_and_ensure_node(db_path, node_id)
 
     return InitConfigResult(config=config, config_path=config_path, db_path=db_path)
 
@@ -84,11 +80,7 @@ def genconf(
     bird_babel_conf_path = Path(config.bird_babel_conf_path)
     bird_roa_v6_conf_path = Path(config.bird_roa_v6_conf_path)
 
-    db = open_db(db_path)
-    try:
-        db.ensure_node(node_id)
-    except DatabaseError as exc:
-        raise Dn42CtlError(str(exc)) from exc
+    db = open_db_and_ensure_node(db_path, node_id)
 
     bird_conf_text = render_bird_main_conf(
         own_asn=config.own_asn,
@@ -107,18 +99,9 @@ def genconf(
 
     ensure_dir(bird_peers_dir)
 
-    # Regenerate babel.conf deterministically from DB iBGP peers.
-    try:
-        interfaces = [
-            (str(r["ifname"]), int(r["babel_rxcost"]))
-            for r in db.list_ibgp_peers(node_id)
-        ]
-    except DatabaseError as exc:
-        raise Dn42CtlError(str(exc)) from exc
-    babel_text = render_babel_conf(interfaces=interfaces)
     if bird_babel_conf_path.exists() and not overwrite_babel_conf:
         raise Dn42CtlError(f"babel.conf 已存在且未允许覆盖: {bird_babel_conf_path}")
-    write_text(bird_babel_conf_path, babel_text)
+    regenerate_babel_conf(config=config, db=db, node_id=node_id)
 
     warnings: list[str] = []
 

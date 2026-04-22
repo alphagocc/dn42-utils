@@ -1,25 +1,26 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from dn42ctl.config import AppConfig
 from dn42ctl.constants import MAX_PORT
 from dn42ctl.db import BgpPeerRecord, DatabaseError
-from dn42ctl.render import render_bird_bgp_peer_conf
-from dn42ctl.wg import WireGuardError, generate_random_lla_cidr, generate_wg_keypair
+from dn42ctl.wg import generate_random_lla_cidr
 
 from dn42ctl.services.core import (
     DEFAULT_ALLOWED_IPS,
     DeleteResult,
     Dn42CtlError,
     PeerResult,
-    open_db,
-    write_net_backend_files,
-    write_text,
     delete_files_and_collect_status,
     normalize_net_backend,
+    open_db,
+    open_db_and_ensure_node,
+    parse_allowed_ips_json,
     peer_files_for_backend,
+    resolve_wg_keypair,
+    write_bird_bgp_peer,
+    write_net_backend_files,
 )
 
 
@@ -40,11 +41,7 @@ def create_bgp_peer(
     backend = normalize_net_backend(net_backend)
 
     node_id = config.node_id
-    db = open_db(db_path)
-    try:
-        db.ensure_node(node_id)
-    except DatabaseError as exc:
-        raise Dn42CtlError(str(exc)) from exc
+    db = open_db_and_ensure_node(db_path, node_id)
 
     try:
         if db.get_bgp_peer(node_id, peer_asn) is not None:
@@ -65,16 +62,7 @@ def create_bgp_peer(
         if listen_port < 0 or listen_port > MAX_PORT:
             raise Dn42CtlError(f"ListenPort 超出范围 (0/1-{MAX_PORT}): {listen_port}")
 
-    if wg_private_key is None and wg_public_key is None:
-        try:
-            private_key, public_key = generate_wg_keypair()
-        except WireGuardError as exc:
-            raise Dn42CtlError(str(exc)) from exc
-    elif wg_private_key is not None and wg_public_key is not None:
-        private_key = wg_private_key
-        public_key = wg_public_key
-    else:
-        raise Dn42CtlError("内部错误: 必须同时提供 wg_private_key 与 wg_public_key")
+    private_key, public_key = resolve_wg_keypair(wg_private_key, wg_public_key)
 
     local_lla_cidr = local_lla or generate_random_lla_cidr()
     allowed_ips = DEFAULT_ALLOWED_IPS
@@ -101,15 +89,9 @@ def create_bgp_peer(
 
     generated: list[Path] = []
 
-    bird_peer_path = Path(config.bird_peers_dir) / f"{ifname}.conf"
-    try:
-        bird_conf_text = render_bird_bgp_peer_conf(
-            ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn
-        )
-    except ValueError as exc:
-        raise Dn42CtlError(str(exc)) from exc
-    write_text(bird_peer_path, bird_conf_text)
-    generated.append(bird_peer_path)
+    write_bird_bgp_peer(
+        config=config, ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn, generated=generated
+    )
 
     write_net_backend_files(
         config=config,
@@ -149,11 +131,7 @@ def modify_bgp_peer(
     backend = normalize_net_backend(net_backend)
 
     node_id = config.node_id
-    db = open_db(db_path)
-    try:
-        db.ensure_node(node_id)
-    except DatabaseError as exc:
-        raise Dn42CtlError(str(exc)) from exc
+    db = open_db_and_ensure_node(db_path, node_id)
 
     try:
         row = db.get_bgp_peer(node_id, peer_asn)
@@ -174,7 +152,6 @@ def modify_bgp_peer(
         and new_listen_port > 0
         and new_listen_port != current_listen_port
     ):
-        # Avoid port conflicts within this node (best-effort).
         try:
             used_ports = db.get_used_listen_ports(node_id)
         except DatabaseError as exc:
@@ -184,10 +161,7 @@ def modify_bgp_peer(
         if new_listen_port in used_ports:
             raise Dn42CtlError(f"ListenPort 已被占用: {new_listen_port}")
     local_lla = str(row["local_lla"])
-    # Restore the stored allowed_ips instead of silently falling back to DEFAULT;
-    # this prevents overwriting user-customised AllowedIPs on every modify.
-    raw_ips = row["allowed_ips_json"]
-    allowed_ips: list[str] = json.loads(raw_ips) if raw_ips else DEFAULT_ALLOWED_IPS
+    allowed_ips = parse_allowed_ips_json(row["allowed_ips_json"])
 
     try:
         db.update_bgp_peer(
@@ -204,15 +178,9 @@ def modify_bgp_peer(
         raise Dn42CtlError(str(exc)) from exc
 
     generated: list[Path] = []
-    bird_peer_path = Path(config.bird_peers_dir) / f"{ifname}.conf"
-    try:
-        bird_conf_text = render_bird_bgp_peer_conf(
-            ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn
-        )
-    except ValueError as exc:
-        raise Dn42CtlError(str(exc)) from exc
-    write_text(bird_peer_path, bird_conf_text)
-    generated.append(bird_peer_path)
+    write_bird_bgp_peer(
+        config=config, ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn, generated=generated
+    )
 
     write_net_backend_files(
         config=config,
