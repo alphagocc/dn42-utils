@@ -161,7 +161,7 @@ def show_ibgp_peers(
     wg_map: dict[str, CommandOutput] = {}
     bird_map: dict[str, CommandOutput] = {}
     if include_live and rows:
-        ifnames = [str(r["ifname"]) for r in rows]
+        ifnames = [str(r["ifname"]) for r in rows if r["has_wg"]]
         protos = [f"ibgp_{str(r['name'])}" for r in rows]
         wg_map, bird_map = _run_live_probes(wg_ifnames=ifnames, bird_protocols=protos)
 
@@ -169,6 +169,7 @@ def show_ibgp_peers(
         name = str(row["name"])
         ifname = str(row["ifname"])
         net_backend = str(row["net_backend"])
+        row_has_wg = bool(row["has_wg"])
         files = peer_files_for_backend(
             config=config,
             ifname=ifname,
@@ -177,7 +178,7 @@ def show_ibgp_peers(
             ibgp_name=name,
         )
         proto = f"ibgp_{name}"
-        live_wg = wg_map.get(ifname) if include_live else None
+        live_wg = wg_map.get(ifname) if (include_live and row_has_wg) else None
         live_bird = bird_map.get(proto) if include_live else None
         out.append(
             IbgpPeerView(
@@ -197,6 +198,8 @@ def show_ibgp_peers(
                 files=_file_status(files),
                 live_wg=live_wg,
                 live_bird=live_bird,
+                peer_ip=row["peer_ip"],
+                has_wg=row_has_wg,
             )
         )
     return out
@@ -237,6 +240,7 @@ def show_wg_tunnels(
     for ibgp in show_ibgp_peers(
         config=config, db_path=db_path, include_live=include_live
     ):
-        _show("ibgp", ibgp)
+        if ibgp.has_wg:
+            _show("ibgp", ibgp)
 
     return tunnels

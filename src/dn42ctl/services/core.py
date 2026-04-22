@@ -68,6 +68,8 @@ class BgpPeerView(_PeerViewBase):
 class IbgpPeerView(_PeerViewBase):
     name: str
     babel_rxcost: int
+    peer_ip: str | None
+    has_wg: bool
 
 
 @dataclass(frozen=True)

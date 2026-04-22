@@ -43,6 +43,8 @@ class BgpPeerRecord(_PeerRecordBase):
 class IbgpPeerRecord(_PeerRecordBase):
     name: str
     babel_rxcost: int
+    peer_ip: str | None = None
+    has_wg: bool = True
 
 
 class Database:
@@ -285,9 +287,9 @@ class Database:
                     peer_public_key, endpoint,
                     local_lla, peer_lla, listen_port,
                     allowed_ips_json, net_backend,
-                    babel_rxcost,
+                    babel_rxcost, peer_ip, has_wg,
                     created_at, updated_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """.strip(),
                 (
                     record.node_id,
@@ -303,6 +305,8 @@ class Database:
                     json.dumps(record.allowed_ips, ensure_ascii=False),
                     record.net_backend,
                     record.babel_rxcost,
+                    record.peer_ip,
+                    1 if record.has_wg else 0,
                     now,
                     now,
                 ),

@@ -1,6 +1,6 @@
 # 命令：bgp peer
 
-## `dn42ctl bgp peer`
+## `dn42ctl bgp peer`（等价于 `dn42ctl bgp peer add`）
 
 用途：创建一个对外 BGP peer（wireguard 接口 + bird peers + 网络后端配置）。
 
@@ -41,3 +41,19 @@
 - 读取数据库中该 peer 的现有记录，提示用户输入缺失或需要更新的字段。
 - 更新数据库记录。
 - 重新渲染并覆盖生成 Bird peer conf 与对应网络后端配置文件。
+
+---
+
+## `dn42ctl bgp peer del`
+
+用途：删除指定的外部 BGP peer。
+
+### 输入
+
+- 必填：`<ASN>`
+
+### 行为
+
+- 删除前必须二次确认（交互 prompt）。
+- 删除数据库记录。
+- 删除生成文件（Bird peer conf + networkd/NM 文件）。

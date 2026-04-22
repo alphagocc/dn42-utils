@@ -67,4 +67,11 @@ MIGRATIONS: list[tuple[int, str]] = [
         ADD COLUMN babel_rxcost INTEGER NOT NULL DEFAULT 120;
         """.strip(),
     ),
+    (
+        3,
+        """
+        ALTER TABLE ibgp_peers ADD COLUMN peer_ip TEXT;
+        ALTER TABLE ibgp_peers ADD COLUMN has_wg INTEGER NOT NULL DEFAULT 1;
+        """.strip(),
+    ),
 ]

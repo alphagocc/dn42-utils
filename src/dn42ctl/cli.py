@@ -99,6 +99,19 @@ def _validate_peer_lla(value: str) -> str:
     return value
 
 
+def _validate_peer_ip(value: str) -> str:
+    """Validate peer IP: non-empty and parseable as an IPv6 address."""
+    value = value.strip()
+    if not value:
+        raise typer.BadParameter("Peer IP 不能为空")
+    addr_part = value.split("/", 1)[0]
+    try:
+        ipaddress.IPv6Address(addr_part)
+    except ValueError as exc:
+        raise typer.BadParameter(f"不是合法的 IPv6 地址: {value!r}") from exc
+    return value
+
+
 def _validate_rxcost(value: int) -> int:
     if value < 0 or value > MAX_PORT:
         raise typer.BadParameter(f"rxcost 超出范围 (0-{MAX_PORT}): {value}")
@@ -139,6 +152,8 @@ def _prepare_peer_info(
     peer_public_key: str | None,
     endpoint: str | None,
     peer_lla: str | None,
+    *,
+    allow_empty_endpoint: bool = False,
 ) -> tuple[str | None, str | None, str | None, str, str, str]:
     prepared_private_key: str | None = None
     prepared_public_key: str | None = None
@@ -158,7 +173,10 @@ def _prepare_peer_info(
     if peer_public_key is None:
         peer_public_key = typer.prompt("Peer 公钥")
     if endpoint is None:
-        endpoint = typer.prompt("Peer Endpoint (IP:Port)")
+        if allow_empty_endpoint:
+            endpoint = typer.prompt("Peer Endpoint (IP:Port，留空跳过)", default="")
+        else:
+            endpoint = typer.prompt("Peer Endpoint (IP:Port)")
     if peer_lla is None:
         peer_lla = typer.prompt("Peer LLA (fe80::...)")
 
@@ -221,14 +239,17 @@ def _print_ibgp_peers(peers: list["IbgpPeerView"]) -> None:
         return
     for p in peers:
         proto = f"ibgp_{p.name}"
+        wg_tag = "wg" if p.has_wg else "no-wg"
         typer.echo(
-            f"{p.name} proto={proto} ifname={p.ifname} backend={p.net_backend} port={p.listen_port}"
+            f"{p.name} proto={proto} ifname={p.ifname} [{wg_tag}] backend={p.net_backend} port={p.listen_port}"
         )
-        typer.echo(f"  babel_rxcost: {p.babel_rxcost}")
-        typer.echo(f"  peer_lla: {p.peer_lla or ''}")
-        typer.echo(f"  endpoint: {p.endpoint or ''}")
-        typer.echo(f"  peer_pubkey: {p.peer_public_key or ''}")
-        typer.echo(f"  wg_pubkey(local): {p.wg_public_key}")
+        typer.echo(f"  peer_ip: {p.peer_ip or ''}")
+        if p.has_wg:
+            typer.echo(f"  babel_rxcost: {p.babel_rxcost}")
+            typer.echo(f"  peer_lla: {p.peer_lla or ''}")
+            typer.echo(f"  endpoint: {p.endpoint or ''}")
+            typer.echo(f"  peer_pubkey: {p.peer_public_key or ''}")
+            typer.echo(f"  wg_pubkey(local): {p.wg_public_key}")
         _print_file_statuses([asdict(f) for f in p.files])
         if p.live_wg is not None:
             typer.echo(f"  live(wg): {'OK' if p.live_wg.ok else 'UNAVAILABLE'}")
@@ -701,6 +722,33 @@ bgp_app.add_typer(peer_app, name="peer")
 app.add_typer(bgp_app, name="bgp")
 
 
+@peer_app.command("del")
+def cmd_bgp_peer_del(
+    ctx: typer.Context,
+    peer_asn: int = typer.Argument(..., help="Peer ASN"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    config = _require_config_or_exit(appctx)
+
+    if not typer.confirm(
+        f"确认删除 BGP peer AS{peer_asn}（DB + 配置文件）？", default=False
+    ):
+        typer.echo("已取消")
+        return
+
+    try:
+        res = delete_bgp_peer(config=config, db_path=appctx.db_path, peer_asn=peer_asn)
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}")
+        raise typer.Exit(1) from exc
+
+    typer.echo("删除完成")
+    for p in res.deleted_files:
+        typer.echo(f"删除: {p}")
+    for p in res.missing_files:
+        typer.echo(f"缺失: {p}")
+
+
 ibgp_app = typer.Typer()
 ibgp_peer_app = typer.Typer(invoke_without_command=True)
 
@@ -711,11 +759,17 @@ def cmd_ibgp_peer(
     name: str | None = typer.Option(
         None, "--name", help="Peer 名称 (用于文件名/接口名)"
     ),
+    peer_ip: str | None = typer.Option(
+        None, "--peer-ip", help="对端网内 IPv6 地址"
+    ),
+    no_wg: bool = typer.Option(
+        False, "--no-wg", help="跳过 WireGuard 隧道创建"
+    ),
     peer_public_key: str | None = typer.Option(
         None, "--pubkey", help="Peer WireGuard 公钥"
     ),
     endpoint: str | None = typer.Option(
-        None, "--endpoint", help="Peer Endpoint (IP:Port)"
+        None, "--endpoint", help="Peer Endpoint (IP:Port，可留空)"
     ),
     peer_lla: str | None = typer.Option(None, "--peer-lla", help="Peer LLA (IPv6)"),
     net_backend: str | None = typer.Option(None, "--net", help="networkd 或 nm"),
@@ -736,6 +790,36 @@ def cmd_ibgp_peer(
 
     if name is None:
         name = typer.prompt("iBGP peer 名称")
+    if peer_ip is None:
+        peer_ip = typer.prompt("对端网内 IPv6 地址")
+
+    assert name is not None
+    assert peer_ip is not None
+
+    try:
+        peer_ip = _validate_peer_ip(peer_ip)
+    except typer.BadParameter as exc:
+        typer.echo(f"输入错误: {exc}")
+        raise typer.Exit(2) from exc
+
+    if no_wg:
+        try:
+            res = create_ibgp_peer(
+                config=config,
+                db_path=appctx.db_path,
+                name=name,
+                peer_ip=peer_ip,
+                has_wg=False,
+            )
+        except Dn42CtlError as exc:
+            typer.echo(f"错误: {exc}")
+            raise typer.Exit(1) from exc
+
+        typer.echo("iBGP peer 创建完成 (无 WireGuard)")
+        for p in res.generated_files:
+            typer.echo(f"写入: {p}")
+        return
+
     if net_backend is None:
         net_backend = typer.prompt("网络后端", default="networkd")
     if babel_rxcost is None:
@@ -748,9 +832,10 @@ def cmd_ibgp_peer(
         peer_public_key,
         endpoint,
         peer_lla,
-    ) = _prepare_peer_info(peer_public_key, endpoint, peer_lla)
+    ) = _prepare_peer_info(
+        peer_public_key, endpoint, peer_lla, allow_empty_endpoint=True
+    )
 
-    assert name is not None
     assert net_backend is not None
     assert babel_rxcost is not None
 
@@ -768,6 +853,8 @@ def cmd_ibgp_peer(
             config=config,
             db_path=appctx.db_path,
             name=name,
+            peer_ip=peer_ip,
+            has_wg=True,
             peer_public_key=peer_public_key,
             endpoint=endpoint,
             peer_lla=peer_lla,
@@ -845,7 +932,47 @@ ibgp_app.add_typer(ibgp_peer_app, name="peer")
 app.add_typer(ibgp_app, name="ibgp")
 
 
-show_app = typer.Typer()
+@ibgp_peer_app.command("del")
+def cmd_ibgp_peer_del(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="iBGP peer name"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    config = _require_config_or_exit(appctx)
+
+    if not typer.confirm(
+        f"确认删除 iBGP peer '{name}'（DB + 配置文件）？",
+        default=False,
+    ):
+        typer.echo("已取消")
+        return
+
+    try:
+        res = delete_ibgp_peer(config=config, db_path=appctx.db_path, name=name)
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}")
+        raise typer.Exit(1) from exc
+
+    typer.echo("删除完成")
+    for p in res.deleted_files:
+        typer.echo(f"删除: {p}")
+    for p in res.missing_files:
+        typer.echo(f"缺失: {p}")
+    for p in res.regenerated_files:
+        typer.echo(f"重生成: {p}")
+
+
+show_app = typer.Typer(invoke_without_command=True)
+
+
+@show_app.callback(invoke_without_command=True)
+def cmd_show_default(
+    ctx: typer.Context,
+    as_json: bool = typer.Option(False, "--json", help="输出 JSON"),
+) -> None:
+    if ctx.invoked_subcommand is not None:
+        return
+    ctx.invoke(cmd_show_all, as_json=as_json)
 
 
 def _print_json(data: object) -> None:
@@ -968,68 +1095,3 @@ def cmd_show_all(
 
 
 app.add_typer(show_app, name="show")
-
-
-del_app = typer.Typer()
-del_peer_app = typer.Typer()
-
-
-@del_peer_app.command("bgp")
-def cmd_del_peer_bgp(
-    ctx: typer.Context,
-    peer_asn: int = typer.Argument(..., help="Peer ASN"),
-) -> None:
-    appctx: AppContext = ctx.obj
-    config = _require_config_or_exit(appctx)
-
-    if not typer.confirm(
-        f"确认删除 BGP peer AS{peer_asn}（DB + 配置文件）？", default=False
-    ):
-        typer.echo("已取消")
-        return
-
-    try:
-        res = delete_bgp_peer(config=config, db_path=appctx.db_path, peer_asn=peer_asn)
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}")
-        raise typer.Exit(1) from exc
-
-    typer.echo("删除完成")
-    for p in res.deleted_files:
-        typer.echo(f"删除: {p}")
-    for p in res.missing_files:
-        typer.echo(f"缺失: {p}")
-
-
-@del_peer_app.command("ibgp")
-def cmd_del_peer_ibgp(
-    ctx: typer.Context,
-    name: str = typer.Argument(..., help="iBGP peer name"),
-) -> None:
-    appctx: AppContext = ctx.obj
-    config = _require_config_or_exit(appctx)
-
-    if not typer.confirm(
-        f"确认删除 iBGP peer '{name}'（DB + 配置文件 + 重生成 babel.conf）？",
-        default=False,
-    ):
-        typer.echo("已取消")
-        return
-
-    try:
-        res = delete_ibgp_peer(config=config, db_path=appctx.db_path, name=name)
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}")
-        raise typer.Exit(1) from exc
-
-    typer.echo("删除完成")
-    for p in res.deleted_files:
-        typer.echo(f"删除: {p}")
-    for p in res.missing_files:
-        typer.echo(f"缺失: {p}")
-    for p in res.regenerated_files:
-        typer.echo(f"重生成: {p}")
-
-
-del_app.add_typer(del_peer_app, name="peer")
-app.add_typer(del_app, name="del")

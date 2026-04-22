@@ -53,14 +53,14 @@ def render_bird_bgp_peer_conf(*, ifname: str, peer_lla: str, peer_asn: int) -> s
     )
 
 
-def render_bird_ibgp_peer_conf(*, name: str, ifname: str, peer_lla: str) -> str:
-    if not peer_lla:
-        raise ValueError(f"peer_lla must not be empty for iBGP peer {ifname}")
+def render_bird_ibgp_peer_conf(*, name: str, ifname: str, peer_ip: str) -> str:
+    if not peer_ip:
+        raise ValueError(f"peer_ip must not be empty for iBGP peer {ifname}")
     return _render_template(
         "bird_ibgp_peer.conf.j2",
         name=name,
         ifname=ifname,
-        peer_lla=peer_lla,
+        peer_ip=peer_ip,
     )
 
 

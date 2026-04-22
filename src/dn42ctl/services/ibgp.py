@@ -32,18 +32,18 @@ def create_ibgp_peer(
     config: AppConfig,
     db_path: Path,
     name: str,
-    peer_public_key: str,
-    endpoint: str,
-    peer_lla: str,
-    net_backend: str,
-    babel_rxcost: int,
+    peer_ip: str,
+    has_wg: bool = True,
+    peer_public_key: str | None = None,
+    endpoint: str | None = None,
+    peer_lla: str | None = None,
+    net_backend: str | None = None,
+    babel_rxcost: int = 0,
     listen_port: int | None = None,
     wg_private_key: str | None = None,
     wg_public_key: str | None = None,
     local_lla: str | None = None,
 ) -> PeerResult:
-    backend = normalize_net_backend(net_backend)
-
     node_id = config.node_id
     db = open_db_and_ensure_node(db_path, node_id)
 
@@ -52,32 +52,41 @@ def create_ibgp_peer(
     if len(ifname) > 15:
         raise Dn42CtlError("接口名过长，请使用更短的 name")
 
-    if listen_port is None:
-        try:
-            used_ports = db.get_used_listen_ports(node_id)
-        except DatabaseError as exc:
-            raise Dn42CtlError(str(exc)) from exc
-        used_ports.discard(0)
-        listen_port = pick_unused_port(used_ports)
-    else:
-        if listen_port < 0 or listen_port > MAX_PORT:
-            raise Dn42CtlError(f"ListenPort 超出范围 (0/1-{MAX_PORT}): {listen_port}")
-        if listen_port > 0:
+    if has_wg:
+        backend = normalize_net_backend(net_backend or "networkd")
+
+        if listen_port is None:
             try:
                 used_ports = db.get_used_listen_ports(node_id)
             except DatabaseError as exc:
                 raise Dn42CtlError(str(exc)) from exc
             used_ports.discard(0)
-            if listen_port in used_ports:
-                raise Dn42CtlError(f"ListenPort 已被占用: {listen_port}")
+            listen_port = pick_unused_port(used_ports)
+        else:
+            if listen_port < 0 or listen_port > MAX_PORT:
+                raise Dn42CtlError(f"ListenPort 超出范围 (0/1-{MAX_PORT}): {listen_port}")
+            if listen_port > 0:
+                try:
+                    used_ports = db.get_used_listen_ports(node_id)
+                except DatabaseError as exc:
+                    raise Dn42CtlError(str(exc)) from exc
+                used_ports.discard(0)
+                if listen_port in used_ports:
+                    raise Dn42CtlError(f"ListenPort 已被占用: {listen_port}")
 
-    if babel_rxcost < 0 or babel_rxcost > MAX_PORT:
-        raise Dn42CtlError(f"rxcost 超出范围 (0-{MAX_PORT}): {babel_rxcost}")
+        if babel_rxcost < 0 or babel_rxcost > MAX_PORT:
+            raise Dn42CtlError(f"rxcost 超出范围 (0-{MAX_PORT}): {babel_rxcost}")
 
-    private_key, public_key = resolve_wg_keypair(wg_private_key, wg_public_key)
-
-    local_lla_cidr = local_lla or generate_random_lla_cidr()
-    allowed_ips = DEFAULT_ALLOWED_IPS
+        private_key, public_key = resolve_wg_keypair(wg_private_key, wg_public_key)
+        local_lla_cidr = local_lla or generate_random_lla_cidr()
+        allowed_ips = DEFAULT_ALLOWED_IPS
+    else:
+        backend = "networkd"
+        listen_port = 0
+        private_key = ""
+        public_key = ""
+        local_lla_cidr = ""
+        allowed_ips = DEFAULT_ALLOWED_IPS
 
     try:
         db.insert_ibgp_peer(
@@ -87,14 +96,16 @@ def create_ibgp_peer(
                 ifname=ifname,
                 wg_private_key=private_key,
                 wg_public_key=public_key,
-                peer_public_key=peer_public_key,
-                endpoint=endpoint,
+                peer_public_key=peer_public_key or "",
+                endpoint=endpoint or "",
                 local_lla=local_lla_cidr,
-                peer_lla=peer_lla,
+                peer_lla=peer_lla or "",
                 listen_port=listen_port,
                 allowed_ips=allowed_ips,
                 net_backend=backend,
                 babel_rxcost=babel_rxcost,
+                peer_ip=peer_ip,
+                has_wg=has_wg,
             )
         )
     except DatabaseError as exc:
@@ -105,30 +116,31 @@ def create_ibgp_peer(
     bird_peer_path = Path(config.bird_peers_dir) / f"ibgp_{peer_name}.conf"
     try:
         bird_conf_text = render_bird_ibgp_peer_conf(
-            name=peer_name, ifname=ifname, peer_lla=peer_lla
+            name=peer_name, ifname=ifname, peer_ip=peer_ip
         )
     except ValueError as exc:
         raise Dn42CtlError(str(exc)) from exc
     write_text(bird_peer_path, bird_conf_text)
     generated.append(bird_peer_path)
 
-    write_net_backend_files(
-        config=config,
-        node_id=node_id,
-        backend=backend,
-        ifname=ifname,
-        private_key=private_key,
-        listen_port=listen_port,
-        peer_public_key=peer_public_key,
-        endpoint=endpoint,
-        allowed_ips=allowed_ips,
-        local_lla=local_lla_cidr,
-        peer_lla=peer_lla,
-        generated=generated,
-    )
+    if has_wg:
+        write_net_backend_files(
+            config=config,
+            node_id=node_id,
+            backend=backend,
+            ifname=ifname,
+            private_key=private_key,
+            listen_port=listen_port,
+            peer_public_key=peer_public_key or "",
+            endpoint=endpoint or "",
+            allowed_ips=allowed_ips,
+            local_lla=local_lla_cidr,
+            peer_lla=peer_lla or "",
+            generated=generated,
+        )
 
-    babel_path = regenerate_babel_conf(config=config, db=db, node_id=node_id)
-    generated.append(babel_path)
+        babel_path = regenerate_babel_conf(config=config, db=db, node_id=node_id)
+        generated.append(babel_path)
 
     return PeerResult(
         ifname=ifname,
@@ -158,15 +170,21 @@ def delete_ibgp_peer(
 
     ifname = str(row["ifname"])
     net_backend = str(row["net_backend"])
-    files = peer_files_for_backend(
-        config=config,
-        ifname=ifname,
-        net_backend=net_backend,
-        kind="ibgp",
-        ibgp_name=peer_name,
-    )
-    babel_path = Path(config.bird_babel_conf_path)
-    files = [p for p in files if p != babel_path]
+    row_has_wg = bool(row["has_wg"])
+
+    if row_has_wg:
+        files = peer_files_for_backend(
+            config=config,
+            ifname=ifname,
+            net_backend=net_backend,
+            kind="ibgp",
+            ibgp_name=peer_name,
+        )
+        babel_path = Path(config.bird_babel_conf_path)
+        files = [p for p in files if p != babel_path]
+    else:
+        bird_peer_path = Path(config.bird_peers_dir) / f"ibgp_{peer_name}.conf"
+        files = [bird_peer_path]
 
     deleted, missing = delete_files_and_collect_status(files)
 
@@ -175,7 +193,11 @@ def delete_ibgp_peer(
     except DatabaseError as exc:
         raise Dn42CtlError(str(exc)) from exc
 
-    regenerate_babel_conf(config=config, db=db, node_id=node_id)
+    regenerated: list[str] = []
+    if row_has_wg:
+        babel_path = Path(config.bird_babel_conf_path)
+        regenerate_babel_conf(config=config, db=db, node_id=node_id)
+        regenerated.append(str(babel_path))
 
     return DeleteResult(
         kind="ibgp",
@@ -183,7 +205,7 @@ def delete_ibgp_peer(
         name=peer_name,
         deleted_files=deleted,
         missing_files=missing,
-        regenerated_files=[str(babel_path)],
+        regenerated_files=regenerated,
     )
 
 

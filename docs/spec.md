@@ -7,7 +7,7 @@
 `dn42ctl` 是一个用于生成/维护 DN42 相关配置的 Python CLI 工具，核心目标：
 
 - 可复现环境：使用 `uv` 锁定依赖与运行环境。
-- CLI 功能：支持 `init`、`genconf`、`bgp peer`、`bgp peer modify`、`ibgp peer`、`show`、`del peer`、`scan`。
+- CLI 功能：支持 `init`、`genconf`、`bgp peer [add|modify|del]`、`ibgp peer [add|modify|del]`、`show`、`scan`。
 - 网络后端：同时支持 `systemd-networkd` 与 `NetworkManager`。
 - 强制约束：WireGuard 的 AllowedIPs **必须写入**，但**禁止自动修改路由表**。
 - 数据落库：所有状态写入 SQLite，便于多端/多节点集中管理；以 `node_id` 区分节点。
@@ -53,9 +53,15 @@
 ## Babel rxcost 设计
 
 - `babel.conf` 的 `rxcost` 按 **iBGP peer 粒度**配置并存储在 SQLite（`ibgp_peers.babel_rxcost`）。
-- 创建 iBGP peer 时必须提供 `rxcost`（命令行参数或交互提示）。
+- 创建 iBGP peer 时必须提供 `rxcost`（命令行参数或交互提示）——仅在有 WG 隧道时需要。
 - 修改 iBGP peer 的 `rxcost` 后应重生成 `babel.conf`（幂等）。
 - `scan` 会从现有 `babel.conf` 中尽力解析各接口的 `rxcost` 并导入 SQLite；解析失败会给出 warning 并回退到默认值（保持原来行为）。
+
+## iBGP 互联设计
+
+- iBGP peer 使用**网内 IP**（`peer_ip`）作为 Bird neighbor 地址，而非 link-local 地址（LLA）。这是因为 iBGP 内网有 babel 路由协议，无需依赖 LLA 互联。
+- iBGP peer 支持**无 WireGuard 模式**（`--no-wg`）：仅生成 Bird peer conf，不创建 WG 隧道、不修改 babel.conf。适用于对端已通过其他方式（如物理网络、已有隧道）可达的场景。
+- iBGP peer 的 `endpoint` 为可选：对端可能在防火墙后，无需填写。
 
 ## 详细规范索引
 
@@ -68,7 +74,7 @@
 
 - init：`docs/commands/init.md`
 - genconf：`docs/commands/genconf.md`
-- bgp peer：`docs/commands/bgp_peer.md`
-- ibgp peer：`docs/commands/ibgp_peer.md`
-- show / del：`docs/commands/show_and_del.md`
+- bgp peer (add/modify/del)：`docs/commands/bgp_peer.md`
+- ibgp peer (add/modify/del)：`docs/commands/ibgp_peer.md`
+- show / peer del：`docs/commands/show_and_del.md`
 - scan：`docs/commands/scan.md`
