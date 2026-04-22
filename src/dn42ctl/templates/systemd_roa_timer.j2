@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily timer to download DN42 ROA (IPv6)
+
+[Timer]
+OnCalendar=*-*-* 00:05:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

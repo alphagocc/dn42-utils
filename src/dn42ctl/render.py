@@ -101,6 +101,21 @@ def render_networkd_network(*, ifname: str, local_lla_cidr: str, peer_lla: str) 
     )
 
 
+def render_systemd_roa_service(
+    *, roa_parent: Path, roa_target: Path, roa_url: str
+) -> str:
+    return _render_template(
+        "systemd_roa_service.j2",
+        roa_parent=roa_parent,
+        roa_target=roa_target,
+        roa_url=roa_url,
+    )
+
+
+def render_systemd_roa_timer() -> str:
+    return _render_template("systemd_roa_timer.j2")
+
+
 NM_UUID_NAMESPACE = uuid.UUID("4b45d197-2d1f-4c65-9a2b-4efb5a2c602f")
 
 

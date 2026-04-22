@@ -1,0 +1,10 @@
+[Unit]
+Description=Download DN42 ROA for BIRD2 (IPv6)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStartPre=/usr/bin/mkdir -p '{{ roa_parent }}'
+ExecStart=curl -fsSL -o '{{ roa_target }}' {{ roa_url }}
+ExecStartPost=-birdc configure

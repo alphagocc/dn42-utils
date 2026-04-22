@@ -8,7 +8,7 @@ import urllib.request
 from pathlib import Path
 
 from dn42ctl.config import AppConfig, save_config
-from dn42ctl.render import render_bird_main_conf
+from dn42ctl.render import render_bird_main_conf, render_systemd_roa_service, render_systemd_roa_timer
 
 from dn42ctl.services.core import (
     Dn42CtlError,
@@ -141,27 +141,12 @@ def genconf(
         if shutil.which("curl") is None:
             warnings.append("未找到 curl：systemd ROA 定时更新可能失败")
 
-        service_text = (
-            "[Unit]\n"
-            "Description=Download DN42 ROA for BIRD2 (IPv6)\n"
-            "After=network-online.target\n"
-            "Wants=network-online.target\n\n"
-            "[Service]\n"
-            "Type=oneshot\n"
-            # Quote path to handle spaces/special characters safely.
-            f"ExecStartPre=/usr/bin/mkdir -p '{roa_parent}'\n"
-            f"ExecStart=curl -fsSL -o '{roa_target}' {DN42_ROA_V6_URL}\n"
-            "ExecStartPost=-birdc configure\n"
+        service_text = render_systemd_roa_service(
+            roa_parent=roa_parent,
+            roa_target=roa_target,
+            roa_url=DN42_ROA_V6_URL,
         )
-        timer_text = (
-            "[Unit]\n"
-            "Description=Daily timer to download DN42 ROA (IPv6)\n\n"
-            "[Timer]\n"
-            "OnCalendar=*-*-* 00:05:00 UTC\n"
-            "Persistent=true\n\n"
-            "[Install]\n"
-            "WantedBy=timers.target\n"
-        )
+        timer_text = render_systemd_roa_timer()
 
         try:
             write_text(service_path, service_text)
