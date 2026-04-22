@@ -44,8 +44,7 @@ class FileStatus:
 
 
 @dataclass(frozen=True)
-class BgpPeerView:
-    peer_asn: int
+class _PeerViewBase:
     ifname: str
     peer_public_key: str | None
     endpoint: str | None
@@ -61,21 +60,14 @@ class BgpPeerView:
 
 
 @dataclass(frozen=True)
-class IbgpPeerView:
+class BgpPeerView(_PeerViewBase):
+    peer_asn: int
+
+
+@dataclass(frozen=True)
+class IbgpPeerView(_PeerViewBase):
     name: str
-    ifname: str
     babel_rxcost: int
-    peer_public_key: str | None
-    endpoint: str | None
-    peer_lla: str | None
-    local_lla: str
-    listen_port: int
-    allowed_ips: list[str]
-    net_backend: str
-    wg_public_key: str
-    files: list[FileStatus]
-    live_wg: CommandOutput | None
-    live_bird: CommandOutput | None
 
 
 @dataclass(frozen=True)

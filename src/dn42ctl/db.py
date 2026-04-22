@@ -20,9 +20,8 @@ def _now_iso() -> str:
 
 
 @dataclass(frozen=True)
-class BgpPeerRecord:
+class _PeerRecordBase:
     node_id: str
-    peer_asn: int
     ifname: str
     wg_private_key: str
     wg_public_key: str
@@ -36,19 +35,13 @@ class BgpPeerRecord:
 
 
 @dataclass(frozen=True)
-class IbgpPeerRecord:
-    node_id: str
+class BgpPeerRecord(_PeerRecordBase):
+    peer_asn: int
+
+
+@dataclass(frozen=True)
+class IbgpPeerRecord(_PeerRecordBase):
     name: str
-    ifname: str
-    wg_private_key: str
-    wg_public_key: str
-    peer_public_key: str | None
-    endpoint: str | None
-    local_lla: str
-    peer_lla: str | None
-    listen_port: int
-    allowed_ips: list[str]
-    net_backend: str
     babel_rxcost: int
 
 
@@ -241,35 +234,45 @@ class Database:
         except sqlite3.Error as exc:
             raise DatabaseError("Failed to query iBGP peer") from exc
 
-    def delete_bgp_peer(self, node_id: str, peer_asn: int) -> sqlite3.Row | None:
+    def _delete_peer(
+        self,
+        table: str,
+        where_clause: str,
+        get_fn: callable,
+        where_params: tuple,
+        error_label: str,
+    ) -> sqlite3.Row | None:
         try:
-            row = self.get_bgp_peer(node_id, peer_asn)
+            row = get_fn(*where_params)
             if row is None:
                 return None
             self._conn.execute(
-                "DELETE FROM bgp_peers WHERE node_id=? AND peer_asn=?",
-                (node_id, peer_asn),
+                f"DELETE FROM {table} WHERE {where_clause}",  # noqa: S608
+                where_params,
             )
             self._conn.commit()
             return row
         except sqlite3.Error as exc:
             self._conn.rollback()
-            raise DatabaseError("Failed to delete BGP peer") from exc
+            raise DatabaseError(f"Failed to delete {error_label}") from exc
+
+    def delete_bgp_peer(self, node_id: str, peer_asn: int) -> sqlite3.Row | None:
+        return self._delete_peer(
+            "bgp_peers",
+            "node_id=? AND peer_asn=?",
+            self.get_bgp_peer,
+            (node_id, peer_asn),
+            "BGP peer",
+        )
 
     def delete_ibgp_peer(self, node_id: str, name: str) -> sqlite3.Row | None:
-        try:
-            row = self.get_ibgp_peer(node_id, name)
-            if row is None:
-                return None
-            self._conn.execute(
-                "DELETE FROM ibgp_peers WHERE node_id=? AND name=?",
-                (node_id, name),
-            )
-            self._conn.commit()
-            return row
-        except sqlite3.Error as exc:
-            self._conn.rollback()
-            raise DatabaseError("Failed to delete iBGP peer") from exc
+        return self._delete_peer(
+            "ibgp_peers",
+            "node_id=? AND name=?",
+            self.get_ibgp_peer,
+            (node_id, name),
+            "iBGP peer",
+        )
 
     def insert_ibgp_peer(self, record: IbgpPeerRecord) -> None:
         now = _now_iso()
