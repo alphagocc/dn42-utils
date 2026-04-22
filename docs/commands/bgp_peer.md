@@ -6,8 +6,10 @@
 
 ### 输入
 
-- 必填：`--asn`、`--pubkey`、`--endpoint`、`--peer-lla`、`--net`（`networkd` 或 `nm`）。
-- 可选：`--listen-port`
+- 必填：`--asn`、`--pubkey`、`--peer-lla`、`--net`（`networkd` 或 `nm`）。
+- 可选：
+  - `--endpoint`：对端 Endpoint（IP:Port）。可为空，适用于对端在防火墙后的场景。
+  - `--listen-port`
   - `0` 表示不设置（让系统自行选择端口，适用于仅出站/防火墙后场景）
   - 留空则按规则推导
 - 缺失时会提示用户输入。

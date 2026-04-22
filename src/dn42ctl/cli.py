@@ -574,7 +574,7 @@ def cmd_bgp_peer(
         None, "--pubkey", help="Peer WireGuard 公钥"
     ),
     endpoint: str | None = typer.Option(
-        None, "--endpoint", help="Peer Endpoint (IP:Port)"
+        None, "--endpoint", help="Peer Endpoint (IP:Port，可留空)"
     ),
     peer_lla: str | None = typer.Option(None, "--peer-lla", help="Peer LLA (IPv6)"),
     net_backend: str | None = typer.Option(
@@ -604,7 +604,9 @@ def cmd_bgp_peer(
         peer_public_key,
         endpoint,
         peer_lla,
-    ) = _prepare_peer_info(peer_public_key, endpoint, peer_lla)
+    ) = _prepare_peer_info(
+        peer_public_key, endpoint, peer_lla, allow_empty_endpoint=True
+    )
 
     assert peer_asn is not None
     assert net_backend is not None
