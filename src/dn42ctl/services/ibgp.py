@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from dn42ctl.config import AppConfig
+from dn42ctl.constants import MAX_PORT
 from dn42ctl.db import DatabaseError, IbgpPeerRecord
 from dn42ctl.render import render_babel_conf, render_bird_ibgp_peer_conf
 from dn42ctl.wg import WireGuardError, generate_random_lla_cidr, generate_wg_keypair
@@ -60,8 +61,8 @@ def create_ibgp_peer(
         used_ports.discard(0)
         listen_port = pick_unused_port(used_ports)
     else:
-        if listen_port < 0 or listen_port > 65535:
-            raise Dn42CtlError(f"ListenPort 超出范围 (0/1-65535): {listen_port}")
+        if listen_port < 0 or listen_port > MAX_PORT:
+            raise Dn42CtlError(f"ListenPort 超出范围 (0/1-{MAX_PORT}): {listen_port}")
         if listen_port > 0:
             try:
                 used_ports = db.get_used_listen_ports(node_id)
@@ -71,8 +72,8 @@ def create_ibgp_peer(
             if listen_port in used_ports:
                 raise Dn42CtlError(f"ListenPort 已被占用: {listen_port}")
 
-    if babel_rxcost < 0 or babel_rxcost > 65535:
-        raise Dn42CtlError(f"rxcost 超出范围 (0-65535): {babel_rxcost}")
+    if babel_rxcost < 0 or babel_rxcost > MAX_PORT:
+        raise Dn42CtlError(f"rxcost 超出范围 (0-{MAX_PORT}): {babel_rxcost}")
 
     if wg_private_key is None and wg_public_key is None:
         try:
@@ -222,8 +223,8 @@ def modify_ibgp_peer_rxcost(
     name: str,
     babel_rxcost: int,
 ) -> PeerResult:
-    if babel_rxcost < 0 or babel_rxcost > 65535:
-        raise Dn42CtlError(f"rxcost 超出范围 (0-65535): {babel_rxcost}")
+    if babel_rxcost < 0 or babel_rxcost > MAX_PORT:
+        raise Dn42CtlError(f"rxcost 超出范围 (0-{MAX_PORT}): {babel_rxcost}")
 
     db = open_db(db_path)
     node_id = config.node_id

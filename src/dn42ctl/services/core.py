@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-import os
 import random
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from dn42ctl.config import AppConfig
+from dn42ctl.constants import FILE_MODE_PRIVATE, WG_PORT_RANGE
 from dn42ctl.db import Database, DatabaseError
+from dn42ctl.fs import chmod_best_effort
 from dn42ctl.render import (
     nm_uuid_for,
     render_networkd_netdev,
@@ -160,13 +161,6 @@ class PeerResult:
     generated_files: list[Path]
 
 
-def _chmod_if_possible(path: Path, mode: int) -> None:
-    try:
-        os.chmod(path, mode)
-    except OSError:
-        pass
-
-
 def write_text(path: Path, content: str, *, mode: int | None = None) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -176,7 +170,7 @@ def write_text(path: Path, content: str, *, mode: int | None = None) -> None:
     except OSError as exc:
         raise Dn42CtlError(f"写入失败: {path} ({exc})") from exc
     if mode is not None:
-        _chmod_if_possible(path, mode)
+        chmod_best_effort(path, mode)
 
 
 def ensure_dir(path: Path) -> None:
@@ -205,10 +199,10 @@ def open_db(db_path: Path) -> Database:
 
 def pick_unused_port(used: set[int]) -> int:
     # Keep away from the well-known/default WG port; prefer high ports.
-    candidate = random.randint(20000, 65535)
+    candidate = random.randint(*WG_PORT_RANGE)
     attempts = 0
     while candidate in used:
-        candidate = random.randint(20000, 65535)
+        candidate = random.randint(*WG_PORT_RANGE)
         attempts += 1
         if attempts > 2000:
             raise Dn42CtlError("无法自动选择未占用端口，请手动指定")
@@ -252,7 +246,7 @@ def write_net_backend_files(
                 endpoint=endpoint,
                 allowed_ips=allowed_ips,
             ),
-            mode=0o600,
+            mode=FILE_MODE_PRIVATE,
         )
         write_text(
             network_path,
@@ -278,7 +272,7 @@ def write_net_backend_files(
                 allowed_ips=allowed_ips,
                 local_ipv6_cidr=local_lla,
             ),
-            mode=0o600,
+            mode=FILE_MODE_PRIVATE,
         )
         generated.append(nm_path)
 

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from dn42ctl.constants import FILE_MODE_PRIVATE
+from dn42ctl.fs import chmod_best_effort
 from dn42ctl.migrations import MIGRATIONS
 
 
@@ -69,10 +70,7 @@ class Database:
         db.migrate()
 
         # DB may store WireGuard private keys; try to restrict permissions.
-        try:
-            os.chmod(db_path, 0o600)
-        except OSError:
-            pass
+        chmod_best_effort(db_path, FILE_MODE_PRIVATE)
         return db
 
     def close(self) -> None:

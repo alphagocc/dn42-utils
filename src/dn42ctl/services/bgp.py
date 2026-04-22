@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from dn42ctl.config import AppConfig
+from dn42ctl.constants import MAX_PORT
 from dn42ctl.db import BgpPeerRecord, DatabaseError
 from dn42ctl.render import render_bird_bgp_peer_conf
 from dn42ctl.wg import WireGuardError, generate_random_lla_cidr, generate_wg_keypair
@@ -58,11 +59,11 @@ def create_bgp_peer(
     ifname = f"dn42_{as_last4}"
     if listen_port is None:
         listen_port = int(as_last5)
-        if listen_port > 65535:
+        if listen_port > MAX_PORT:
             raise Dn42CtlError(f"由 ASN 推导的 ListenPort 超出范围: {listen_port}")
     else:
-        if listen_port < 0 or listen_port > 65535:
-            raise Dn42CtlError(f"ListenPort 超出范围 (0/1-65535): {listen_port}")
+        if listen_port < 0 or listen_port > MAX_PORT:
+            raise Dn42CtlError(f"ListenPort 超出范围 (0/1-{MAX_PORT}): {listen_port}")
 
     if wg_private_key is None and wg_public_key is None:
         try:
@@ -166,8 +167,8 @@ def modify_bgp_peer(
     public_key = str(row["wg_public_key"])
     current_listen_port = int(row["listen_port"])
     new_listen_port = current_listen_port if listen_port is None else listen_port
-    if new_listen_port < 0 or new_listen_port > 65535:
-        raise Dn42CtlError(f"ListenPort 超出范围 (0/1-65535): {new_listen_port}")
+    if new_listen_port < 0 or new_listen_port > MAX_PORT:
+        raise Dn42CtlError(f"ListenPort 超出范围 (0/1-{MAX_PORT}): {new_listen_port}")
     if (
         listen_port is not None
         and new_listen_port > 0

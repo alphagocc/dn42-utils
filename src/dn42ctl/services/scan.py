@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import cast
 
 from dn42ctl.config import AppConfig
+from dn42ctl.constants import BABEL_DEFAULT_RXCOST, IFNAME_PREFIX_BGP, IFNAME_PREFIX_IBGP
 from dn42ctl.db import BgpPeerRecord, DatabaseError, IbgpPeerRecord
 
 from dn42ctl.services.core import (
@@ -131,7 +132,7 @@ def discover_bird_paths(
 
 
 def _is_managed_ifname(ifname: str) -> bool:
-    return ifname.startswith("dn42_") or ifname.startswith("wg_")
+    return ifname.startswith(IFNAME_PREFIX_BGP) or ifname.startswith(IFNAME_PREFIX_IBGP)
 
 
 def _read_text(path: Path) -> str:
@@ -417,8 +418,8 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
         raise Dn42CtlError(str(exc)) from exc
 
     for ifname in sorted(candidates):
-        kind = "bgp" if ifname.startswith("dn42_") else "ibgp"
-        peer_name = ifname[3:] if kind == "ibgp" else None
+        kind = "bgp" if ifname.startswith(IFNAME_PREFIX_BGP) else "ibgp"
+        peer_name = ifname[len(IFNAME_PREFIX_IBGP):] if kind == "ibgp" else None
 
         # Locate config sources.
         netdev_path = _find_first([d / f"{ifname}.netdev" for d in networkd_dirs])
@@ -622,7 +623,7 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
                         listen_port=listen_port,
                         allowed_ips=allowed_ips_list,
                         net_backend=backend,
-                        babel_rxcost=babel_rxcost_by_ifname.get(ifname, 120),
+                        babel_rxcost=babel_rxcost_by_ifname.get(ifname, BABEL_DEFAULT_RXCOST),
                     )
                 )
                 inserted.append(
@@ -660,7 +661,7 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
             else f" ... (+{len(missing_rxcost_ifnames) - 8})"
         )
         warnings.append(
-            "babel.conf 未提供部分接口的 rxcost：" f"{preview}{extra}；已使用默认值 120"
+            "babel.conf 未提供部分接口的 rxcost：" f"{preview}{extra}；已使用默认值 {BABEL_DEFAULT_RXCOST}"
         )
 
     return ScanResult(

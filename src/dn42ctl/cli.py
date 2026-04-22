@@ -10,6 +10,7 @@ from pathlib import Path
 
 import typer
 
+from dn42ctl.constants import MAX_PORT
 from dn42ctl.context import AppContext
 from dn42ctl.db import DatabaseError
 from dn42ctl.config import ConfigError, save_config
@@ -79,8 +80,8 @@ def _validate_endpoint(value: str) -> str:
             f"格式错误: 需要 host:port 或 [IPv6]:port 形式: {value!r}"
         )
     port = int(m.group(2))
-    if not (1 <= port <= 65535):
-        raise typer.BadParameter(f"Port 超出范围 (1-65535): {port}")
+    if not (1 <= port <= MAX_PORT):
+        raise typer.BadParameter(f"Port 超出范围 (1-{MAX_PORT}): {port}")
     return value
 
 
@@ -99,8 +100,8 @@ def _validate_peer_lla(value: str) -> str:
 
 
 def _validate_rxcost(value: int) -> int:
-    if value < 0 or value > 65535:
-        raise typer.BadParameter(f"rxcost 超出范围 (0-65535): {value}")
+    if value < 0 or value > MAX_PORT:
+        raise typer.BadParameter(f"rxcost 超出范围 (0-{MAX_PORT}): {value}")
     return value
 
 

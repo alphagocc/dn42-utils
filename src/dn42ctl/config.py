@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from dn42ctl.constants import FILE_MODE_PRIVATE
+from dn42ctl.fs import chmod_best_effort
 
 try:
     import tomllib  # Python 3.11+
@@ -102,7 +104,4 @@ def save_config(path: Path, config: AppConfig) -> None:
     with path.open("wb") as f:
         tomli_w.dump(data, f)
 
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+    chmod_best_effort(path, FILE_MODE_PRIVATE)
