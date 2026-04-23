@@ -23,6 +23,7 @@ from dn42ctl.wg import WireGuardError, generate_wg_keypair
 
 
 DEFAULT_ALLOWED_IPS = ["fe80::/64", "fd00::/8"]
+IBGP_ALLOWED_IPS = ["::/0"]
 
 
 class Dn42CtlError(RuntimeError):
