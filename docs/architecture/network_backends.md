@@ -21,6 +21,7 @@
 - `.netdev`：
   - 使用 `Kind=wireguard`
   - 必须设置：`RouteTable=off`
+  - 文件权限：`0640 root:systemd-network`（包含 WireGuard 私钥，需要让 systemd-networkd 可读）
 - `.network`：
   - 为接口配置 LLA 地址
   - 配置对端的 `Peer=<peer_lla>` 等必要信息

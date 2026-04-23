@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import cast
 
 from dn42ctl.config import AppConfig
-from dn42ctl.constants import FILE_MODE_PRIVATE, WG_PORT_RANGE
+from dn42ctl.constants import FILE_MODE_NETDEV, FILE_MODE_PRIVATE, WG_PORT_RANGE
 from dn42ctl.db import Database, DatabaseError
-from dn42ctl.fs import chmod_best_effort
+from dn42ctl.fs import chmod_best_effort, chown_best_effort
 from dn42ctl.render import (
     nm_uuid_for,
     render_babel_conf,
@@ -160,7 +160,7 @@ class PeerResult:
     generated_files: list[Path]
 
 
-def write_text(path: Path, content: str, *, mode: int | None = None) -> None:
+def write_text(path: Path, content: str, *, mode: int | None = None, owner: tuple[int, str] | None = None) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8", newline="\n")
@@ -170,6 +170,8 @@ def write_text(path: Path, content: str, *, mode: int | None = None) -> None:
         raise Dn42CtlError(f"写入失败: {path} ({exc})") from exc
     if mode is not None:
         chmod_best_effort(path, mode)
+    if owner is not None:
+        chown_best_effort(path, owner[0], owner[1])
 
 
 def ensure_dir(path: Path) -> None:
@@ -245,7 +247,8 @@ def write_net_backend_files(
                 endpoint=endpoint,
                 allowed_ips=allowed_ips,
             ),
-            mode=FILE_MODE_PRIVATE,
+            mode=FILE_MODE_NETDEV,
+            owner=(0, "systemd-network"),
         )
         write_text(
             network_path,
