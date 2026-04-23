@@ -319,22 +319,43 @@ class Database:
             self._conn.rollback()
             raise DatabaseError("Failed to insert iBGP peer") from exc
 
-    def update_ibgp_peer_rxcost(
+    def update_ibgp_peer(
         self,
         *,
         node_id: str,
         name: str,
+        peer_public_key: str | None,
+        endpoint: str | None,
+        peer_lla: str | None,
+        listen_port: int,
+        allowed_ips: list[str],
+        net_backend: str,
         babel_rxcost: int,
+        peer_ip: str | None,
     ) -> None:
         now = _now_iso()
         try:
             cur = self._conn.execute(
                 """
                 UPDATE ibgp_peers
-                SET babel_rxcost=?, updated_at=?
+                SET peer_public_key=?, endpoint=?, peer_lla=?,
+                    listen_port=?, allowed_ips_json=?, net_backend=?,
+                    babel_rxcost=?, peer_ip=?, updated_at=?
                 WHERE node_id=? AND name=?
                 """.strip(),
-                (babel_rxcost, now, node_id, name),
+                (
+                    peer_public_key,
+                    endpoint,
+                    peer_lla,
+                    listen_port,
+                    json.dumps(allowed_ips, ensure_ascii=False),
+                    net_backend,
+                    babel_rxcost,
+                    peer_ip,
+                    now,
+                    node_id,
+                    name,
+                ),
             )
             if cur.rowcount == 0:
                 exists = self._conn.execute(
@@ -346,7 +367,7 @@ class Database:
             self._conn.commit()
         except sqlite3.Error as exc:
             self._conn.rollback()
-            raise DatabaseError("Failed to update iBGP peer rxcost") from exc
+            raise DatabaseError("Failed to update iBGP peer") from exc
 
     def get_used_listen_ports(self, node_id: str) -> set[int]:
         ports: set[int] = set()
