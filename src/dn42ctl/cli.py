@@ -974,7 +974,7 @@ def cmd_show_default(
 ) -> None:
     if ctx.invoked_subcommand is not None:
         return
-    ctx.invoke(cmd_show_all, as_json=as_json)
+    ctx.invoke(cmd_show_all, ctx=ctx, as_json=as_json)
 
 
 def _print_json(data: object) -> None:
