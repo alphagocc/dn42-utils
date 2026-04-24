@@ -3,11 +3,12 @@ from __future__ import annotations
 import configparser
 import re
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
 from dn42ctl.config import AppConfig
-from dn42ctl.constants import BABEL_DEFAULT_RXCOST, IFNAME_PREFIX_BGP, IFNAME_PREFIX_IBGP
+from dn42ctl.constants import BABEL_DEFAULT_RXCOST, BABEL_DEFAULT_TYPE, IFNAME_PREFIX_BGP, IFNAME_PREFIX_IBGP
 from dn42ctl.db import BgpPeerRecord, DatabaseError, IbgpPeerRecord
 from dn42ctl.wg import WireGuardError, pubkey_from_private
 
@@ -297,23 +298,35 @@ _BABEL_INTERFACE_BLOCK_RE = re.compile(
     flags=re.MULTILINE,
 )
 _BABEL_RXCOST_RE = re.compile(r"\brxcost\s+(\d+)\s*;", flags=re.MULTILINE)
+_BABEL_TYPE_RE = re.compile(r"\btype\s+(wired|wireless|tunnel)\s*;", flags=re.MULTILINE)
 
 
-def _parse_babel_conf_rxcost(text: str) -> dict[str, int]:
-    """Best-effort parse of per-interface rxcost from babel.conf."""
-    out: dict[str, int] = {}
+@dataclass(frozen=True)
+class _BabelInterfaceParams:
+    rxcost: int | None
+    babel_type: str | None
+
+
+def _parse_babel_conf_interface_params(text: str) -> dict[str, _BabelInterfaceParams]:
+    """Best-effort parse of per-interface rxcost and type from babel.conf."""
+    out: dict[str, _BabelInterfaceParams] = {}
     for m in _BABEL_INTERFACE_BLOCK_RE.finditer(text):
         ifname = m.group(1).strip()
         body = m.group(2)
         if not ifname:
             continue
+        rxcost: int | None = None
+        babel_type: str | None = None
         m2 = _BABEL_RXCOST_RE.search(body)
-        if not m2:
-            continue
-        try:
-            out[ifname] = int(m2.group(1))
-        except ValueError:
-            continue
+        if m2:
+            try:
+                rxcost = int(m2.group(1))
+            except ValueError:
+                pass
+        m3 = _BABEL_TYPE_RE.search(body)
+        if m3:
+            babel_type = m3.group(1)
+        out[ifname] = _BabelInterfaceParams(rxcost=rxcost, babel_type=babel_type)
     return out
 
 
@@ -356,7 +369,7 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
     nm_dirs = _dedup(nm_dirs)
 
     # Optional: parse babel.conf to import per-interface rxcost for iBGP peers.
-    babel_rxcost_by_ifname: dict[str, int] = {}
+    babel_params_by_ifname: dict[str, _BabelInterfaceParams] = {}
     missing_rxcost_ifnames: list[str] = []
     babel_path = Path(config.bird_babel_conf_path)
     try:
@@ -366,10 +379,10 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
             except Dn42CtlError as exc:
                 warnings.append(f"读取 babel.conf 失败: {exc}")
             else:
-                babel_rxcost_by_ifname = _parse_babel_conf_rxcost(babel_text)
+                babel_params_by_ifname = _parse_babel_conf_interface_params(babel_text)
         else:
             warnings.append(
-                f"未找到 babel.conf: {babel_path}（无法探测 rxcost，将使用默认值）"
+                f"未找到 babel.conf: {babel_path}（无法探测 rxcost/type，将使用默认值）"
             )
     except OSError as exc:
         warnings.append(f"无法访问 babel.conf: {babel_path} ({exc})")
@@ -591,6 +604,9 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
                 skipped.append(f"{ifname}: wg pubkey 失败: {exc}")
                 continue
             try:
+                params = babel_params_by_ifname.get(ifname)
+                scan_rxcost = params.rxcost if (params and params.rxcost is not None) else BABEL_DEFAULT_RXCOST
+                scan_babel_type = params.babel_type if (params and params.babel_type) else BABEL_DEFAULT_TYPE
                 db.insert_ibgp_peer(
                     IbgpPeerRecord(
                         node_id=config.node_id,
@@ -605,7 +621,8 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
                         listen_port=listen_port,
                         allowed_ips=allowed_ips_list,
                         net_backend=backend,
-                        babel_rxcost=babel_rxcost_by_ifname.get(ifname, BABEL_DEFAULT_RXCOST),
+                        babel_rxcost=scan_rxcost,
+                        babel_type=scan_babel_type,
                     )
                 )
                 inserted.append(
@@ -627,7 +644,7 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
                 )
                 warnings.append(f"{ifname}: 写入 DB 失败: {exc}")
 
-            if ifname not in babel_rxcost_by_ifname:
+            if ifname not in babel_params_by_ifname:
                 missing_rxcost_ifnames.append(ifname)
 
     if conflicts:

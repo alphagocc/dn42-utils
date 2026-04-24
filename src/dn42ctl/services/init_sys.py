@@ -9,6 +9,7 @@ from pathlib import Path
 
 from dn42ctl.config import AppConfig, save_config
 from dn42ctl.render import render_bird_main_conf, render_systemd_roa_service, render_systemd_roa_timer
+from dn42ctl.services.dummy import DummyResult, ensure_dummy_interface
 
 from dn42ctl.services.core import (
     Dn42CtlError,
@@ -64,7 +65,11 @@ def init_node(
 
     db = open_db_and_ensure_node(db_path, node_id)
 
-    return InitConfigResult(config=config, config_path=config_path, db_path=db_path)
+    dummy: DummyResult | None = None
+    if sys.platform.startswith("linux"):
+        dummy = ensure_dummy_interface(own_ipv6)
+
+    return InitConfigResult(config=config, config_path=config_path, db_path=db_path, dummy=dummy)
 
 
 def genconf(
@@ -81,6 +86,10 @@ def genconf(
     bird_roa_v6_conf_path = Path(config.bird_roa_v6_conf_path)
 
     db = open_db_and_ensure_node(db_path, node_id)
+
+    dummy: DummyResult | None = None
+    if sys.platform.startswith("linux"):
+        dummy = ensure_dummy_interface(config.own_ipv6)
 
     bird_conf_text = render_bird_main_conf(
         own_asn=config.own_asn,
@@ -178,5 +187,6 @@ def genconf(
         bird_babel_conf_path=bird_babel_conf_path,
         bird_roa_v6_conf_path=bird_roa_v6_conf_path,
         systemd_roa_timer_enabled=systemd_enabled,
+        dummy=dummy,
         warnings=warnings,
     )

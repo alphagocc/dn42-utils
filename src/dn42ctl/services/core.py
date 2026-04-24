@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import cast
 
 from dn42ctl.config import AppConfig
-from dn42ctl.constants import FILE_MODE_NETDEV, FILE_MODE_PRIVATE, WG_PORT_RANGE
+from dn42ctl.constants import BABEL_VALID_TYPES, FILE_MODE_NETDEV, FILE_MODE_PRIVATE, WG_PORT_RANGE
 from dn42ctl.db import Database, DatabaseError
 from dn42ctl.fs import chmod_best_effort, chown_best_effort
 from dn42ctl.render import (
@@ -69,6 +69,7 @@ class BgpPeerView(_PeerViewBase):
 class IbgpPeerView(_PeerViewBase):
     name: str
     babel_rxcost: int
+    babel_type: str
     peer_ip: str | None
     has_wg: bool
 
@@ -134,11 +135,15 @@ def permission_hint() -> str:
     )
 
 
+from dn42ctl.services.dummy import DummyResult
+
+
 @dataclass(frozen=True)
 class InitConfigResult:
     config: AppConfig
     config_path: Path
     db_path: Path
+    dummy: DummyResult | None
 
 
 @dataclass(frozen=True)
@@ -149,6 +154,7 @@ class GenConfResult:
     bird_babel_conf_path: Path
     bird_roa_v6_conf_path: Path
     systemd_roa_timer_enabled: bool
+    dummy: DummyResult | None
     warnings: list[str]
 
 
@@ -354,7 +360,7 @@ def delete_files_and_collect_status(
 def regenerate_babel_conf(*, config: AppConfig, db: Database, node_id: str) -> Path:
     try:
         interfaces = [
-            (str(r["ifname"]), int(r["babel_rxcost"]))
+            (str(r["ifname"]), int(r["babel_rxcost"]), str(r["babel_type"]) if r["babel_type"] else "tunnel")
             for r in db.list_ibgp_peers(node_id)
         ]
     except DatabaseError as exc:

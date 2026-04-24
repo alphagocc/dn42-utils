@@ -10,6 +10,7 @@
 - WG 相关（`--no-wg` 未设置时必填）：`--pubkey`、`--peer-lla`、`--net`、`--rxcost`。
 - 可选：
   - `--endpoint`：对端 Endpoint（IP:Port）。可为空，适用于对端在防火墙后的场景。
+  - `--type`：Babel interface type，取值 `wired`/`wireless`/`tunnel`，默认 `tunnel`。高丢包链路建议使用 `wireless`。
   - `--listen-port`：
     - `0` 表示不设置
     - 留空则自动选择未占用端口（避免与当前节点已有端口冲突）
@@ -24,6 +25,7 @@
 - `ifname`：`wg_<sanitize(name)>`（长度不得超过 15）——仅在有 WG 时有意义
 - `ListenPort`：默认从高端口随机选择且避免冲突；也允许通过 `--listen-port` 覆盖。无 WG 时为 0。
 - `rxcost`：写入 DB（`ibgp_peers.babel_rxcost`），并用于生成 `babel.conf` 的对应 `interface` 段。
+- `type`：写入 DB（`ibgp_peers.babel_type`），用于生成 `babel.conf` 的 `type` 字段。默认 `tunnel`。
 
 ### 输出
 
@@ -35,12 +37,12 @@
 
 ## `dn42ctl ibgp peer modify`
 
-用途：修改已存在 iBGP peer 的 Babel `rxcost`（不删除 peer），并重生成 `babel.conf`。
+用途：修改已存在 iBGP peer 的 WG 相关参数（pubkey/endpoint/peer_lla/peer_ip/net_backend/rxcost/listen_port/type），并重生成配置文件。
 
 ### 输入
 
 - 必填：`<name>`
-- 必填：`--rxcost`（未提供时应交互提示）
+- 可选：`--rxcost`、`--type`（未提供时应交互提示）
 
 ### 行为
 

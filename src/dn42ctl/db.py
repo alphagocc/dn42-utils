@@ -45,6 +45,7 @@ class IbgpPeerRecord(_PeerRecordBase):
     babel_rxcost: int
     peer_ip: str | None = None
     has_wg: bool = True
+    babel_type: str = "tunnel"
 
 
 class Database:
@@ -288,8 +289,9 @@ class Database:
                     local_lla, peer_lla, listen_port,
                     allowed_ips_json, net_backend,
                     babel_rxcost, peer_ip, has_wg,
+                    babel_type,
                     created_at, updated_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """.strip(),
                 (
                     record.node_id,
@@ -307,6 +309,7 @@ class Database:
                     record.babel_rxcost,
                     record.peer_ip,
                     1 if record.has_wg else 0,
+                    record.babel_type,
                     now,
                     now,
                 ),
@@ -332,6 +335,7 @@ class Database:
         net_backend: str,
         babel_rxcost: int,
         peer_ip: str | None,
+        babel_type: str,
     ) -> None:
         now = _now_iso()
         try:
@@ -340,7 +344,7 @@ class Database:
                 UPDATE ibgp_peers
                 SET peer_public_key=?, endpoint=?, peer_lla=?,
                     listen_port=?, allowed_ips_json=?, net_backend=?,
-                    babel_rxcost=?, peer_ip=?, updated_at=?
+                    babel_rxcost=?, peer_ip=?, babel_type=?, updated_at=?
                 WHERE node_id=? AND name=?
                 """.strip(),
                 (
@@ -352,6 +356,7 @@ class Database:
                     net_backend,
                     babel_rxcost,
                     peer_ip,
+                    babel_type,
                     now,
                     node_id,
                     name,

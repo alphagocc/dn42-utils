@@ -64,10 +64,10 @@ def render_bird_ibgp_peer_conf(*, name: str, ifname: str, peer_ip: str) -> str:
     )
 
 
-def render_babel_conf(*, interfaces: list[tuple[str, int]]) -> str:
+def render_babel_conf(*, interfaces: list[tuple[str, int, str]]) -> str:
     """Render babel.conf.
 
-    `interfaces` is a deterministic list of (ifname, rxcost) pairs.
+    `interfaces` is a deterministic list of (ifname, rxcost, babel_type) tuples.
     """
     return _render_template("babel.conf.j2", interfaces=interfaces)
 

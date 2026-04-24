@@ -185,6 +185,7 @@ def show_ibgp_peers(
                 name=name,
                 ifname=ifname,
                 babel_rxcost=int(row["babel_rxcost"]),
+                babel_type=str(row["babel_type"] or "tunnel"),
                 peer_public_key=row["peer_public_key"],
                 endpoint=row["endpoint"],
                 peer_lla=row["peer_lla"],

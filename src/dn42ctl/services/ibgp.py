@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from dn42ctl.config import AppConfig
-from dn42ctl.constants import MAX_PORT
+from dn42ctl.constants import BABEL_VALID_TYPES, MAX_PORT
 from dn42ctl.db import DatabaseError, IbgpPeerRecord
 from dn42ctl.render import render_bird_ibgp_peer_conf
 from dn42ctl.wg import generate_random_lla_cidr
@@ -40,6 +40,7 @@ def create_ibgp_peer(
     peer_lla: str | None = None,
     net_backend: str | None = None,
     babel_rxcost: int = 0,
+    babel_type: str = "tunnel",
     listen_port: int | None = None,
     wg_private_key: str | None = None,
     wg_public_key: str | None = None,
@@ -78,6 +79,9 @@ def create_ibgp_peer(
         if babel_rxcost < 0 or babel_rxcost > MAX_PORT:
             raise Dn42CtlError(f"rxcost 超出范围 (0-{MAX_PORT}): {babel_rxcost}")
 
+        if babel_type not in BABEL_VALID_TYPES:
+            raise Dn42CtlError(f"babel type 必须是 {', '.join(BABEL_VALID_TYPES)} 之一")
+
         private_key, public_key = resolve_wg_keypair(wg_private_key, wg_public_key)
         local_lla_cidr = local_lla or generate_random_lla_cidr()
         allowed_ips = IBGP_ALLOWED_IPS
@@ -107,6 +111,7 @@ def create_ibgp_peer(
                 babel_rxcost=babel_rxcost,
                 peer_ip=peer_ip,
                 has_wg=has_wg,
+                babel_type=babel_type,
             )
         )
     except DatabaseError as exc:
@@ -220,6 +225,7 @@ def modify_ibgp_peer(
     peer_lla: str,
     net_backend: str,
     babel_rxcost: int,
+    babel_type: str,
     peer_ip: str,
     listen_port: int | None = None,
 ) -> PeerResult:
@@ -227,6 +233,9 @@ def modify_ibgp_peer(
 
     if babel_rxcost < 0 or babel_rxcost > MAX_PORT:
         raise Dn42CtlError(f"rxcost 超出范围 (0-{MAX_PORT}): {babel_rxcost}")
+
+    if babel_type not in BABEL_VALID_TYPES:
+        raise Dn42CtlError(f"babel type 必须是 {', '.join(BABEL_VALID_TYPES)} 之一")
 
     node_id = config.node_id
     db = open_db_and_ensure_node(db_path, node_id)
@@ -277,6 +286,7 @@ def modify_ibgp_peer(
             net_backend=backend,
             babel_rxcost=babel_rxcost,
             peer_ip=peer_ip,
+            babel_type=babel_type,
         )
     except DatabaseError as exc:
         raise Dn42CtlError(str(exc)) from exc

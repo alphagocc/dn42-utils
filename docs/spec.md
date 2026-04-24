@@ -64,6 +64,25 @@
 - iBGP peer 的 `endpoint` 为可选：对端可能在防火墙后，无需填写。
 - iBGP WireGuard 隧道的 `AllowedIPs` 固定为 `::/0`：iBGP 对端均为可信任的自有机器，需要放行全部流量以支持 babel 路由协议等互联需求。BGP（eBGP）peer 仍使用受限的 `AllowedIPs`（`fe80::/64, fd00::/8`）。
 
+## dn42-dummy 接口
+
+- `init` 和 `genconf` 均会尝试创建 `dn42-dummy` 接口并绑定 `OWNIPv6/128` 地址（幂等操作）。
+- 若接口已存在且地址已绑定，则跳过。
+- 网络管理方式自动检测：
+  - 若 `nmcli` 命令存在 **且** NetworkManager 服务正在运行（`nmcli general status` 返回 0），使用 NM 方式创建。
+  - 否则使用 `iproute2`（`ip link add` / `ip addr add`）。
+- NM 命令：`nmcli connection add type dummy ifname dn42-dummy ipv6.method manual ipv6.addresses <OWNIPv6>/128`
+- iproute2 命令：`ip link add dn42-dummy type dummy` + `ip addr add <OWNIPv6>/128 dev dn42-dummy` + `ip link set dn42-dummy up`
+- 创建失败不应阻断 init/genconf 流程，仅输出警告。
+
+## Babel interface type 设计
+
+- `babel.conf` 的 `type` 按 **iBGP peer 粒度**配置并存储在 SQLite（`ibgp_peers.babel_type`）。
+- 取值范围：`wired`、`wireless`、`tunnel`。默认值为 `tunnel`。
+- 创建 iBGP peer 时可通过 `--type` 指定（默认 `tunnel`）。
+- 修改 iBGP peer 时可通过 `--type` 修改。
+- `scan` 会从现有 `babel.conf` 中尽力解析各接口的 `type` 并导入 SQLite；解析失败回退到默认值 `tunnel`。
+
 ## 详细规范索引
 
 ### 架构

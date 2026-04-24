@@ -74,4 +74,10 @@ MIGRATIONS: list[tuple[int, str]] = [
         ALTER TABLE ibgp_peers ADD COLUMN has_wg INTEGER NOT NULL DEFAULT 1;
         """.strip(),
     ),
+    (
+        4,
+        """
+        ALTER TABLE ibgp_peers ADD COLUMN babel_type TEXT NOT NULL DEFAULT 'tunnel';
+        """.strip(),
+    ),
 ]

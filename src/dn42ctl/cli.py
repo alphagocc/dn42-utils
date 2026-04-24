@@ -10,7 +10,7 @@ from pathlib import Path
 
 import typer
 
-from dn42ctl.constants import MAX_PORT
+from dn42ctl.constants import BABEL_VALID_TYPES, MAX_PORT
 from dn42ctl.context import AppContext
 from dn42ctl.db import Database, DatabaseError
 from dn42ctl.config import AppConfig, ConfigError, save_config
@@ -118,10 +118,31 @@ def _validate_rxcost(value: int) -> int:
     return value
 
 
+def _validate_babel_type(value: str) -> str:
+    value = value.strip().lower()
+    if value not in BABEL_VALID_TYPES:
+        raise typer.BadParameter(f"type 必须是 {', '.join(BABEL_VALID_TYPES)} 之一: {value!r}")
+    return value
+
+
 def _default_router_id() -> str:
     a = secrets.randbelow(254) + 1
     b = secrets.randbelow(254) + 1
     return f"169.254.{a}.{b}"
+
+
+def _print_dummy_result(dummy: object | None) -> None:
+    if dummy is None:
+        return
+    from dn42ctl.services.dummy import DummyResult
+    if not isinstance(dummy, DummyResult):
+        return
+    if dummy.skipped:
+        typer.echo("dn42-dummy: 已存在，跳过")
+    elif dummy.created:
+        typer.echo(f"dn42-dummy: 已创建 (backend={dummy.backend})")
+    for w in dummy.warnings:
+        typer.echo(f"  警告: {w}")
 
 
 def _require_config_or_exit(appctx: AppContext) -> AppConfig:
@@ -246,6 +267,7 @@ def _print_ibgp_peers(peers: list["IbgpPeerView"]) -> None:
         typer.echo(f"  peer_ip: {p.peer_ip or ''}")
         if p.has_wg:
             typer.echo(f"  babel_rxcost: {p.babel_rxcost}")
+            typer.echo(f"  babel_type: {p.babel_type}")
             typer.echo(f"  peer_lla: {p.peer_lla or ''}")
             typer.echo(f"  endpoint: {p.endpoint or ''}")
             typer.echo(f"  peer_pubkey: {p.peer_public_key or ''}")
@@ -434,6 +456,7 @@ def cmd_init(
     typer.echo(f"node_id: {init_res.config.node_id}")
     typer.echo(f"Config: {init_res.config_path}")
     typer.echo(f"DB: {init_res.db_path}")
+    _print_dummy_result(init_res.dummy)
 
     if gen_res is not None:
         typer.echo(f"Bird: {gen_res.bird_conf_path}")
@@ -480,6 +503,7 @@ def cmd_genconf(ctx: typer.Context) -> None:
         "ROA systemd timer: "
         + ("enabled" if res.systemd_roa_timer_enabled else "skipped")
     )
+    _print_dummy_result(res.dummy)
 
     if res.warnings:
         typer.echo("\n警告:")
@@ -778,6 +802,9 @@ def cmd_ibgp_peer(
     babel_rxcost: int | None = typer.Option(
         None, "--rxcost", help="Babel rxcost (0-65535)"
     ),
+    babel_type: str | None = typer.Option(
+        None, "--type", help="Babel interface type (wired/wireless/tunnel，默认 tunnel)"
+    ),
     listen_port: int | None = typer.Option(
         None,
         "--listen-port",
@@ -826,6 +853,8 @@ def cmd_ibgp_peer(
         net_backend = typer.prompt("网络后端", default="networkd")
     if babel_rxcost is None:
         babel_rxcost = typer.prompt("Babel rxcost", type=int)
+    if babel_type is None:
+        babel_type = typer.prompt("Babel type (wired/wireless/tunnel)", default="tunnel")
 
     (
         prepared_private_key,
@@ -840,12 +869,14 @@ def cmd_ibgp_peer(
 
     assert net_backend is not None
     assert babel_rxcost is not None
+    assert babel_type is not None
 
     try:
         peer_public_key = _validate_pubkey(peer_public_key)
         endpoint = _validate_endpoint(endpoint)
         peer_lla = _validate_peer_lla(peer_lla)
         babel_rxcost = _validate_rxcost(babel_rxcost)
+        babel_type = _validate_babel_type(babel_type)
     except typer.BadParameter as exc:
         typer.echo(f"输入错误: {exc}")
         raise typer.Exit(2) from exc
@@ -862,6 +893,7 @@ def cmd_ibgp_peer(
             peer_lla=peer_lla,
             net_backend=net_backend,
             babel_rxcost=babel_rxcost,
+            babel_type=babel_type,
             listen_port=listen_port,
             wg_private_key=prepared_private_key,
             wg_public_key=prepared_public_key,
@@ -895,6 +927,9 @@ def cmd_ibgp_peer_modify(
     net_backend: str | None = typer.Option(None, "--net", help="networkd 或 nm"),
     babel_rxcost: int | None = typer.Option(
         None, "--rxcost", help="Babel rxcost (0-65535)"
+    ),
+    babel_type: str | None = typer.Option(
+        None, "--type", help="Babel interface type (wired/wireless/tunnel)"
     ),
     listen_port: int | None = typer.Option(
         None,
@@ -937,6 +972,8 @@ def cmd_ibgp_peer_modify(
         )
     if babel_rxcost is None:
         babel_rxcost = typer.prompt("Babel rxcost", type=int, default=int(row["babel_rxcost"]))
+    if babel_type is None:
+        babel_type = typer.prompt("Babel type (wired/wireless/tunnel)", default=str(row["babel_type"] or "tunnel"))
 
     assert peer_public_key is not None
     assert endpoint is not None
@@ -944,6 +981,7 @@ def cmd_ibgp_peer_modify(
     assert peer_ip is not None
     assert net_backend is not None
     assert babel_rxcost is not None
+    assert babel_type is not None
 
     try:
         peer_public_key = _validate_pubkey(peer_public_key)
@@ -953,6 +991,7 @@ def cmd_ibgp_peer_modify(
         if peer_ip:
             peer_ip = _validate_peer_ip(peer_ip)
         babel_rxcost = _validate_rxcost(babel_rxcost)
+        babel_type = _validate_babel_type(babel_type)
     except typer.BadParameter as exc:
         typer.echo(f"输入错误: {exc}")
         raise typer.Exit(2) from exc
@@ -968,6 +1007,7 @@ def cmd_ibgp_peer_modify(
             peer_ip=peer_ip,
             net_backend=net_backend,
             babel_rxcost=babel_rxcost,
+            babel_type=babel_type,
             listen_port=listen_port,
         )
     except Dn42CtlError as exc:
