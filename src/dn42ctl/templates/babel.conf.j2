@@ -12,6 +12,9 @@ protocol babel intra_babel {
 {% for name, rxcost in interfaces %}
     interface "{{ name }}" {
         rxcost {{ rxcost }};
+        rtt cost 192;
+        rtt max 394ms; # 4*96+10ms
+        rtt decay 64;
     };
 {% endfor %}
 };
