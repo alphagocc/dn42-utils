@@ -55,6 +55,8 @@ uv run python -m compileall -q src
 
 ## Documentation (link, don’t duplicate)
 
+`docs/spec.md` is an **index** — keep it short. Detailed specs belong in `docs/commands/` or `docs/architecture/`. When adding new features, create a dedicated doc file and add a one-line reference in `spec.md` instead of writing the full spec inline.
+
 - Spec / constraints: [`docs/spec.md`](docs/spec.md)
 - Architecture:
   - DB: [`docs/architecture/database.md`](docs/architecture/database.md)
