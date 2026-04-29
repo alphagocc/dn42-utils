@@ -1186,3 +1186,24 @@ def cmd_show_all(
 
 
 app.add_typer(show_app, name="show")
+
+
+@app.command("serve")
+def cmd_serve(
+    ctx: typer.Context,
+    host: str = typer.Option("127.0.0.1", "--host", help="绑定地址 (默认 127.0.0.1)"),
+    port: int = typer.Option(4242, "--port", help="监听端口 (默认 4242)"),
+    token: str = typer.Option(
+        ..., "--token", envvar="DN42CTL_API_TOKEN", help="Bearer Token (必须提供)"
+    ),
+) -> None:
+    appctx: AppContext = ctx.obj
+    config = _require_config_or_exit(appctx)
+
+    from dn42ctl.api import app as api_app, configure
+
+    configure(config=config, db_path=appctx.db_path, token=token)
+
+    import uvicorn
+
+    uvicorn.run(api_app, host=host, port=port)

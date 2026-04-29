@@ -1,7 +1,16 @@
 添加或修改以下功能
 
-1. [x] 创建 ibgp 时，由于对端机器可能在防火墙后，故无需填写对端 Endpoint。
-2. [x] 创建 ibgp 时，需要提供对端的网内 ip 而不是 lla 地址互联，因为我们有 babel。
-3. [x] 创建 ibgp 时，可以选择无需创建 wg 隧道。
-4. [x] dn42ctl show 如果不添加参数，默认是 all
-5. [x] dn42ctl del 设计有问题。同层级参数是 show ibgp bgp 感觉需要变成 ibgp peer add，ibgp peer del，bgp peer add，bgp peer del 这样
+<task>
+
+对每一种 cli 操作设计 restful api。api 需要鉴权。默认绑定 127.0.0.1/::1。api 放在 /api/ 下。默认端口 4242，端口可自定义。
+使用合适的库完成你的操作，不要重复造轮子。
+
+</task>
+
+<important>
+为了完成上述任务，你需要创建一个更详细的plan，然后使用 askQuestion 等工具对用户进行提问，确保你的plan符合用户真实意图。
+
+禁止删除 important 段落中的内容
+
+开始写代码前，你需要先修改 spec 确保设计已经文档化。
+</important>
