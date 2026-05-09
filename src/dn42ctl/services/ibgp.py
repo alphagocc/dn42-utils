@@ -3,9 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from dn42ctl.config import AppConfig
-from dn42ctl.constants import BABEL_VALID_TYPES, MAX_PORT
 from dn42ctl.db import DatabaseError, IbgpPeerRecord
 from dn42ctl.render import render_bird_ibgp_peer_conf
+from dn42ctl.validators import (
+    ValidationError,
+    validate_babel_type,
+    validate_listen_port,
+    validate_rxcost,
+)
 from dn42ctl.wg import generate_random_lla_cidr
 
 from dn42ctl.services.core import (
@@ -65,8 +70,10 @@ def create_ibgp_peer(
             used_ports.discard(0)
             listen_port = pick_unused_port(used_ports)
         else:
-            if listen_port < 0 or listen_port > MAX_PORT:
-                raise Dn42CtlError(f"ListenPort 超出范围 (0/1-{MAX_PORT}): {listen_port}")
+            try:
+                validate_listen_port(listen_port, allow_zero=True)
+            except ValidationError as exc:
+                raise Dn42CtlError(str(exc)) from exc
             if listen_port > 0:
                 try:
                     used_ports = db.get_used_listen_ports(node_id)
@@ -76,11 +83,15 @@ def create_ibgp_peer(
                 if listen_port in used_ports:
                     raise Dn42CtlError(f"ListenPort 已被占用: {listen_port}")
 
-        if babel_rxcost < 0 or babel_rxcost > MAX_PORT:
-            raise Dn42CtlError(f"rxcost 超出范围 (0-{MAX_PORT}): {babel_rxcost}")
+        try:
+            validate_rxcost(babel_rxcost)
+        except ValidationError as exc:
+            raise Dn42CtlError(str(exc)) from exc
 
-        if babel_type not in BABEL_VALID_TYPES:
-            raise Dn42CtlError(f"babel type 必须是 {', '.join(BABEL_VALID_TYPES)} 之一")
+        try:
+            validate_babel_type(babel_type)
+        except ValidationError as exc:
+            raise Dn42CtlError(str(exc)) from exc
 
         private_key, public_key = resolve_wg_keypair(wg_private_key, wg_public_key)
         local_lla_cidr = local_lla or generate_random_lla_cidr()
@@ -231,11 +242,15 @@ def modify_ibgp_peer(
 ) -> PeerResult:
     backend = normalize_net_backend(net_backend)
 
-    if babel_rxcost < 0 or babel_rxcost > MAX_PORT:
-        raise Dn42CtlError(f"rxcost 超出范围 (0-{MAX_PORT}): {babel_rxcost}")
+    try:
+        validate_rxcost(babel_rxcost)
+    except ValidationError as exc:
+        raise Dn42CtlError(str(exc)) from exc
 
-    if babel_type not in BABEL_VALID_TYPES:
-        raise Dn42CtlError(f"babel type 必须是 {', '.join(BABEL_VALID_TYPES)} 之一")
+    try:
+        validate_babel_type(babel_type)
+    except ValidationError as exc:
+        raise Dn42CtlError(str(exc)) from exc
 
     node_id = config.node_id
     db = open_db_and_ensure_node(db_path, node_id)
@@ -257,8 +272,10 @@ def modify_ibgp_peer(
     local_lla = str(row["local_lla"])
     current_listen_port = int(row["listen_port"])
     new_listen_port = current_listen_port if listen_port is None else listen_port
-    if new_listen_port < 0 or new_listen_port > MAX_PORT:
-        raise Dn42CtlError(f"ListenPort 超出范围 (0/1-{MAX_PORT}): {new_listen_port}")
+    try:
+        validate_listen_port(new_listen_port, allow_zero=True)
+    except ValidationError as exc:
+        raise Dn42CtlError(str(exc)) from exc
     if (
         listen_port is not None
         and new_listen_port > 0

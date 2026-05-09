@@ -90,6 +90,7 @@
 - 数据库：`docs/architecture/database.md`
 - 网络后端：`docs/architecture/network_backends.md`
 - REST API：`docs/architecture/rest_api.md`
+- 输入校验：`docs/architecture/validation.md`
 
 ### 命令
 

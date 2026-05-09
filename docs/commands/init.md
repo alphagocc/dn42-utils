@@ -17,6 +17,14 @@
 - 写入本地配置文件（TOML）。
 - 初始化/迁移 SQLite（创建表 + `schema_migrations`）。
 
+### 输入校验
+
+- `OWNAS`：正整数。
+- `OWNIPv6`：合法的 IPv6 地址；或 4 位 hex（自动扩展为 `fddf:8aef:1053::xxxx`）。
+- `OWNNETv6`：合法的 IPv6 CIDR 前缀（如 `fddf:8aef:1053::/48`）。
+- `OWNNETSETv6`：Bird 格式的网络集合，需要形如 `[prefix+/...]` 的格式。
+- `ROUTERID`：合法的 IPv4 地址。
+
 默认情况下，`init` **不生成** Bird/Babel/ROA/systemd timer 等配置文件；需要显式运行 `dn42ctl genconf`，或在 init 时使用 `--genconf`。
 
 ### 路径覆盖参数

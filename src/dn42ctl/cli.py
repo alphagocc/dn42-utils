@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import ipaddress
 import json
-import re
 import secrets
 import uuid
 from dataclasses import asdict, replace
 from pathlib import Path
+from typing import Any
 
 import typer
 
-from dn42ctl.constants import BABEL_VALID_TYPES, MAX_PORT
 from dn42ctl.context import AppContext
 from dn42ctl.db import Database, DatabaseError
 from dn42ctl.config import AppConfig, ConfigError, save_config
@@ -41,6 +39,18 @@ from dn42ctl.services import (
     show_wg_tunnels,
 )
 from dn42ctl.services.core import BgpPeerView, IbgpPeerView, WgTunnelView, sanitize_name
+from dn42ctl.validators import (
+    ValidationError as _ValidationError,
+    validate_asn,
+    validate_endpoint,
+    validate_ipv6_address,
+    validate_ipv6_network,
+    validate_ownnetset_v6,
+    validate_pubkey,
+    validate_router_id,
+    validate_rxcost,
+    validate_babel_type,
+)
 from dn42ctl.wg import WireGuardError, generate_random_lla_cidr, generate_wg_keypair
 
 
@@ -55,74 +65,11 @@ def _db_open_hint(db_path: Path) -> str:
     )
 
 
-_WG_PUBKEY_RE = re.compile(r"^[A-Za-z0-9+/]{42,44}={0,2}$")
-
-
-def _validate_pubkey(value: str) -> str:
-    """Validate a WireGuard public key: non-empty, base64 charset, ~44 chars."""
-    value = value.strip()
-    if not value:
-        raise typer.BadParameter("公钥不能为空")
-    if not _WG_PUBKEY_RE.match(value):
-        raise typer.BadParameter(f"公钥格式不合法 (base64, 需40~44字符): {value!r}")
-    return value
-
-
-def _validate_endpoint(value: str) -> str:
-    """Validate endpoint: allow empty, or require host:port with port 1-65535."""
-    value = value.strip()
-    if not value:
-        return value
-    # Support IPv6 bracket notation [::1]:port and plain host:port.
-    m = re.match(r"^(\[.+\]|[^:]+):(\d+)$", value)
-    if not m:
-        raise typer.BadParameter(
-            f"格式错误: 需要 host:port 或 [IPv6]:port 形式: {value!r}"
-        )
-    port = int(m.group(2))
-    if not (1 <= port <= MAX_PORT):
-        raise typer.BadParameter(f"Port 超出范围 (1-{MAX_PORT}): {port}")
-    return value
-
-
-def _validate_peer_lla(value: str) -> str:
-    """Validate peer LLA: non-empty and parseable as an IPv6 address."""
-    value = value.strip()
-    if not value:
-        raise typer.BadParameter("Peer LLA 不能为空")
-    # Strip /prefix-length for validation.
-    addr_part = value.split("/", 1)[0]
+def _cli_validate(fn: Any, *args: Any, **kwargs: Any) -> Any:
     try:
-        ipaddress.IPv6Address(addr_part)
-    except ValueError as exc:
-        raise typer.BadParameter(f"不是合法的 IPv6 地址: {value!r}") from exc
-    return value
-
-
-def _validate_peer_ip(value: str) -> str:
-    """Validate peer IP: non-empty and parseable as an IPv6 address."""
-    value = value.strip()
-    if not value:
-        raise typer.BadParameter("Peer IP 不能为空")
-    addr_part = value.split("/", 1)[0]
-    try:
-        ipaddress.IPv6Address(addr_part)
-    except ValueError as exc:
-        raise typer.BadParameter(f"不是合法的 IPv6 地址: {value!r}") from exc
-    return value
-
-
-def _validate_rxcost(value: int) -> int:
-    if value < 0 or value > MAX_PORT:
-        raise typer.BadParameter(f"rxcost 超出范围 (0-{MAX_PORT}): {value}")
-    return value
-
-
-def _validate_babel_type(value: str) -> str:
-    value = value.strip().lower()
-    if value not in BABEL_VALID_TYPES:
-        raise typer.BadParameter(f"type 必须是 {', '.join(BABEL_VALID_TYPES)} 之一: {value!r}")
-    return value
+        return fn(*args, **kwargs)
+    except _ValidationError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def _default_router_id() -> str:
@@ -412,6 +359,16 @@ def cmd_init(
             else DEFAULT_NM_SYSTEM_CONNECTIONS_DIR
         )
 
+    try:
+        _cli_validate(validate_asn, own_asn)
+        _cli_validate(validate_ipv6_address, own_ipv6, field_name="OWNIPv6")
+        _cli_validate(validate_ipv6_network, ownnet_v6, field_name="OWNNETv6")
+        _cli_validate(validate_ownnetset_v6, ownnetset_v6)
+        _cli_validate(validate_router_id, router_id)
+    except typer.BadParameter as exc:
+        typer.echo(f"输入错误: {exc}")
+        raise typer.Exit(2) from exc
+
     overwrite_bird = False
     overwrite_babel = False
     if do_genconf:
@@ -636,9 +593,9 @@ def cmd_bgp_peer(
     assert net_backend is not None
 
     try:
-        peer_public_key = _validate_pubkey(peer_public_key)
-        endpoint = _validate_endpoint(endpoint)
-        peer_lla = _validate_peer_lla(peer_lla)
+        peer_public_key = _cli_validate(validate_pubkey, peer_public_key)
+        endpoint = _cli_validate(validate_endpoint, endpoint, allow_empty=True)
+        peer_lla = _cli_validate(validate_ipv6_address, peer_lla, field_name="Peer LLA")
     except typer.BadParameter as exc:
         typer.echo(f"输入错误: {exc}")
         raise typer.Exit(2) from exc
@@ -716,10 +673,10 @@ def cmd_bgp_peer_modify(
     assert net_backend is not None
 
     try:
-        peer_public_key = _validate_pubkey(peer_public_key)
-        endpoint = _validate_endpoint(endpoint)
-        if peer_lla:  # peer_lla may be empty string if user cleared it
-            peer_lla = _validate_peer_lla(peer_lla)
+        peer_public_key = _cli_validate(validate_pubkey, peer_public_key)
+        endpoint = _cli_validate(validate_endpoint, endpoint, allow_empty=True)
+        if peer_lla:
+            peer_lla = _cli_validate(validate_ipv6_address, peer_lla, field_name="Peer LLA")
     except typer.BadParameter as exc:
         typer.echo(f"\u8f93\u5165\u9519\u8bef: {exc}")
         raise typer.Exit(2) from exc
@@ -826,7 +783,7 @@ def cmd_ibgp_peer(
     assert peer_ip is not None
 
     try:
-        peer_ip = _validate_peer_ip(peer_ip)
+        peer_ip = _cli_validate(validate_ipv6_address, peer_ip, field_name="对端网内 IPv6")
     except typer.BadParameter as exc:
         typer.echo(f"输入错误: {exc}")
         raise typer.Exit(2) from exc
@@ -872,11 +829,11 @@ def cmd_ibgp_peer(
     assert babel_type is not None
 
     try:
-        peer_public_key = _validate_pubkey(peer_public_key)
-        endpoint = _validate_endpoint(endpoint)
-        peer_lla = _validate_peer_lla(peer_lla)
-        babel_rxcost = _validate_rxcost(babel_rxcost)
-        babel_type = _validate_babel_type(babel_type)
+        peer_public_key = _cli_validate(validate_pubkey, peer_public_key)
+        endpoint = _cli_validate(validate_endpoint, endpoint, allow_empty=True)
+        peer_lla = _cli_validate(validate_ipv6_address, peer_lla, field_name="Peer LLA")
+        babel_rxcost = _cli_validate(validate_rxcost, babel_rxcost)
+        babel_type = _cli_validate(validate_babel_type, babel_type)
     except typer.BadParameter as exc:
         typer.echo(f"输入错误: {exc}")
         raise typer.Exit(2) from exc
@@ -984,14 +941,14 @@ def cmd_ibgp_peer_modify(
     assert babel_type is not None
 
     try:
-        peer_public_key = _validate_pubkey(peer_public_key)
-        endpoint = _validate_endpoint(endpoint)
+        peer_public_key = _cli_validate(validate_pubkey, peer_public_key)
+        endpoint = _cli_validate(validate_endpoint, endpoint, allow_empty=True)
         if peer_lla:
-            peer_lla = _validate_peer_lla(peer_lla)
+            peer_lla = _cli_validate(validate_ipv6_address, peer_lla, field_name="Peer LLA")
         if peer_ip:
-            peer_ip = _validate_peer_ip(peer_ip)
-        babel_rxcost = _validate_rxcost(babel_rxcost)
-        babel_type = _validate_babel_type(babel_type)
+            peer_ip = _cli_validate(validate_ipv6_address, peer_ip, field_name="对端网内 IPv6")
+        babel_rxcost = _cli_validate(validate_rxcost, babel_rxcost)
+        babel_type = _cli_validate(validate_babel_type, babel_type)
     except typer.BadParameter as exc:
         typer.echo(f"输入错误: {exc}")
         raise typer.Exit(2) from exc

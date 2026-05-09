@@ -287,12 +287,11 @@ def write_net_backend_files(
 
 
 def normalize_net_backend(net_backend: str) -> str:
-    backend = net_backend.strip().lower()
-    if backend == "networkd":
-        return "networkd"
-    if backend in {"nm", "networkmanager"}:
-        return "nm"
-    raise Dn42CtlError("net_backend 必须是 networkd 或 nm")
+    from dn42ctl.validators import ValidationError, validate_net_backend
+    try:
+        return validate_net_backend(net_backend)
+    except ValidationError as exc:
+        raise Dn42CtlError(str(exc)) from exc
 
 
 def peer_files_for_backend(

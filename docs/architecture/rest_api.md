@@ -43,7 +43,10 @@ dn42ctl serve --token <secret> [--host 127.0.0.1] [--port 4242]
 
 - 服务层 `Dn42CtlError` → HTTP `400` + `{"detail": "..."}`
 - 鉴权失败 → HTTP `401`
+- 输入格式/类型校验失败（Pydantic `field_validator`） → HTTP `422` + `{"detail": [{"loc": [...], "msg": "...", "type": "..."}]}`
 - 路径参数无效 → HTTP `422`（FastAPI 自动校验）
+
+详见 `docs/architecture/validation.md`。
 
 ## 技术栈
 

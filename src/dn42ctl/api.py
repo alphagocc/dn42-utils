@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from dn42ctl.config import AppConfig
 from dn42ctl.services import (
@@ -21,6 +21,16 @@ from dn42ctl.services import (
     show_bgp_peers,
     show_ibgp_peers,
     show_wg_tunnels,
+)
+from dn42ctl.validators import (
+    validate_asn,
+    validate_babel_type,
+    validate_endpoint,
+    validate_ipv6_address,
+    validate_listen_port,
+    validate_net_backend,
+    validate_pubkey,
+    validate_rxcost,
 )
 
 _bearer = HTTPBearer()
@@ -71,6 +81,38 @@ class BgpPeerCreateRequest(BaseModel):
     net_backend: str = "networkd"
     listen_port: int | None = None
 
+    @field_validator("peer_asn")
+    @classmethod
+    def _check_asn(cls, v: int) -> int:
+        return validate_asn(v)
+
+    @field_validator("peer_public_key")
+    @classmethod
+    def _check_pubkey(cls, v: str) -> str:
+        return validate_pubkey(v)
+
+    @field_validator("endpoint")
+    @classmethod
+    def _check_endpoint(cls, v: str) -> str:
+        return validate_endpoint(v, allow_empty=True)
+
+    @field_validator("peer_lla")
+    @classmethod
+    def _check_peer_lla(cls, v: str) -> str:
+        return validate_ipv6_address(v, field_name="Peer LLA")
+
+    @field_validator("net_backend")
+    @classmethod
+    def _check_net_backend(cls, v: str) -> str:
+        return validate_net_backend(v)
+
+    @field_validator("listen_port")
+    @classmethod
+    def _check_listen_port(cls, v: int | None) -> int | None:
+        if v is not None:
+            return validate_listen_port(v, allow_zero=True)
+        return v
+
 
 class BgpPeerModifyRequest(BaseModel):
     peer_public_key: str
@@ -78,6 +120,33 @@ class BgpPeerModifyRequest(BaseModel):
     peer_lla: str
     net_backend: str = "networkd"
     listen_port: int | None = None
+
+    @field_validator("peer_public_key")
+    @classmethod
+    def _check_pubkey(cls, v: str) -> str:
+        return validate_pubkey(v)
+
+    @field_validator("endpoint")
+    @classmethod
+    def _check_endpoint(cls, v: str) -> str:
+        return validate_endpoint(v, allow_empty=True)
+
+    @field_validator("peer_lla")
+    @classmethod
+    def _check_peer_lla(cls, v: str) -> str:
+        return validate_ipv6_address(v, field_name="Peer LLA")
+
+    @field_validator("net_backend")
+    @classmethod
+    def _check_net_backend(cls, v: str) -> str:
+        return validate_net_backend(v)
+
+    @field_validator("listen_port")
+    @classmethod
+    def _check_listen_port(cls, v: int | None) -> int | None:
+        if v is not None:
+            return validate_listen_port(v, allow_zero=True)
+        return v
 
 
 class IbgpPeerCreateRequest(BaseModel):
@@ -92,6 +161,56 @@ class IbgpPeerCreateRequest(BaseModel):
     babel_type: str = "tunnel"
     listen_port: int | None = None
 
+    @field_validator("peer_ip")
+    @classmethod
+    def _check_peer_ip(cls, v: str) -> str:
+        return validate_ipv6_address(v, field_name="对端网内 IPv6")
+
+    @field_validator("peer_public_key")
+    @classmethod
+    def _check_pubkey(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_pubkey(v)
+        return v
+
+    @field_validator("endpoint")
+    @classmethod
+    def _check_endpoint(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_endpoint(v, allow_empty=True)
+        return v
+
+    @field_validator("peer_lla")
+    @classmethod
+    def _check_peer_lla(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_ipv6_address(v, field_name="Peer LLA")
+        return v
+
+    @field_validator("net_backend")
+    @classmethod
+    def _check_net_backend(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_net_backend(v)
+        return v
+
+    @field_validator("babel_rxcost")
+    @classmethod
+    def _check_rxcost(cls, v: int) -> int:
+        return validate_rxcost(v)
+
+    @field_validator("babel_type")
+    @classmethod
+    def _check_babel_type(cls, v: str) -> str:
+        return validate_babel_type(v)
+
+    @field_validator("listen_port")
+    @classmethod
+    def _check_listen_port(cls, v: int | None) -> int | None:
+        if v is not None:
+            return validate_listen_port(v, allow_zero=True)
+        return v
+
 
 class IbgpPeerModifyRequest(BaseModel):
     peer_public_key: str
@@ -102,6 +221,50 @@ class IbgpPeerModifyRequest(BaseModel):
     babel_rxcost: int = 120
     babel_type: str = "tunnel"
     listen_port: int | None = None
+
+    @field_validator("peer_public_key")
+    @classmethod
+    def _check_pubkey(cls, v: str) -> str:
+        return validate_pubkey(v)
+
+    @field_validator("endpoint")
+    @classmethod
+    def _check_endpoint(cls, v: str) -> str:
+        return validate_endpoint(v, allow_empty=True)
+
+    @field_validator("peer_lla")
+    @classmethod
+    def _check_peer_lla(cls, v: str) -> str:
+        if v:
+            return validate_ipv6_address(v, field_name="Peer LLA")
+        return v
+
+    @field_validator("peer_ip")
+    @classmethod
+    def _check_peer_ip(cls, v: str) -> str:
+        return validate_ipv6_address(v, field_name="对端网内 IPv6")
+
+    @field_validator("net_backend")
+    @classmethod
+    def _check_net_backend(cls, v: str) -> str:
+        return validate_net_backend(v)
+
+    @field_validator("babel_rxcost")
+    @classmethod
+    def _check_rxcost(cls, v: int) -> int:
+        return validate_rxcost(v)
+
+    @field_validator("babel_type")
+    @classmethod
+    def _check_babel_type(cls, v: str) -> str:
+        return validate_babel_type(v)
+
+    @field_validator("listen_port")
+    @classmethod
+    def _check_listen_port(cls, v: int | None) -> int | None:
+        if v is not None:
+            return validate_listen_port(v, allow_zero=True)
+        return v
 
 
 class GenconfRequest(BaseModel):

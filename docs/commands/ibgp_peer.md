@@ -16,6 +16,18 @@
     - 留空则自动选择未占用端口（避免与当前节点已有端口冲突）
   - `--no-wg`：跳过 WireGuard 隧道创建。不生成密钥、不写网络配置文件、不修改 babel.conf。
 
+### 输入校验
+
+- `--name`：非空，自动规范化（非字母数字下划线字符替换为 `_`，转小写）。
+- `--peer-ip`：合法的 IPv6 地址（允许带 `/prefix`）。
+- `--pubkey`：WireGuard 公钥，base64 格式（40~44 字符）。
+- `--endpoint`：`host:port` 或 `[IPv6]:port` 格式，端口 1-65535。可为空。
+- `--peer-lla`：合法的 IPv6 地址（允许带 `/prefix`）。
+- `--net`：`networkd` 或 `nm`（也接受 `networkmanager`）。
+- `--rxcost`：0-65535。
+- `--type`：`wired` / `wireless` / `tunnel`（大小写不敏感）。
+- `--listen-port`：0 或 1-65535。
+
 > `--rxcost` 未提供时，CLI 应通过交互提示要求用户输入。
 
 > 交互模式下（有 WG 时）：如果 `--pubkey/--endpoint/--peer-lla` 缺失，CLI 会先生成并输出本端 WG 公钥与本端 LLA，便于先发给对端；随后再提示输入对端信息。其中 `--endpoint` 允许留空。

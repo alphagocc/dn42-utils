@@ -14,6 +14,15 @@
   - 留空则按规则推导
 - 缺失时会提示用户输入。
 
+### 输入校验
+
+- `--asn`：正整数。
+- `--pubkey`：WireGuard 公钥，base64 格式（40~44 字符）。
+- `--endpoint`：`host:port` 或 `[IPv6]:port` 格式，端口 1-65535。可为空。
+- `--peer-lla`：合法的 IPv6 地址（允许带 `/prefix`）。
+- `--net`：`networkd` 或 `nm`（也接受 `networkmanager`）。
+- `--listen-port`：0 或 1-65535。
+
 > 交互模式下：如果 `--pubkey/--endpoint/--peer-lla` 缺失，CLI 会先生成并输出本端 WG 公钥与本端 LLA，便于先发给对端；随后再提示输入对端信息。
 
 ### 派生规则

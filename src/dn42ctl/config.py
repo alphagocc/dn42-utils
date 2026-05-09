@@ -6,6 +6,14 @@ from typing import Any
 
 from dn42ctl.constants import FILE_MODE_PRIVATE
 from dn42ctl.fs import chmod_best_effort
+from dn42ctl.validators import (
+    ValidationError,
+    validate_asn,
+    validate_ipv6_address,
+    validate_ipv6_network,
+    validate_ownnetset_v6,
+    validate_router_id,
+)
 
 try:
     import tomllib  # Python 3.11+
@@ -65,13 +73,28 @@ def load_config(path: Path) -> AppConfig:
     if not isinstance(paths, dict):
         raise ConfigError("Missing [paths] section")
 
+    own_asn = _require_int(raw, "own_asn")
+    router_id = _require_str(raw, "router_id")
+    own_ipv6 = _require_str(raw, "own_ipv6")
+    ownnet_v6 = _require_str(raw, "ownnet_v6")
+    ownnetset_v6 = _require_str(raw, "ownnetset_v6")
+
+    try:
+        validate_asn(own_asn)
+        validate_router_id(router_id)
+        validate_ipv6_address(own_ipv6, field_name="own_ipv6")
+        validate_ipv6_network(ownnet_v6, field_name="ownnet_v6")
+        validate_ownnetset_v6(ownnetset_v6)
+    except ValidationError as exc:
+        raise ConfigError(f"配置项不合法: {exc}") from exc
+
     return AppConfig(
         node_id=_require_str(raw, "node_id"),
-        own_asn=_require_int(raw, "own_asn"),
-        router_id=_require_str(raw, "router_id"),
-        own_ipv6=_require_str(raw, "own_ipv6"),
-        ownnet_v6=_require_str(raw, "ownnet_v6"),
-        ownnetset_v6=_require_str(raw, "ownnetset_v6"),
+        own_asn=own_asn,
+        router_id=router_id,
+        own_ipv6=own_ipv6,
+        ownnet_v6=ownnet_v6,
+        ownnetset_v6=ownnetset_v6,
         bird_conf_path=_require_str(paths, "bird_conf"),
         bird_peers_dir=_require_str(paths, "bird_peers_dir"),
         bird_babel_conf_path=_require_str(paths, "bird_babel_conf"),
