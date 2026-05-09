@@ -49,7 +49,19 @@ Notes:
 ## Validation (quick)
 
 ```bash
-uv run dn42ctl --help
+# Lint
+uv run ruff check src/ tests/
+
+# Type check
+uv run pyright src/
+
+# Tests
+uv run pytest -v
+
+# Tests with coverage
+uv run pytest --cov=dn42ctl --cov-report=term-missing
+
+# Compile check
 uv run python -m compileall -q src
 ```
 
@@ -61,5 +73,6 @@ uv run python -m compileall -q src
 - Architecture:
   - DB: [`docs/architecture/database.md`](docs/architecture/database.md)
   - Network backends: [`docs/architecture/network_backends.md`](docs/architecture/network_backends.md)
+  - Testing: [`docs/architecture/testing.md`](docs/architecture/testing.md)
 - Command docs: [`docs/commands/`](docs/commands/)
 - End-user walkthrough & defaults: [`README.md`](README.md)

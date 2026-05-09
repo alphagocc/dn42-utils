@@ -91,6 +91,7 @@
 - 网络后端：`docs/architecture/network_backends.md`
 - REST API：`docs/architecture/rest_api.md`
 - 输入校验：`docs/architecture/validation.md`
+- 测试基础设施：`docs/architecture/testing.md`
 
 ### 命令
 
