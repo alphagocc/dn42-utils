@@ -65,7 +65,7 @@ def db_path(tmp_path: Path) -> Path:
 @pytest.fixture
 def mock_wg_keypair():
     with patch(
-        "dn42ctl.wg.generate_wg_keypair",
+        "dn42ctl.services.core.generate_wg_keypair",
         return_value=(FAKE_WG_PRIVKEY, FAKE_WG_PUBKEY),
     ) as m:
         yield m
