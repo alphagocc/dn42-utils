@@ -17,3 +17,8 @@ build/
 
 # Editors
 .vscode/
+
+# Coverage
+coverage.xml
+htmlcov/
+.coverage
