@@ -5,7 +5,6 @@ from pathlib import Path
 
 from jinja2 import Environment, PackageLoader, StrictUndefined
 
-
 _JINJA_ENV = Environment(
     loader=PackageLoader("dn42ctl", "templates"),
     autoescape=False,
@@ -101,9 +100,7 @@ def render_networkd_network(*, ifname: str, local_lla_cidr: str, peer_lla: str) 
     )
 
 
-def render_systemd_roa_service(
-    *, roa_parent: Path, roa_target: Path, roa_url: str
-) -> str:
+def render_systemd_roa_service(*, roa_parent: Path, roa_target: Path, roa_url: str) -> str:
     return _render_template(
         "systemd_roa_service.j2",
         roa_parent=roa_parent,

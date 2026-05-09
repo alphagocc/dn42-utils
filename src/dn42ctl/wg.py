@@ -10,9 +10,7 @@ class WireGuardError(RuntimeError):
 
 def pubkey_from_private(private_key: str) -> str:
     try:
-        return subprocess.check_output(
-            ["wg", "pubkey"], input=private_key, text=True, stderr=subprocess.STDOUT
-        ).strip()
+        return subprocess.check_output(["wg", "pubkey"], input=private_key, text=True, stderr=subprocess.STDOUT).strip()
     except FileNotFoundError as exc:
         raise WireGuardError("未找到 'wg' 命令，请先安装 wireguard-tools") from exc
     except subprocess.CalledProcessError as exc:
@@ -22,9 +20,7 @@ def pubkey_from_private(private_key: str) -> str:
 
 def generate_wg_keypair() -> tuple[str, str]:
     try:
-        privkey = subprocess.check_output(
-            ["wg", "genkey"], text=True, stderr=subprocess.STDOUT
-        ).strip()
+        privkey = subprocess.check_output(["wg", "genkey"], text=True, stderr=subprocess.STDOUT).strip()
     except FileNotFoundError as exc:
         raise WireGuardError("未找到 'wg' 命令，请先安装 wireguard-tools") from exc
     except subprocess.CalledProcessError as exc:

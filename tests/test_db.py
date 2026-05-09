@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+from pathlib import Path
 
 import pytest
 
@@ -10,30 +10,21 @@ from dn42ctl.db import BgpPeerRecord, Database, DatabaseError, IbgpPeerRecord
 class TestMigrations:
     def test_tables_exist(self, mem_db: Database) -> None:
         conn = mem_db._conn
-        tables = {
-            row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
-        }
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         assert "schema_migrations" in tables
         assert "nodes" in tables
         assert "bgp_peers" in tables
         assert "ibgp_peers" in tables
 
     def test_all_versions_applied(self, mem_db: Database) -> None:
-        rows = mem_db._conn.execute(
-            "SELECT version FROM schema_migrations ORDER BY version"
-        ).fetchall()
+        rows = mem_db._conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
         versions = [row[0] for row in rows]
         assert versions == [1, 2, 3, 4]
 
     def test_migrate_idempotent(self, mem_db: Database) -> None:
         mem_db.migrate()
         mem_db.migrate()
-        rows = mem_db._conn.execute(
-            "SELECT version FROM schema_migrations ORDER BY version"
-        ).fetchall()
+        rows = mem_db._conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
         assert len(rows) == 4
 
 
@@ -41,50 +32,48 @@ class TestEnsureNode:
     def test_insert_and_upsert(self, mem_db: Database) -> None:
         mem_db.ensure_node("node-1")
         mem_db.ensure_node("node-1")
-        rows = mem_db._conn.execute(
-            "SELECT COUNT(*) FROM nodes WHERE node_id='node-1'"
-        ).fetchone()
+        rows = mem_db._conn.execute("SELECT COUNT(*) FROM nodes WHERE node_id='node-1'").fetchone()
         assert rows[0] == 1
 
 
 def _make_bgp_record(**overrides: object) -> BgpPeerRecord:
-    defaults = dict(
-        node_id="test-node",
-        ifname="dn42_1234",
-        wg_private_key="privkey",
-        wg_public_key="pubkey",
-        peer_public_key="peerpubkey",
-        endpoint="example.com:51820",
-        local_lla="fe80::abcd:1234",
-        peer_lla="fe80::1",
-        listen_port=51820,
-        allowed_ips=["fe80::/64", "fd00::/8"],
-        net_backend="networkd",
-        peer_asn=4242421234,
-    )
+    defaults = {
+        "node_id": "test-node",
+        "ifname": "dn42_1234",
+        "wg_private_key": "privkey",
+        "wg_public_key": "pubkey",
+        "peer_public_key": "peerpubkey",
+        "endpoint": "example.com:51820",
+        "local_lla": "fe80::abcd:1234",
+        "peer_lla": "fe80::1",
+        "listen_port": 51820,
+        "allowed_ips": ["fe80::/64", "fd00::/8"],
+        "net_backend": "networkd",
+        "peer_asn": 4242421234,
+    }
     defaults.update(overrides)
     return BgpPeerRecord(**defaults)  # type: ignore[arg-type]
 
 
 def _make_ibgp_record(**overrides: object) -> IbgpPeerRecord:
-    defaults = dict(
-        node_id="test-node",
-        name="mynode",
-        ifname="wg_mynode",
-        wg_private_key="privkey",
-        wg_public_key="pubkey",
-        peer_public_key="peerpubkey",
-        endpoint="example.com:51821",
-        local_lla="fe80::abcd:5678",
-        peer_lla="fe80::2",
-        listen_port=51821,
-        allowed_ips=["::/0"],
-        net_backend="networkd",
-        babel_rxcost=120,
-        peer_ip="fd42:4242:5678::1",
-        has_wg=True,
-        babel_type="tunnel",
-    )
+    defaults = {
+        "node_id": "test-node",
+        "name": "mynode",
+        "ifname": "wg_mynode",
+        "wg_private_key": "privkey",
+        "wg_public_key": "pubkey",
+        "peer_public_key": "peerpubkey",
+        "endpoint": "example.com:51821",
+        "local_lla": "fe80::abcd:5678",
+        "peer_lla": "fe80::2",
+        "listen_port": 51821,
+        "allowed_ips": ["::/0"],
+        "net_backend": "networkd",
+        "babel_rxcost": 120,
+        "peer_ip": "fd42:4242:5678::1",
+        "has_wg": True,
+        "babel_type": "tunnel",
+    }
     defaults.update(overrides)
     return IbgpPeerRecord(**defaults)  # type: ignore[arg-type]
 
@@ -106,12 +95,8 @@ class TestBgpPeerCrud:
             mem_db_with_node.insert_bgp_peer(rec)
 
     def test_list_ordered(self, mem_db_with_node: Database) -> None:
-        mem_db_with_node.insert_bgp_peer(
-            _make_bgp_record(peer_asn=9999, ifname="dn42_9999")
-        )
-        mem_db_with_node.insert_bgp_peer(
-            _make_bgp_record(peer_asn=1111, ifname="dn42_1111")
-        )
+        mem_db_with_node.insert_bgp_peer(_make_bgp_record(peer_asn=9999, ifname="dn42_9999"))
+        mem_db_with_node.insert_bgp_peer(_make_bgp_record(peer_asn=1111, ifname="dn42_1111"))
         peers = mem_db_with_node.list_bgp_peers("test-node")
         assert len(peers) == 2
         assert peers[0]["peer_asn"] == 1111
@@ -181,12 +166,8 @@ class TestIbgpPeerCrud:
             mem_db_with_node.insert_ibgp_peer(rec)
 
     def test_list_ordered(self, mem_db_with_node: Database) -> None:
-        mem_db_with_node.insert_ibgp_peer(
-            _make_ibgp_record(name="zzz", ifname="wg_zzz")
-        )
-        mem_db_with_node.insert_ibgp_peer(
-            _make_ibgp_record(name="aaa", ifname="wg_aaa")
-        )
+        mem_db_with_node.insert_ibgp_peer(_make_ibgp_record(name="zzz", ifname="wg_zzz"))
+        mem_db_with_node.insert_ibgp_peer(_make_ibgp_record(name="aaa", ifname="wg_aaa"))
         peers = mem_db_with_node.list_ibgp_peers("test-node")
         assert len(peers) == 2
         assert peers[0]["name"] == "aaa"
@@ -244,12 +225,8 @@ class TestIbgpPeerCrud:
 
 class TestGetUsedListenPorts:
     def test_combined(self, mem_db_with_node: Database) -> None:
-        mem_db_with_node.insert_bgp_peer(
-            _make_bgp_record(listen_port=51820)
-        )
-        mem_db_with_node.insert_ibgp_peer(
-            _make_ibgp_record(listen_port=51821)
-        )
+        mem_db_with_node.insert_bgp_peer(_make_bgp_record(listen_port=51820))
+        mem_db_with_node.insert_ibgp_peer(_make_ibgp_record(listen_port=51821))
         ports = mem_db_with_node.get_used_listen_ports("test-node")
         assert ports == {51820, 51821}
 

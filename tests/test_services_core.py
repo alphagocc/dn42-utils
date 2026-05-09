@@ -163,8 +163,6 @@ class TestDeleteFilesAndCollectStatus:
 class TestOpenDbAndEnsureNode:
     def test_creates_db(self, db_path: Path) -> None:
         db = open_db_and_ensure_node(db_path, "test-node")
-        row = db._conn.execute(
-            "SELECT COUNT(*) FROM nodes WHERE node_id='test-node'"
-        ).fetchone()
+        row = db._conn.execute("SELECT COUNT(*) FROM nodes WHERE node_id='test-node'").fetchone()
         assert row[0] == 1
         db.close()

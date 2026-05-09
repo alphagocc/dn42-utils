@@ -5,9 +5,6 @@ from pathlib import Path
 from dn42ctl.config import AppConfig
 from dn42ctl.constants import MAX_PORT
 from dn42ctl.db import BgpPeerRecord, DatabaseError
-from dn42ctl.validators import ValidationError, validate_listen_port
-from dn42ctl.wg import generate_random_lla_cidr
-
 from dn42ctl.services.core import (
     DEFAULT_ALLOWED_IPS,
     DeleteResult,
@@ -23,6 +20,8 @@ from dn42ctl.services.core import (
     write_bird_bgp_peer,
     write_net_backend_files,
 )
+from dn42ctl.validators import ValidationError, validate_listen_port
+from dn42ctl.wg import generate_random_lla_cidr
 
 
 def create_bgp_peer(
@@ -92,9 +91,7 @@ def create_bgp_peer(
 
     generated: list[Path] = []
 
-    write_bird_bgp_peer(
-        config=config, ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn, generated=generated
-    )
+    write_bird_bgp_peer(config=config, ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn, generated=generated)
 
     write_net_backend_files(
         config=config,
@@ -152,11 +149,7 @@ def modify_bgp_peer(
         validate_listen_port(new_listen_port, allow_zero=True)
     except ValidationError as exc:
         raise Dn42CtlError(str(exc)) from exc
-    if (
-        listen_port is not None
-        and new_listen_port > 0
-        and new_listen_port != current_listen_port
-    ):
+    if listen_port is not None and new_listen_port > 0 and new_listen_port != current_listen_port:
         try:
             used_ports = db.get_used_listen_ports(node_id)
         except DatabaseError as exc:
@@ -183,9 +176,7 @@ def modify_bgp_peer(
         raise Dn42CtlError(str(exc)) from exc
 
     generated: list[Path] = []
-    write_bird_bgp_peer(
-        config=config, ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn, generated=generated
-    )
+    write_bird_bgp_peer(config=config, ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn, generated=generated)
 
     write_net_backend_files(
         config=config,
@@ -228,9 +219,7 @@ def delete_bgp_peer(
 
     ifname = str(row["ifname"])
     net_backend = str(row["net_backend"])
-    files = peer_files_for_backend(
-        config=config, ifname=ifname, net_backend=net_backend, kind="bgp"
-    )
+    files = peer_files_for_backend(config=config, ifname=ifname, net_backend=net_backend, kind="bgp")
 
     deleted, missing = delete_files_and_collect_status(files)
 

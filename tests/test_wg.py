@@ -6,32 +6,32 @@ from unittest.mock import patch
 
 import pytest
 
-from dn42ctl.wg import WireGuardError, generate_wg_keypair, pubkey_from_private, generate_random_lla_cidr
+from dn42ctl.wg import WireGuardError, generate_random_lla_cidr, generate_wg_keypair, pubkey_from_private
 
 
 class TestPubkeyFromPrivate:
     def test_success(self) -> None:
-        with patch(
-            "subprocess.check_output", return_value="  PUBKEY_VALUE  \n"
-        ) as mock:
+        with patch("subprocess.check_output", return_value="  PUBKEY_VALUE  \n") as mock:
             result = pubkey_from_private("PRIVKEY")
             assert result == "PUBKEY_VALUE"
             mock.assert_called_once()
 
     def test_wg_not_found(self) -> None:
-        with patch(
-            "subprocess.check_output", side_effect=FileNotFoundError()
+        with (
+            patch("subprocess.check_output", side_effect=FileNotFoundError()),
+            pytest.raises(WireGuardError, match="wg"),
         ):
-            with pytest.raises(WireGuardError, match="wg"):
-                pubkey_from_private("PRIVKEY")
+            pubkey_from_private("PRIVKEY")
 
     def test_wg_fails(self) -> None:
-        with patch(
-            "subprocess.check_output",
-            side_effect=subprocess.CalledProcessError(1, "wg", output="error msg"),
+        with (
+            patch(
+                "subprocess.check_output",
+                side_effect=subprocess.CalledProcessError(1, "wg", output="error msg"),
+            ),
+            pytest.raises(WireGuardError, match="执行失败"),
         ):
-            with pytest.raises(WireGuardError, match="执行失败"):
-                pubkey_from_private("PRIVKEY")
+            pubkey_from_private("PRIVKEY")
 
 
 class TestGenerateWgKeypair:
@@ -49,16 +49,15 @@ class TestGenerateWgKeypair:
             assert pub == "PUBLIC_KEY"
 
     def test_wg_not_found(self) -> None:
-        with patch(
-            "subprocess.check_output", side_effect=FileNotFoundError()
+        with (
+            patch("subprocess.check_output", side_effect=FileNotFoundError()),
+            pytest.raises(WireGuardError, match="wg"),
         ):
-            with pytest.raises(WireGuardError, match="wg"):
-                generate_wg_keypair()
+            generate_wg_keypair()
 
     def test_empty_key(self) -> None:
-        with patch("subprocess.check_output", return_value="\n"):
-            with pytest.raises(WireGuardError, match="空密钥"):
-                generate_wg_keypair()
+        with patch("subprocess.check_output", return_value="\n"), pytest.raises(WireGuardError, match="空密钥"):
+            generate_wg_keypair()
 
 
 class TestGenerateRandomLlaCidr:

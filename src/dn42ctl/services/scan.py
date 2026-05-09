@@ -10,8 +10,6 @@ from typing import cast
 from dn42ctl.config import AppConfig
 from dn42ctl.constants import BABEL_DEFAULT_RXCOST, BABEL_DEFAULT_TYPE, IFNAME_PREFIX_BGP, IFNAME_PREFIX_IBGP
 from dn42ctl.db import BgpPeerRecord, DatabaseError, IbgpPeerRecord
-from dn42ctl.wg import WireGuardError, pubkey_from_private
-
 from dn42ctl.services.core import (
     DEFAULT_ALLOWED_IPS,
     BirdPathsDiscovery,
@@ -21,7 +19,7 @@ from dn42ctl.services.core import (
     open_db_and_ensure_node,
     sanitize_name,
 )
-
+from dn42ctl.wg import WireGuardError, pubkey_from_private
 
 _BIRD_INCLUDE_RE = re.compile(
     r"^\s*include\s+([\"'])([^\"']+)\1\s*;\s*(?:#.*)?$",
@@ -337,9 +335,7 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
     skipped: list[str] = []
 
     if shutil.which("wg") is None:
-        raise Dn42CtlError(
-            "scan 需要 'wg' 命令以从私钥推导公钥，请先安装 wireguard-tools"
-        )
+        raise Dn42CtlError("scan 需要 'wg' 命令以从私钥推导公钥，请先安装 wireguard-tools")
 
     # Directories to scan (dedup while preserving intent).
     bird_peers_dirs = [
@@ -381,9 +377,7 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
             else:
                 babel_params_by_ifname = _parse_babel_conf_interface_params(babel_text)
         else:
-            warnings.append(
-                f"未找到 babel.conf: {babel_path}（无法探测 rxcost/type，将使用默认值）"
-            )
+            warnings.append(f"未找到 babel.conf: {babel_path}（无法探测 rxcost/type，将使用默认值）")
     except OSError as exc:
         warnings.append(f"无法访问 babel.conf: {babel_path} ({exc})")
 
@@ -414,7 +408,7 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
 
     for ifname in sorted(candidates):
         kind = "bgp" if ifname.startswith(IFNAME_PREFIX_BGP) else "ibgp"
-        peer_name = ifname[len(IFNAME_PREFIX_IBGP):] if kind == "ibgp" else None
+        peer_name = ifname[len(IFNAME_PREFIX_IBGP) :] if kind == "ibgp" else None
 
         # Locate config sources.
         netdev_path = _find_first([d / f"{ifname}.netdev" for d in networkd_dirs])
@@ -569,16 +563,12 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
 
             # Optional: try bird conf to extract peer_lla.
             if peer_lla is None:
-                bird_path = _find_first(
-                    [d / f"ibgp_{peer_name}.conf" for d in bird_peers_dirs]
-                )
+                bird_path = _find_first([d / f"ibgp_{peer_name}.conf" for d in bird_peers_dirs])
                 if bird_path is not None:
                     try:
                         bird_text = _read_text(bird_path)
                     except Dn42CtlError as exc:
-                        warnings.append(
-                            f"{ifname}: 读取 Bird iBGP peer conf 失败: {exc}"
-                        )
+                        warnings.append(f"{ifname}: 读取 Bird iBGP peer conf 失败: {exc}")
                     else:
                         maybe = _parse_bird_ibgp_peer_conf(bird_text, ifname)
                         if maybe:
@@ -648,20 +638,12 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
                 missing_rxcost_ifnames.append(ifname)
 
     if conflicts:
-        warnings.append(
-            "存在冲突（DB 已有记录）：默认已跳过。可先使用 'dn42ctl del peer ...' 删除后再 scan。"
-        )
+        warnings.append("存在冲突（DB 已有记录）：默认已跳过。可先使用 'dn42ctl del peer ...' 删除后再 scan。")
 
     if missing_rxcost_ifnames:
         preview = ", ".join(missing_rxcost_ifnames[:8])
-        extra = (
-            ""
-            if len(missing_rxcost_ifnames) <= 8
-            else f" ... (+{len(missing_rxcost_ifnames) - 8})"
-        )
-        warnings.append(
-            "babel.conf 未提供部分接口的 rxcost：" f"{preview}{extra}；已使用默认值 {BABEL_DEFAULT_RXCOST}"
-        )
+        extra = "" if len(missing_rxcost_ifnames) <= 8 else f" ... (+{len(missing_rxcost_ifnames) - 8})"
+        warnings.append(f"babel.conf 未提供部分接口的 rxcost：{preview}{extra}；已使用默认值 {BABEL_DEFAULT_RXCOST}")
 
     return ScanResult(
         inserted=inserted,

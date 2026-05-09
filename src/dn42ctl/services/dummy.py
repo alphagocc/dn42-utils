@@ -67,18 +67,23 @@ def ensure_dummy_interface(own_ipv6: str) -> DummyResult:
         try:
             if backend == "nm":
                 subprocess.check_output(
-                    ["nmcli", "connection", "modify", ifname,
-                     "ipv6.addresses", addr_cidr],
-                    text=True, stderr=subprocess.STDOUT, timeout=10,
+                    ["nmcli", "connection", "modify", ifname, "ipv6.addresses", addr_cidr],
+                    text=True,
+                    stderr=subprocess.STDOUT,
+                    timeout=10,
                 )
                 subprocess.check_output(
                     ["nmcli", "connection", "up", ifname],
-                    text=True, stderr=subprocess.STDOUT, timeout=10,
+                    text=True,
+                    stderr=subprocess.STDOUT,
+                    timeout=10,
                 )
             else:
                 subprocess.check_output(
                     ["ip", "addr", "add", addr_cidr, "dev", ifname],
-                    text=True, stderr=subprocess.STDOUT, timeout=10,
+                    text=True,
+                    stderr=subprocess.STDOUT,
+                    timeout=10,
                 )
         except (subprocess.CalledProcessError, FileNotFoundError) as exc:
             warnings.append(f"dn42-dummy 地址绑定失败: {exc}")
@@ -89,24 +94,41 @@ def ensure_dummy_interface(own_ipv6: str) -> DummyResult:
     try:
         if backend == "nm":
             subprocess.check_output(
-                ["nmcli", "connection", "add", "type", "dummy",
-                 "ifname", ifname,
-                 "ipv6.method", "manual",
-                 "ipv6.addresses", addr_cidr],
-                text=True, stderr=subprocess.STDOUT, timeout=10,
+                [
+                    "nmcli",
+                    "connection",
+                    "add",
+                    "type",
+                    "dummy",
+                    "ifname",
+                    ifname,
+                    "ipv6.method",
+                    "manual",
+                    "ipv6.addresses",
+                    addr_cidr,
+                ],
+                text=True,
+                stderr=subprocess.STDOUT,
+                timeout=10,
             )
         else:
             subprocess.check_output(
                 ["ip", "link", "add", ifname, "type", "dummy"],
-                text=True, stderr=subprocess.STDOUT, timeout=10,
+                text=True,
+                stderr=subprocess.STDOUT,
+                timeout=10,
             )
             subprocess.check_output(
                 ["ip", "addr", "add", addr_cidr, "dev", ifname],
-                text=True, stderr=subprocess.STDOUT, timeout=10,
+                text=True,
+                stderr=subprocess.STDOUT,
+                timeout=10,
             )
             subprocess.check_output(
                 ["ip", "link", "set", ifname, "up"],
-                text=True, stderr=subprocess.STDOUT, timeout=10,
+                text=True,
+                stderr=subprocess.STDOUT,
+                timeout=10,
             )
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         warnings.append(f"dn42-dummy 创建失败: {exc}")

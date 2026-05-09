@@ -13,9 +13,9 @@ from dn42ctl.validators import (
     validate_listen_port,
     validate_net_backend,
     validate_ownnetset_v6,
+    validate_pubkey,
     validate_router_id,
     validate_rxcost,
-    validate_pubkey,
 )
 
 

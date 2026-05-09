@@ -20,34 +20,26 @@ from dn42ctl.render import (
 
 class TestRenderBirdBgpPeerConf:
     def test_basic(self) -> None:
-        result = render_bird_bgp_peer_conf(
-            ifname="dn42_1234", peer_lla="fe80::1", peer_asn=4242421234
-        )
+        result = render_bird_bgp_peer_conf(ifname="dn42_1234", peer_lla="fe80::1", peer_asn=4242421234)
         assert "protocol bgp dn42_1234" in result
         assert "fe80::1" in result
         assert "4242421234" in result
 
     def test_empty_peer_lla_raises(self) -> None:
         with pytest.raises(ValueError, match="peer_lla must not be empty"):
-            render_bird_bgp_peer_conf(
-                ifname="dn42_1234", peer_lla="", peer_asn=4242421234
-            )
+            render_bird_bgp_peer_conf(ifname="dn42_1234", peer_lla="", peer_asn=4242421234)
 
 
 class TestRenderBirdIbgpPeerConf:
     def test_basic(self) -> None:
-        result = render_bird_ibgp_peer_conf(
-            name="mynode", ifname="wg_mynode", peer_ip="fd42:4242:5678::1"
-        )
+        result = render_bird_ibgp_peer_conf(name="mynode", ifname="wg_mynode", peer_ip="fd42:4242:5678::1")
         assert "ibgp_mynode" in result
         assert "fd42:4242:5678::1" in result
         assert "OWNAS" in result
 
     def test_empty_peer_ip_raises(self) -> None:
         with pytest.raises(ValueError, match="peer_ip must not be empty"):
-            render_bird_ibgp_peer_conf(
-                name="mynode", ifname="wg_mynode", peer_ip=""
-            )
+            render_bird_ibgp_peer_conf(name="mynode", ifname="wg_mynode", peer_ip="")
 
 
 class TestRenderBabelConf:

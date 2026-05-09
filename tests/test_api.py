@@ -4,13 +4,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from conftest import VALID_ENDPOINT, VALID_PEER_IP, VALID_PEER_LLA, VALID_PUBKEY
 from fastapi.testclient import TestClient
 
 from dn42ctl.api import app, configure
 from dn42ctl.config import AppConfig
 from dn42ctl.db import Database
-
-from conftest import FAKE_WG_PRIVKEY, FAKE_WG_PUBKEY, VALID_ENDPOINT, VALID_PEER_IP, VALID_PEER_LLA, VALID_PUBKEY
 
 HEADERS = {"Authorization": "Bearer test-secret"}
 BAD_HEADERS = {"Authorization": "Bearer wrong-token"}
@@ -22,10 +21,12 @@ def api_client(sample_config: AppConfig, db_path: Path, mock_wg_keypair):
     db = Database.open(db_path)
     db.ensure_node(sample_config.node_id)
     db.close()
-    with patch("dn42ctl.services.bgp.generate_random_lla_cidr", return_value="fe80::abcd:1234/64"):
-        with patch("dn42ctl.services.ibgp.generate_random_lla_cidr", return_value="fe80::abcd:5678/64"):
-            client = TestClient(app)
-            yield client
+    with (
+        patch("dn42ctl.services.bgp.generate_random_lla_cidr", return_value="fe80::abcd:1234/64"),
+        patch("dn42ctl.services.ibgp.generate_random_lla_cidr", return_value="fe80::abcd:5678/64"),
+    ):
+        client = TestClient(app)
+        yield client
 
 
 class TestAuth:

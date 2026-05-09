@@ -9,8 +9,6 @@ from pathlib import Path
 
 from dn42ctl.config import AppConfig, save_config
 from dn42ctl.render import render_bird_main_conf, render_systemd_roa_service, render_systemd_roa_timer
-from dn42ctl.services.dummy import DummyResult, ensure_dummy_interface
-
 from dn42ctl.services.core import (
     Dn42CtlError,
     GenConfResult,
@@ -20,7 +18,7 @@ from dn42ctl.services.core import (
     regenerate_babel_conf,
     write_text,
 )
-
+from dn42ctl.services.dummy import DummyResult, ensure_dummy_interface
 
 DN42_ROA_V6_URL = "https://dn42.burble.com/roa/dn42_roa_bird2_6.conf"
 
@@ -133,10 +131,7 @@ def genconf(
                 "未命中 ROA 的路由将被判定为 UNKNOWN 并拒绝导入，"
                 f"请尽快手动获取: {DN42_ROA_V6_URL}"
             )
-            placeholder = (
-                "# dn42ctl: ROA v6 placeholder\n"
-                f"# 下载失败，请稍后手动获取: {DN42_ROA_V6_URL}\n"
-            )
+            placeholder = f"# dn42ctl: ROA v6 placeholder\n# 下载失败，请稍后手动获取: {DN42_ROA_V6_URL}\n"
             write_text(bird_roa_v6_conf_path, placeholder)
 
     systemd_enabled = False
@@ -161,13 +156,9 @@ def genconf(
             write_text(service_path, service_text)
             write_text(timer_path, timer_text)
             subprocess.check_output(["systemctl", "daemon-reload"], text=True)
-            subprocess.check_output(
-                ["systemctl", "enable", "--now", "dn42-roa-v6.timer"], text=True
-            )
+            subprocess.check_output(["systemctl", "enable", "--now", "dn42-roa-v6.timer"], text=True)
             # Trigger once so the ROA file is available immediately.
-            subprocess.check_output(
-                ["systemctl", "start", "dn42-roa-v6.service"], text=True
-            )
+            subprocess.check_output(["systemctl", "start", "dn42-roa-v6.service"], text=True)
             systemd_enabled = True
         except PermissionError as exc:
             raise Dn42CtlError("权限不足: 无法安装/启用 systemd 定时器。") from exc

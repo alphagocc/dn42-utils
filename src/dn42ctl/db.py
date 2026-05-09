@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from dn42ctl.constants import FILE_MODE_PRIVATE
@@ -16,7 +17,7 @@ class DatabaseError(RuntimeError):
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 @dataclass(frozen=True)
@@ -55,7 +56,7 @@ class Database:
         self._conn.execute("PRAGMA foreign_keys = ON")
 
     @classmethod
-    def open(cls, db_path: Path) -> "Database":
+    def open(cls, db_path: Path) -> Database:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             conn = sqlite3.connect(db_path)
@@ -73,14 +74,10 @@ class Database:
         self._conn.close()
 
     def migrate(self) -> None:
-        self._conn.execute(
-            "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)"
-        )
+        self._conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)")
         applied = {
             int(row[0])
-            for row in self._conn.execute(
-                "SELECT version FROM schema_migrations ORDER BY version"
-            ).fetchall()
+            for row in self._conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
         }
 
         for version, sql in MIGRATIONS:
@@ -88,9 +85,7 @@ class Database:
                 continue
             try:
                 self._conn.executescript(sql)
-                self._conn.execute(
-                    "INSERT INTO schema_migrations(version) VALUES (?)", (version,)
-                )
+                self._conn.execute("INSERT INTO schema_migrations(version) VALUES (?)", (version,))
                 self._conn.commit()
             except sqlite3.Error as exc:
                 self._conn.rollback()
@@ -241,7 +236,7 @@ class Database:
         self,
         table: str,
         where_clause: str,
-        get_fn: callable,
+        get_fn: Callable[..., sqlite3.Row | None],
         where_params: tuple,
         error_label: str,
     ) -> sqlite3.Row | None:

@@ -50,9 +50,7 @@ def validate_endpoint(value: str, *, allow_empty: bool = False) -> str:
         raise ValidationError("Endpoint 不能为空")
     m = _ENDPOINT_RE.match(value)
     if not m:
-        raise ValidationError(
-            f"Endpoint 格式错误: 需要 host:port 或 [IPv6]:port 形式: {value!r}"
-        )
+        raise ValidationError(f"Endpoint 格式错误: 需要 host:port 或 [IPv6]:port 形式: {value!r}")
     port = int(m.group(2))
     if not (1 <= port <= MAX_PORT):
         raise ValidationError(f"Endpoint 端口超出范围 (1-{MAX_PORT}): {port}")
@@ -96,9 +94,7 @@ def validate_ipv6_network(value: str, *, field_name: str = "IPv6 前缀") -> str
 def validate_babel_type(value: str) -> str:
     value = value.strip().lower()
     if value not in BABEL_VALID_TYPES:
-        raise ValidationError(
-            f"type 必须是 {', '.join(BABEL_VALID_TYPES)} 之一: {value!r}"
-        )
+        raise ValidationError(f"type 必须是 {', '.join(BABEL_VALID_TYPES)} 之一: {value!r}")
     return value
 
 
@@ -116,9 +112,7 @@ def validate_ownnetset_v6(value: str) -> str:
     if not value:
         raise ValidationError("OWNNETSETv6 不能为空")
     if not (value.startswith("[") and value.endswith("]") and "+" in value):
-        raise ValidationError(
-            f"OWNNETSETv6 格式不合法，需要形如 [prefix+/...] 的格式: {value!r}"
-        )
+        raise ValidationError(f"OWNNETSETv6 格式不合法，需要形如 [prefix+/...] 的格式: {value!r}")
     return value
 
 

@@ -8,7 +8,6 @@ from pathlib import Path
 from dn42ctl.config import AppConfig
 from dn42ctl.constants import LIVE_CMD_TIMEOUT
 from dn42ctl.db import DatabaseError
-
 from dn42ctl.services.core import (
     BgpPeerView,
     CommandOutput,
@@ -64,9 +63,7 @@ def _run_live_probes(
 
 def _run_cmd_best_effort(cmd: list[str]) -> CommandOutput:
     try:
-        out = subprocess.check_output(
-            cmd, text=True, stderr=subprocess.STDOUT, timeout=LIVE_CMD_TIMEOUT
-        ).strip()
+        out = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT, timeout=LIVE_CMD_TIMEOUT).strip()
         return CommandOutput(cmd=cmd, ok=True, output=out, error=None)
     except FileNotFoundError as exc:
         return CommandOutput(cmd=cmd, ok=False, output=None, error=str(exc))
@@ -74,9 +71,7 @@ def _run_cmd_best_effort(cmd: list[str]) -> CommandOutput:
         return CommandOutput(cmd=cmd, ok=False, output=None, error="timeout")
     except subprocess.CalledProcessError as exc:
         output = exc.output.strip() if isinstance(exc.output, str) else None
-        return CommandOutput(
-            cmd=cmd, ok=False, output=output, error=f"exit={exc.returncode}"
-        )
+        return CommandOutput(cmd=cmd, ok=False, output=output, error=f"exit={exc.returncode}")
 
 
 def _file_status(paths: list[Path]) -> list[FileStatus]:
@@ -115,9 +110,7 @@ def show_bgp_peers(
         ifname = str(row["ifname"])
         peer_asn = int(row["peer_asn"])
         net_backend = str(row["net_backend"])
-        files = peer_files_for_backend(
-            config=config, ifname=ifname, net_backend=net_backend, kind="bgp"
-        )
+        files = peer_files_for_backend(config=config, ifname=ifname, net_backend=net_backend, kind="bgp")
         live_wg = wg_map.get(ifname) if include_live else None
         live_bird = bird_map.get(ifname) if include_live else None
 
@@ -130,9 +123,7 @@ def show_bgp_peers(
                 peer_lla=row["peer_lla"],
                 local_lla=str(row["local_lla"]),
                 listen_port=int(row["listen_port"]),
-                allowed_ips=parse_allowed_ips_json(
-                    str(row["allowed_ips_json"]) if row["allowed_ips_json"] else None
-                ),
+                allowed_ips=parse_allowed_ips_json(str(row["allowed_ips_json"]) if row["allowed_ips_json"] else None),
                 net_backend=net_backend,
                 wg_public_key=str(row["wg_public_key"]),
                 files=_file_status(files),
@@ -191,9 +182,7 @@ def show_ibgp_peers(
                 peer_lla=row["peer_lla"],
                 local_lla=str(row["local_lla"]),
                 listen_port=int(row["listen_port"]),
-                allowed_ips=parse_allowed_ips_json(
-                    str(row["allowed_ips_json"]) if row["allowed_ips_json"] else None
-                ),
+                allowed_ips=parse_allowed_ips_json(str(row["allowed_ips_json"]) if row["allowed_ips_json"] else None),
                 net_backend=net_backend,
                 wg_public_key=str(row["wg_public_key"]),
                 files=_file_status(files),
@@ -234,13 +223,9 @@ def show_wg_tunnels(
             )
         )
 
-    for bgp in show_bgp_peers(
-        config=config, db_path=db_path, include_live=include_live
-    ):
+    for bgp in show_bgp_peers(config=config, db_path=db_path, include_live=include_live):
         _show("bgp", bgp)
-    for ibgp in show_ibgp_peers(
-        config=config, db_path=db_path, include_live=include_live
-    ):
+    for ibgp in show_ibgp_peers(config=config, db_path=db_path, include_live=include_live):
         if ibgp.has_wg:
             _show("ibgp", ibgp)
 

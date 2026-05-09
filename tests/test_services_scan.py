@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
+from dn42ctl.services.core import Dn42CtlError
 from dn42ctl.services.scan import (
     _parse_babel_conf_interface_params,
     _parse_bird_bgp_peer_conf,
@@ -14,7 +15,6 @@ from dn42ctl.services.scan import (
     discover_bird_paths,
     scan_local_configs,
 )
-from dn42ctl.services.core import Dn42CtlError
 
 
 class TestParseNetworkdNetdev:
@@ -152,9 +152,7 @@ class TestDiscoverBirdPaths:
     def test_with_includes(self, tmp_path: Path) -> None:
         bird_conf = tmp_path / "bird.conf"
         bird_conf.write_text(
-            'include "/etc/bird/peers/*";\n'
-            'include "/etc/bird/babel.conf";\n'
-            'include "/etc/bird/roa_dn42_v6.conf";\n'
+            'include "/etc/bird/peers/*";\ninclude "/etc/bird/babel.conf";\ninclude "/etc/bird/roa_dn42_v6.conf";\n'
         )
         result = discover_bird_paths(candidate_bird_conf_paths=[bird_conf])
         assert result.bird_conf_path == bird_conf
@@ -163,18 +161,15 @@ class TestDiscoverBirdPaths:
         assert result.bird_roa_v6_conf_path == Path("/etc/bird/roa_dn42_v6.conf")
 
     def test_no_candidates(self) -> None:
-        result = discover_bird_paths(
-            candidate_bird_conf_paths=[Path("/nonexistent/bird.conf")]
-        )
+        result = discover_bird_paths(candidate_bird_conf_paths=[Path("/nonexistent/bird.conf")])
         assert result.bird_conf_path is None
         assert result.bird_peers_dir is None
 
 
 class TestScanLocalConfigs:
     def test_wg_not_found_raises(self, sample_config, db_path: Path) -> None:
-        with patch("shutil.which", return_value=None):
-            with pytest.raises(Dn42CtlError, match="wg"):
-                scan_local_configs(config=sample_config, db_path=db_path)
+        with patch("shutil.which", return_value=None), pytest.raises(Dn42CtlError, match="wg"):
+            scan_local_configs(config=sample_config, db_path=db_path)
 
     def test_scan_networkd_bgp(self, sample_config, db_path: Path) -> None:
         networkd_dir = Path(sample_config.networkd_dir)
@@ -188,15 +183,10 @@ class TestScanLocalConfigs:
             "AllowedIPs=fe80::/64,fd00::/8\n"
         )
         network = networkd_dir / "dn42_1234.network"
-        network.write_text(
-            "[Match]\nName=dn42_1234\n\n"
-            "[Address]\nAddress=fe80::abcd:1234/64\nPeer=fe80::1\n"
-        )
+        network.write_text("[Match]\nName=dn42_1234\n\n[Address]\nAddress=fe80::abcd:1234/64\nPeer=fe80::1\n")
         bird_peer = peers_dir / "dn42_1234.conf"
         bird_peer.write_text(
-            "protocol bgp dn42_1234 from dnpeers {\n"
-            "    neighbor fe80::1%dn42_1234 as 4242421234;\n"
-            "}\n"
+            "protocol bgp dn42_1234 from dnpeers {\n    neighbor fe80::1%dn42_1234 as 4242421234;\n}\n"
         )
 
         with (
@@ -219,8 +209,7 @@ class TestScanLocalConfigs:
 
         netdev = networkd_dir / "dn42_1234.netdev"
         netdev.write_text(
-            "[WireGuard]\nPrivateKey=KEY\nListenPort=51820\n"
-            "[WireGuardPeer]\nPublicKey=PUB\nAllowedIPs=fe80::/64\n"
+            "[WireGuard]\nPrivateKey=KEY\nListenPort=51820\n[WireGuardPeer]\nPublicKey=PUB\nAllowedIPs=fe80::/64\n"
         )
         network = networkd_dir / "dn42_1234.network"
         network.write_text("[Address]\nAddress=fe80::1/64\nPeer=fe80::2\n")

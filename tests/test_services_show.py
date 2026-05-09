@@ -5,24 +5,25 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from conftest import VALID_ENDPOINT, VALID_PEER_IP, VALID_PEER_LLA, VALID_PUBKEY
 
+from dn42ctl.services.bgp import create_bgp_peer
+from dn42ctl.services.ibgp import create_ibgp_peer
 from dn42ctl.services.show import (
     _run_cmd_best_effort,
     show_bgp_peers,
     show_ibgp_peers,
     show_wg_tunnels,
 )
-from dn42ctl.services.bgp import create_bgp_peer
-from dn42ctl.services.ibgp import create_ibgp_peer
-
-from conftest import VALID_ENDPOINT, VALID_PEER_IP, VALID_PEER_LLA, VALID_PUBKEY
 
 
 @pytest.fixture
 def _mock_wg(mock_wg_keypair):
-    with patch("dn42ctl.services.bgp.generate_random_lla_cidr", return_value="fe80::abcd:1234/64"):
-        with patch("dn42ctl.services.ibgp.generate_random_lla_cidr", return_value="fe80::abcd:5678/64"):
-            yield
+    with (
+        patch("dn42ctl.services.bgp.generate_random_lla_cidr", return_value="fe80::abcd:1234/64"),
+        patch("dn42ctl.services.ibgp.generate_random_lla_cidr", return_value="fe80::abcd:5678/64"),
+    ):
+        yield
 
 
 class TestRunCmdBestEffort:
@@ -72,9 +73,7 @@ class TestShowBgpPeers:
             peer_lla=VALID_PEER_LLA,
             net_backend="networkd",
         )
-        peers = show_bgp_peers(
-            config=sample_config, db_path=db_path, include_live=False
-        )
+        peers = show_bgp_peers(config=sample_config, db_path=db_path, include_live=False)
         assert len(peers) == 1
         assert peers[0].peer_asn == 4242421234
         assert peers[0].live_wg is None
@@ -82,9 +81,7 @@ class TestShowBgpPeers:
 
     @pytest.mark.usefixtures("_mock_wg")
     def test_empty(self, sample_config, db_path: Path) -> None:
-        peers = show_bgp_peers(
-            config=sample_config, db_path=db_path, include_live=False
-        )
+        peers = show_bgp_peers(config=sample_config, db_path=db_path, include_live=False)
         assert peers == []
 
 
@@ -102,9 +99,7 @@ class TestShowIbgpPeers:
             net_backend="networkd",
             babel_rxcost=120,
         )
-        peers = show_ibgp_peers(
-            config=sample_config, db_path=db_path, include_live=False
-        )
+        peers = show_ibgp_peers(config=sample_config, db_path=db_path, include_live=False)
         assert len(peers) == 1
         assert peers[0].name == "mynode"
         assert peers[0].babel_rxcost == 120
@@ -133,9 +128,7 @@ class TestShowWgTunnels:
             net_backend="networkd",
             babel_rxcost=120,
         )
-        tunnels = show_wg_tunnels(
-            config=sample_config, db_path=db_path, include_live=False
-        )
+        tunnels = show_wg_tunnels(config=sample_config, db_path=db_path, include_live=False)
         assert len(tunnels) == 2
         kinds = {t.kind for t in tunnels}
         assert kinds == {"bgp", "ibgp"}
@@ -149,7 +142,5 @@ class TestShowWgTunnels:
             peer_ip=VALID_PEER_IP,
             has_wg=False,
         )
-        tunnels = show_wg_tunnels(
-            config=sample_config, db_path=db_path, include_live=False
-        )
+        tunnels = show_wg_tunnels(config=sample_config, db_path=db_path, include_live=False)
         assert len(tunnels) == 0

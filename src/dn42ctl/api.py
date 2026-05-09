@@ -278,9 +278,7 @@ class GenconfRequest(BaseModel):
 @app.get(f"{router_prefix}/bgp/peers")
 def api_show_bgp(live: Annotated[bool, Query()] = True) -> list[dict]:
     try:
-        peers = show_bgp_peers(
-            config=_get_config(), db_path=_get_db_path(), include_live=live
-        )
+        peers = show_bgp_peers(config=_get_config(), db_path=_get_db_path(), include_live=live)
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return [asdict(p) for p in peers]
@@ -337,9 +335,7 @@ def api_modify_bgp(asn: int, body: BgpPeerModifyRequest) -> dict:
 @app.delete(f"{router_prefix}/bgp/peers/{{asn}}")
 def api_delete_bgp(asn: int) -> dict:
     try:
-        res = delete_bgp_peer(
-            config=_get_config(), db_path=_get_db_path(), peer_asn=asn
-        )
+        res = delete_bgp_peer(config=_get_config(), db_path=_get_db_path(), peer_asn=asn)
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return asdict(res)
@@ -351,9 +347,7 @@ def api_delete_bgp(asn: int) -> dict:
 @app.get(f"{router_prefix}/ibgp/peers")
 def api_show_ibgp(live: Annotated[bool, Query()] = True) -> list[dict]:
     try:
-        peers = show_ibgp_peers(
-            config=_get_config(), db_path=_get_db_path(), include_live=live
-        )
+        peers = show_ibgp_peers(config=_get_config(), db_path=_get_db_path(), include_live=live)
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return [asdict(p) for p in peers]
@@ -417,9 +411,7 @@ def api_modify_ibgp(name: str, body: IbgpPeerModifyRequest) -> dict:
 @app.delete(f"{router_prefix}/ibgp/peers/{{name}}")
 def api_delete_ibgp(name: str) -> dict:
     try:
-        res = delete_ibgp_peer(
-            config=_get_config(), db_path=_get_db_path(), name=name
-        )
+        res = delete_ibgp_peer(config=_get_config(), db_path=_get_db_path(), name=name)
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return asdict(res)
@@ -431,9 +423,7 @@ def api_delete_ibgp(name: str) -> dict:
 @app.get(f"{router_prefix}/wg/tunnels")
 def api_show_wg(live: Annotated[bool, Query()] = True) -> list[dict]:
     try:
-        tunnels = show_wg_tunnels(
-            config=_get_config(), db_path=_get_db_path(), include_live=live
-        )
+        tunnels = show_wg_tunnels(config=_get_config(), db_path=_get_db_path(), include_live=live)
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return [asdict(t) for t in tunnels]

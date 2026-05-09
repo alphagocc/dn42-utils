@@ -5,14 +5,6 @@ from pathlib import Path
 from dn42ctl.config import AppConfig
 from dn42ctl.db import DatabaseError, IbgpPeerRecord
 from dn42ctl.render import render_bird_ibgp_peer_conf
-from dn42ctl.validators import (
-    ValidationError,
-    validate_babel_type,
-    validate_listen_port,
-    validate_rxcost,
-)
-from dn42ctl.wg import generate_random_lla_cidr
-
 from dn42ctl.services.core import (
     IBGP_ALLOWED_IPS,
     DeleteResult,
@@ -31,6 +23,13 @@ from dn42ctl.services.core import (
     write_net_backend_files,
     write_text,
 )
+from dn42ctl.validators import (
+    ValidationError,
+    validate_babel_type,
+    validate_listen_port,
+    validate_rxcost,
+)
+from dn42ctl.wg import generate_random_lla_cidr
 
 
 def create_ibgp_peer(
@@ -132,9 +131,7 @@ def create_ibgp_peer(
 
     bird_peer_path = Path(config.bird_peers_dir) / f"ibgp_{peer_name}.conf"
     try:
-        bird_conf_text = render_bird_ibgp_peer_conf(
-            name=peer_name, ifname=ifname, peer_ip=peer_ip
-        )
+        bird_conf_text = render_bird_ibgp_peer_conf(name=peer_name, ifname=ifname, peer_ip=peer_ip)
     except ValueError as exc:
         raise Dn42CtlError(str(exc)) from exc
     write_text(bird_peer_path, bird_conf_text)
@@ -276,11 +273,7 @@ def modify_ibgp_peer(
         validate_listen_port(new_listen_port, allow_zero=True)
     except ValidationError as exc:
         raise Dn42CtlError(str(exc)) from exc
-    if (
-        listen_port is not None
-        and new_listen_port > 0
-        and new_listen_port != current_listen_port
-    ):
+    if listen_port is not None and new_listen_port > 0 and new_listen_port != current_listen_port:
         try:
             used_ports = db.get_used_listen_ports(node_id)
         except DatabaseError as exc:
@@ -312,9 +305,7 @@ def modify_ibgp_peer(
 
     bird_peer_path = Path(config.bird_peers_dir) / f"ibgp_{peer_name}.conf"
     try:
-        bird_conf_text = render_bird_ibgp_peer_conf(
-            name=peer_name, ifname=ifname, peer_ip=peer_ip
-        )
+        bird_conf_text = render_bird_ibgp_peer_conf(name=peer_name, ifname=ifname, peer_ip=peer_ip)
     except ValueError as exc:
         raise Dn42CtlError(str(exc)) from exc
     write_text(bird_peer_path, bird_conf_text)

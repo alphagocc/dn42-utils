@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from dn42ctl.config import AppConfig, ConfigError, load_config, save_config
-
 import pytest
+
+from dn42ctl.config import AppConfig, ConfigError, load_config, save_config
 
 
 class TestSaveAndLoadRoundtrip:

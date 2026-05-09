@@ -4,11 +4,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from conftest import VALID_ENDPOINT, VALID_PEER_LLA, VALID_PUBKEY
 
 from dn42ctl.services.bgp import create_bgp_peer, delete_bgp_peer, modify_bgp_peer
 from dn42ctl.services.core import Dn42CtlError
-
-from conftest import FAKE_WG_PRIVKEY, FAKE_WG_PUBKEY, VALID_ENDPOINT, VALID_PEER_LLA, VALID_PUBKEY
 
 
 @pytest.fixture

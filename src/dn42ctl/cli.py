@@ -9,9 +9,9 @@ from typing import Any
 
 import typer
 
+from dn42ctl.config import AppConfig, ConfigError, save_config
 from dn42ctl.context import AppContext
 from dn42ctl.db import Database, DatabaseError
-from dn42ctl.config import AppConfig, ConfigError, save_config
 from dn42ctl.paths import (
     DEFAULT_BIRD_BABEL_CONF_PATH,
     DEFAULT_BIRD_CONF_PATH,
@@ -26,9 +26,9 @@ from dn42ctl.services import (
     Dn42CtlError,
     create_bgp_peer,
     create_ibgp_peer,
-    discover_bird_paths,
     delete_bgp_peer,
     delete_ibgp_peer,
+    discover_bird_paths,
     genconf,
     init_node,
     modify_bgp_peer,
@@ -41,7 +41,10 @@ from dn42ctl.services import (
 from dn42ctl.services.core import BgpPeerView, IbgpPeerView, WgTunnelView, sanitize_name
 from dn42ctl.validators import (
     ValidationError as _ValidationError,
+)
+from dn42ctl.validators import (
     validate_asn,
+    validate_babel_type,
     validate_endpoint,
     validate_ipv6_address,
     validate_ipv6_network,
@@ -49,10 +52,8 @@ from dn42ctl.validators import (
     validate_pubkey,
     validate_router_id,
     validate_rxcost,
-    validate_babel_type,
 )
 from dn42ctl.wg import WireGuardError, generate_random_lla_cidr, generate_wg_keypair
-
 
 app = typer.Typer(add_completion=False)
 
@@ -82,6 +83,7 @@ def _print_dummy_result(dummy: object | None) -> None:
     if dummy is None:
         return
     from dn42ctl.services.dummy import DummyResult
+
     if not isinstance(dummy, DummyResult):
         return
     if dummy.skipped:
@@ -148,6 +150,10 @@ def _prepare_peer_info(
     if peer_lla is None:
         peer_lla = typer.prompt("Peer LLA (fe80::...)")
 
+    assert peer_public_key is not None
+    assert endpoint is not None
+    assert peer_lla is not None
+
     return (
         prepared_private_key,
         prepared_public_key,
@@ -170,9 +176,7 @@ def _print_wg_tunnels(tunnels: list["WgTunnelView"]) -> None:
         return
     for t in tunnels:
         ident = f"AS{t.peer_asn}" if t.kind == "bgp" else f"{t.name}"
-        typer.echo(
-            f"[{t.kind}] {ident} ifname={t.ifname} backend={t.net_backend} port={t.listen_port}"
-        )
+        typer.echo(f"[{t.kind}] {ident} ifname={t.ifname} backend={t.net_backend} port={t.listen_port}")
         typer.echo(f"  peer_pubkey: {t.peer_public_key or ''}")
         typer.echo(f"  endpoint: {t.endpoint or ''}")
         typer.echo(f"  local_lla: {t.local_lla}  peer_lla: {t.peer_lla or ''}")
@@ -187,9 +191,7 @@ def _print_bgp_peers(peers: list["BgpPeerView"]) -> None:
         typer.echo("(空) 未找到任何 BGP peer")
         return
     for p in peers:
-        typer.echo(
-            f"AS{p.peer_asn} ifname={p.ifname} backend={p.net_backend} port={p.listen_port}"
-        )
+        typer.echo(f"AS{p.peer_asn} ifname={p.ifname} backend={p.net_backend} port={p.listen_port}")
         typer.echo(f"  peer_lla: {p.peer_lla or ''}")
         typer.echo(f"  endpoint: {p.endpoint or ''}")
         typer.echo(f"  peer_pubkey: {p.peer_public_key or ''}")
@@ -208,9 +210,7 @@ def _print_ibgp_peers(peers: list["IbgpPeerView"]) -> None:
     for p in peers:
         proto = f"ibgp_{p.name}"
         wg_tag = "wg" if p.has_wg else "no-wg"
-        typer.echo(
-            f"{p.name} proto={proto} ifname={p.ifname} [{wg_tag}] backend={p.net_backend} port={p.listen_port}"
-        )
+        typer.echo(f"{p.name} proto={proto} ifname={p.ifname} [{wg_tag}] backend={p.net_backend} port={p.listen_port}")
         typer.echo(f"  peer_ip: {p.peer_ip or ''}")
         if p.has_wg:
             typer.echo(f"  babel_rxcost: {p.babel_rxcost}")
@@ -254,29 +254,17 @@ def cmd_init(
         "--own-ipv6",
         help="本机 DN42 IPv6 (支持输入 4 位 hex 作为最后一段)",
     ),
-    ownnet_v6: str | None = typer.Option(
-        None, "--ownnet-v6", help="本机 DN42 IPv6 前缀"
-    ),
+    ownnet_v6: str | None = typer.Option(None, "--ownnet-v6", help="本机 DN42 IPv6 前缀"),
     ownnetset_v6: str | None = typer.Option(
         None,
         "--ownnetset-v6",
         help="Bird 的 OWNNETSETv6（形如 [prefix+/...]）",
     ),
-    bird_conf_path: Path | None = typer.Option(
-        None, "--bird-conf", help="bird.conf 输出路径"
-    ),
-    bird_peers_dir: Path | None = typer.Option(
-        None, "--bird-peers-dir", help="Bird peers 目录"
-    ),
-    bird_babel_conf_path: Path | None = typer.Option(
-        None, "--bird-babel-conf", help="babel.conf 输出路径"
-    ),
-    bird_roa_v6_conf_path: Path | None = typer.Option(
-        None, "--bird-roa-v6-conf", help="roa_dn42_v6.conf 路径"
-    ),
-    networkd_dir: Path | None = typer.Option(
-        None, "--networkd-dir", help="systemd-networkd 配置目录"
-    ),
+    bird_conf_path: Path | None = typer.Option(None, "--bird-conf", help="bird.conf 输出路径"),
+    bird_peers_dir: Path | None = typer.Option(None, "--bird-peers-dir", help="Bird peers 目录"),
+    bird_babel_conf_path: Path | None = typer.Option(None, "--bird-babel-conf", help="babel.conf 输出路径"),
+    bird_roa_v6_conf_path: Path | None = typer.Option(None, "--bird-roa-v6-conf", help="roa_dn42_v6.conf 路径"),
+    networkd_dir: Path | None = typer.Option(None, "--networkd-dir", help="systemd-networkd 配置目录"),
     nm_system_connections_dir: Path | None = typer.Option(
         None,
         "--nm-system-connections-dir",
@@ -302,19 +290,11 @@ def cmd_init(
     assert own_asn is not None
 
     if ownnet_v6 is None:
-        ownnet_v6 = (
-            existing.ownnet_v6
-            if existing
-            else typer.prompt("OWNNETv6", default="fddf:8aef:1053::/48")
-        )
+        ownnet_v6 = existing.ownnet_v6 if existing else typer.prompt("OWNNETv6", default="fddf:8aef:1053::/48")
     assert ownnet_v6 is not None
 
     if ownnetset_v6 is None:
-        ownnetset_v6 = (
-            existing.ownnetset_v6
-            if existing
-            else typer.prompt("OWNNETSETv6", default=f"[{ownnet_v6}+]")
-        )
+        ownnetset_v6 = existing.ownnetset_v6 if existing else typer.prompt("OWNNETSETv6", default=f"[{ownnet_v6}+]")
     assert ownnetset_v6 is not None
 
     if own_ipv6 is None:
@@ -323,40 +303,22 @@ def cmd_init(
     if len(own_ipv6) <= 4 and all(c in "0123456789abcdefABCDEF" for c in own_ipv6):
         own_ipv6 = f"fddf:8aef:1053::{own_ipv6.lower()}"
 
-    router_id = (
-        existing.router_id
-        if existing
-        else typer.prompt("ROUTERID", default=_default_router_id())
-    )
+    router_id = existing.router_id if existing else typer.prompt("ROUTERID", default=_default_router_id())
 
     # Path precedence: CLI option > existing config > default.
     if bird_conf_path is None:
-        bird_conf_path = (
-            Path(existing.bird_conf_path) if existing else DEFAULT_BIRD_CONF_PATH
-        )
+        bird_conf_path = Path(existing.bird_conf_path) if existing else DEFAULT_BIRD_CONF_PATH
     if bird_peers_dir is None:
-        bird_peers_dir = (
-            Path(existing.bird_peers_dir) if existing else DEFAULT_BIRD_PEERS_DIR
-        )
+        bird_peers_dir = Path(existing.bird_peers_dir) if existing else DEFAULT_BIRD_PEERS_DIR
     if bird_babel_conf_path is None:
-        bird_babel_conf_path = (
-            Path(existing.bird_babel_conf_path)
-            if existing
-            else DEFAULT_BIRD_BABEL_CONF_PATH
-        )
+        bird_babel_conf_path = Path(existing.bird_babel_conf_path) if existing else DEFAULT_BIRD_BABEL_CONF_PATH
     if bird_roa_v6_conf_path is None:
-        bird_roa_v6_conf_path = (
-            Path(existing.bird_roa_v6_conf_path)
-            if existing
-            else DEFAULT_BIRD_ROA_V6_CONF_PATH
-        )
+        bird_roa_v6_conf_path = Path(existing.bird_roa_v6_conf_path) if existing else DEFAULT_BIRD_ROA_V6_CONF_PATH
     if networkd_dir is None:
         networkd_dir = Path(existing.networkd_dir) if existing else DEFAULT_NETWORKD_DIR
     if nm_system_connections_dir is None:
         nm_system_connections_dir = (
-            Path(existing.nm_system_connections_dir)
-            if existing
-            else DEFAULT_NM_SYSTEM_CONNECTIONS_DIR
+            Path(existing.nm_system_connections_dir) if existing else DEFAULT_NM_SYSTEM_CONNECTIONS_DIR
         )
 
     try:
@@ -419,10 +381,7 @@ def cmd_init(
         typer.echo(f"Bird: {gen_res.bird_conf_path}")
         typer.echo(f"Babel: {gen_res.bird_babel_conf_path}")
         typer.echo(f"ROA v6: {gen_res.bird_roa_v6_conf_path}")
-        typer.echo(
-            "ROA systemd timer: "
-            + ("enabled" if gen_res.systemd_roa_timer_enabled else "skipped")
-        )
+        typer.echo("ROA systemd timer: " + ("enabled" if gen_res.systemd_roa_timer_enabled else "skipped"))
 
         if gen_res.warnings:
             typer.echo("\n警告:")
@@ -456,10 +415,7 @@ def cmd_genconf(ctx: typer.Context) -> None:
     typer.echo(f"Bird: {res.bird_conf_path}")
     typer.echo(f"Babel: {res.bird_babel_conf_path}")
     typer.echo(f"ROA v6: {res.bird_roa_v6_conf_path}")
-    typer.echo(
-        "ROA systemd timer: "
-        + ("enabled" if res.systemd_roa_timer_enabled else "skipped")
-    )
+    typer.echo("ROA systemd timer: " + ("enabled" if res.systemd_roa_timer_enabled else "skipped"))
     _print_dummy_result(res.dummy)
 
     if res.warnings:
@@ -501,9 +457,7 @@ def cmd_scan(ctx: typer.Context) -> None:
         try:
             save_config(appctx.config_path, updated_config)
         except OSError as exc:
-            updated_msg = (
-                f"无法回写 config.toml（但将继续使用识别到的路径进行 scan）: {exc}"
-            )
+            updated_msg = f"无法回写 config.toml（但将继续使用识别到的路径进行 scan）: {exc}"
 
     try:
         res = scan_local_configs(config=updated_config, db_path=appctx.db_path)
@@ -512,22 +466,16 @@ def cmd_scan(ctx: typer.Context) -> None:
         raise typer.Exit(1) from exc
 
     typer.echo("scan 完成")
-    typer.echo(
-        f"inserted: {len(res.inserted)}  conflicts: {len(res.conflicts)}  skipped: {len(res.skipped)}"
-    )
+    typer.echo(f"inserted: {len(res.inserted)}  conflicts: {len(res.conflicts)}  skipped: {len(res.skipped)}")
 
     if res.inserted:
         typer.echo("\n已导入:")
         for x in res.inserted:
-            typer.echo(
-                f"- [{x.kind}] {x.key} ifname={x.ifname} backend={x.net_backend}"
-            )
+            typer.echo(f"- [{x.kind}] {x.key} ifname={x.ifname} backend={x.net_backend}")
     if res.conflicts:
         typer.echo("\n冲突(已跳过):")
         for x in res.conflicts:
-            typer.echo(
-                f"- [{x.kind}] {x.key} ifname={x.ifname} backend={x.net_backend}"
-            )
+            typer.echo(f"- [{x.kind}] {x.key} ifname={x.ifname} backend={x.net_backend}")
     if res.skipped:
         typer.echo("\n跳过:")
         for s in res.skipped:
@@ -551,16 +499,10 @@ peer_app = typer.Typer(invoke_without_command=True)
 def cmd_bgp_peer(
     ctx: typer.Context,
     peer_asn: int | None = typer.Option(None, "--asn", help="Peer ASN"),
-    peer_public_key: str | None = typer.Option(
-        None, "--pubkey", help="Peer WireGuard 公钥"
-    ),
-    endpoint: str | None = typer.Option(
-        None, "--endpoint", help="Peer Endpoint (IP:Port，可留空)"
-    ),
+    peer_public_key: str | None = typer.Option(None, "--pubkey", help="Peer WireGuard 公钥"),
+    endpoint: str | None = typer.Option(None, "--endpoint", help="Peer Endpoint (IP:Port，可留空)"),
     peer_lla: str | None = typer.Option(None, "--peer-lla", help="Peer LLA (IPv6)"),
-    net_backend: str | None = typer.Option(
-        None, "--net", help="networkd 或 nm (NetworkManager)"
-    ),
+    net_backend: str | None = typer.Option(None, "--net", help="networkd 或 nm (NetworkManager)"),
     listen_port: int | None = typer.Option(
         None,
         "--listen-port",
@@ -585,9 +527,7 @@ def cmd_bgp_peer(
         peer_public_key,
         endpoint,
         peer_lla,
-    ) = _prepare_peer_info(
-        peer_public_key, endpoint, peer_lla, allow_empty_endpoint=True
-    )
+    ) = _prepare_peer_info(peer_public_key, endpoint, peer_lla, allow_empty_endpoint=True)
 
     assert peer_asn is not None
     assert net_backend is not None
@@ -599,6 +539,10 @@ def cmd_bgp_peer(
     except typer.BadParameter as exc:
         typer.echo(f"输入错误: {exc}")
         raise typer.Exit(2) from exc
+
+    assert peer_public_key is not None
+    assert endpoint is not None
+    assert peer_lla is not None
 
     try:
         res = create_bgp_peer(
@@ -631,12 +575,8 @@ def cmd_bgp_peer(
 def cmd_bgp_peer_modify(
     ctx: typer.Context,
     peer_asn: int = typer.Argument(..., help="Peer ASN"),
-    peer_public_key: str | None = typer.Option(
-        None, "--pubkey", help="Peer WireGuard 公钥"
-    ),
-    endpoint: str | None = typer.Option(
-        None, "--endpoint", help="Peer Endpoint (IP:Port)"
-    ),
+    peer_public_key: str | None = typer.Option(None, "--pubkey", help="Peer WireGuard 公钥"),
+    endpoint: str | None = typer.Option(None, "--endpoint", help="Peer Endpoint (IP:Port)"),
     peer_lla: str | None = typer.Option(None, "--peer-lla", help="Peer LLA (IPv6)"),
     net_backend: str | None = typer.Option(None, "--net", help="networkd 或 nm"),
     listen_port: int | None = typer.Option(
@@ -655,17 +595,13 @@ def cmd_bgp_peer_modify(
         raise typer.Exit(2)
 
     if peer_public_key is None:
-        peer_public_key = typer.prompt(
-            "Peer 公钥", default=str(row["peer_public_key"] or "")
-        )
+        peer_public_key = typer.prompt("Peer 公钥", default=str(row["peer_public_key"] or ""))
     if endpoint is None:
         endpoint = typer.prompt("Peer Endpoint", default=str(row["endpoint"] or ""))
     if peer_lla is None:
         peer_lla = typer.prompt("Peer LLA", default=str(row["peer_lla"] or ""))
     if net_backend is None:
-        net_backend = typer.prompt(
-            "网络后端", default=str(row["net_backend"] or "networkd")
-        )
+        net_backend = typer.prompt("网络后端", default=str(row["net_backend"] or "networkd"))
 
     assert peer_public_key is not None
     assert endpoint is not None
@@ -680,6 +616,10 @@ def cmd_bgp_peer_modify(
     except typer.BadParameter as exc:
         typer.echo(f"\u8f93\u5165\u9519\u8bef: {exc}")
         raise typer.Exit(2) from exc
+
+    assert peer_public_key is not None
+    assert endpoint is not None
+    assert peer_lla is not None
 
     try:
         res = modify_bgp_peer(
@@ -713,9 +653,7 @@ def cmd_bgp_peer_del(
     appctx: AppContext = ctx.obj
     config = _require_config_or_exit(appctx)
 
-    if not typer.confirm(
-        f"确认删除 BGP peer AS{peer_asn}（DB + 配置文件）？", default=False
-    ):
+    if not typer.confirm(f"确认删除 BGP peer AS{peer_asn}（DB + 配置文件）？", default=False):
         typer.echo("已取消")
         return
 
@@ -739,26 +677,14 @@ ibgp_peer_app = typer.Typer(invoke_without_command=True)
 @ibgp_peer_app.callback(invoke_without_command=True)
 def cmd_ibgp_peer(
     ctx: typer.Context,
-    name: str | None = typer.Option(
-        None, "--name", help="Peer 名称 (用于文件名/接口名)"
-    ),
-    peer_ip: str | None = typer.Option(
-        None, "--peer-ip", help="对端网内 IPv6 地址"
-    ),
-    no_wg: bool = typer.Option(
-        False, "--no-wg", help="跳过 WireGuard 隧道创建"
-    ),
-    peer_public_key: str | None = typer.Option(
-        None, "--pubkey", help="Peer WireGuard 公钥"
-    ),
-    endpoint: str | None = typer.Option(
-        None, "--endpoint", help="Peer Endpoint (IP:Port，可留空)"
-    ),
+    name: str | None = typer.Option(None, "--name", help="Peer 名称 (用于文件名/接口名)"),
+    peer_ip: str | None = typer.Option(None, "--peer-ip", help="对端网内 IPv6 地址"),
+    no_wg: bool = typer.Option(False, "--no-wg", help="跳过 WireGuard 隧道创建"),
+    peer_public_key: str | None = typer.Option(None, "--pubkey", help="Peer WireGuard 公钥"),
+    endpoint: str | None = typer.Option(None, "--endpoint", help="Peer Endpoint (IP:Port，可留空)"),
     peer_lla: str | None = typer.Option(None, "--peer-lla", help="Peer LLA (IPv6)"),
     net_backend: str | None = typer.Option(None, "--net", help="networkd 或 nm"),
-    babel_rxcost: int | None = typer.Option(
-        None, "--rxcost", help="Babel rxcost (0-65535)"
-    ),
+    babel_rxcost: int | None = typer.Option(None, "--rxcost", help="Babel rxcost (0-65535)"),
     babel_type: str | None = typer.Option(
         None, "--type", help="Babel interface type (wired/wireless/tunnel，默认 tunnel)"
     ),
@@ -789,6 +715,7 @@ def cmd_ibgp_peer(
         raise typer.Exit(2) from exc
 
     if no_wg:
+        assert peer_ip is not None
         try:
             res = create_ibgp_peer(
                 config=config,
@@ -820,9 +747,7 @@ def cmd_ibgp_peer(
         peer_public_key,
         endpoint,
         peer_lla,
-    ) = _prepare_peer_info(
-        peer_public_key, endpoint, peer_lla, allow_empty_endpoint=True
-    )
+    ) = _prepare_peer_info(peer_public_key, endpoint, peer_lla, allow_empty_endpoint=True)
 
     assert net_backend is not None
     assert babel_rxcost is not None
@@ -837,6 +762,13 @@ def cmd_ibgp_peer(
     except typer.BadParameter as exc:
         typer.echo(f"输入错误: {exc}")
         raise typer.Exit(2) from exc
+
+    assert peer_ip is not None
+    assert peer_public_key is not None
+    assert endpoint is not None
+    assert peer_lla is not None
+    assert babel_rxcost is not None
+    assert babel_type is not None
 
     try:
         res = create_ibgp_peer(
@@ -873,21 +805,13 @@ def cmd_ibgp_peer(
 def cmd_ibgp_peer_modify(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="iBGP peer name"),
-    peer_public_key: str | None = typer.Option(
-        None, "--pubkey", help="Peer WireGuard 公钥"
-    ),
-    endpoint: str | None = typer.Option(
-        None, "--endpoint", help="Peer Endpoint (IP:Port)"
-    ),
+    peer_public_key: str | None = typer.Option(None, "--pubkey", help="Peer WireGuard 公钥"),
+    endpoint: str | None = typer.Option(None, "--endpoint", help="Peer Endpoint (IP:Port)"),
     peer_lla: str | None = typer.Option(None, "--peer-lla", help="Peer LLA (IPv6)"),
     peer_ip: str | None = typer.Option(None, "--peer-ip", help="对端网内 IPv6 地址"),
     net_backend: str | None = typer.Option(None, "--net", help="networkd 或 nm"),
-    babel_rxcost: int | None = typer.Option(
-        None, "--rxcost", help="Babel rxcost (0-65535)"
-    ),
-    babel_type: str | None = typer.Option(
-        None, "--type", help="Babel interface type (wired/wireless/tunnel)"
-    ),
+    babel_rxcost: int | None = typer.Option(None, "--rxcost", help="Babel rxcost (0-65535)"),
+    babel_type: str | None = typer.Option(None, "--type", help="Babel interface type (wired/wireless/tunnel)"),
     listen_port: int | None = typer.Option(
         None,
         "--listen-port",
@@ -914,9 +838,7 @@ def cmd_ibgp_peer_modify(
         raise typer.Exit(2)
 
     if peer_public_key is None:
-        peer_public_key = typer.prompt(
-            "Peer 公钥", default=str(row["peer_public_key"] or "")
-        )
+        peer_public_key = typer.prompt("Peer 公钥", default=str(row["peer_public_key"] or ""))
     if endpoint is None:
         endpoint = typer.prompt("Peer Endpoint", default=str(row["endpoint"] or ""))
     if peer_lla is None:
@@ -924,9 +846,7 @@ def cmd_ibgp_peer_modify(
     if peer_ip is None:
         peer_ip = typer.prompt("对端网内 IPv6", default=str(row["peer_ip"] or ""))
     if net_backend is None:
-        net_backend = typer.prompt(
-            "网络后端", default=str(row["net_backend"] or "networkd")
-        )
+        net_backend = typer.prompt("网络后端", default=str(row["net_backend"] or "networkd"))
     if babel_rxcost is None:
         babel_rxcost = typer.prompt("Babel rxcost", type=int, default=int(row["babel_rxcost"]))
     if babel_type is None:
@@ -952,6 +872,13 @@ def cmd_ibgp_peer_modify(
     except typer.BadParameter as exc:
         typer.echo(f"输入错误: {exc}")
         raise typer.Exit(2) from exc
+
+    assert peer_public_key is not None
+    assert endpoint is not None
+    assert peer_lla is not None
+    assert peer_ip is not None
+    assert babel_rxcost is not None
+    assert babel_type is not None
 
     try:
         res = modify_ibgp_peer(
@@ -1044,9 +971,7 @@ def cmd_show_wg(
     config = _require_config_or_exit(appctx)
 
     try:
-        tunnels = show_wg_tunnels(
-            config=config, db_path=appctx.db_path, include_live=True
-        )
+        tunnels = show_wg_tunnels(config=config, db_path=appctx.db_path, include_live=True)
     except Dn42CtlError as exc:
         typer.echo(f"错误: {exc}")
         raise typer.Exit(1) from exc
@@ -1088,9 +1013,7 @@ def cmd_show_ibgp(
     config = _require_config_or_exit(appctx)
 
     try:
-        peers = show_ibgp_peers(
-            config=config, db_path=appctx.db_path, include_live=True
-        )
+        peers = show_ibgp_peers(config=config, db_path=appctx.db_path, include_live=True)
     except Dn42CtlError as exc:
         typer.echo(f"错误: {exc}")
         raise typer.Exit(1) from exc
@@ -1111,9 +1034,7 @@ def cmd_show_all(
     config = _require_config_or_exit(appctx)
 
     try:
-        tunnels = show_wg_tunnels(
-            config=config, db_path=appctx.db_path, include_live=True
-        )
+        tunnels = show_wg_tunnels(config=config, db_path=appctx.db_path, include_live=True)
         bgp = show_bgp_peers(config=config, db_path=appctx.db_path, include_live=True)
         ibgp = show_ibgp_peers(config=config, db_path=appctx.db_path, include_live=True)
     except Dn42CtlError as exc:
@@ -1150,14 +1071,13 @@ def cmd_serve(
     ctx: typer.Context,
     host: str = typer.Option("127.0.0.1", "--host", help="绑定地址 (默认 127.0.0.1)"),
     port: int = typer.Option(4242, "--port", help="监听端口 (默认 4242)"),
-    token: str = typer.Option(
-        ..., "--token", envvar="DN42CTL_API_TOKEN", help="Bearer Token (必须提供)"
-    ),
+    token: str = typer.Option(..., "--token", envvar="DN42CTL_API_TOKEN", help="Bearer Token (必须提供)"),
 ) -> None:
     appctx: AppContext = ctx.obj
     config = _require_config_or_exit(appctx)
 
-    from dn42ctl.api import app as api_app, configure
+    from dn42ctl.api import app as api_app
+    from dn42ctl.api import configure
 
     configure(config=config, db_path=appctx.db_path, token=token)
 

@@ -3,10 +3,7 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import patch
 
-import pytest
-
 from dn42ctl.services.dummy import (
-    DummyResult,
     _address_bound,
     _interface_exists,
     detect_dummy_backend,
@@ -66,12 +63,8 @@ class TestAddressBound:
 class TestEnsureDummyInterface:
     def test_already_exists_and_bound(self) -> None:
         with (
-            patch(
-                "dn42ctl.services.dummy._interface_exists", return_value=True
-            ),
-            patch(
-                "dn42ctl.services.dummy._address_bound", return_value=True
-            ),
+            patch("dn42ctl.services.dummy._interface_exists", return_value=True),
+            patch("dn42ctl.services.dummy._address_bound", return_value=True),
         ):
             result = ensure_dummy_interface("fd42:4242:1234::1")
             assert result.skipped is True
@@ -79,12 +72,8 @@ class TestEnsureDummyInterface:
 
     def test_exists_but_not_bound_iproute2(self) -> None:
         with (
-            patch(
-                "dn42ctl.services.dummy._interface_exists", return_value=True
-            ),
-            patch(
-                "dn42ctl.services.dummy._address_bound", return_value=False
-            ),
+            patch("dn42ctl.services.dummy._interface_exists", return_value=True),
+            patch("dn42ctl.services.dummy._address_bound", return_value=False),
             patch(
                 "dn42ctl.services.dummy.detect_dummy_backend",
                 return_value="iproute2",
@@ -97,9 +86,7 @@ class TestEnsureDummyInterface:
 
     def test_not_exists_create_iproute2(self) -> None:
         with (
-            patch(
-                "dn42ctl.services.dummy._interface_exists", return_value=False
-            ),
+            patch("dn42ctl.services.dummy._interface_exists", return_value=False),
             patch(
                 "dn42ctl.services.dummy.detect_dummy_backend",
                 return_value="iproute2",
@@ -112,9 +99,7 @@ class TestEnsureDummyInterface:
 
     def test_creation_fails(self) -> None:
         with (
-            patch(
-                "dn42ctl.services.dummy._interface_exists", return_value=False
-            ),
+            patch("dn42ctl.services.dummy._interface_exists", return_value=False),
             patch(
                 "dn42ctl.services.dummy.detect_dummy_backend",
                 return_value="iproute2",

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 DEFAULT_CONFIG_PATH = Path("/etc/dn42ctl/config.toml")
 DEFAULT_DB_PATH = Path("/var/lib/dn42ctl/dn42.sqlite3")
 

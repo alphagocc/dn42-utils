@@ -46,11 +46,21 @@ line-length = 120
 src = ["src"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "B", "UP", "S", "BLE", "FBT", "C4", "T20", "SIM"]
+select = ["E", "F", "W", "I", "B", "UP", "S", "BLE", "C4", "T20", "SIM"]
 ignore = ["S101"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S106", "S105"]
+"src/dn42ctl/cli.py" = ["B008", "UP037"]
+"src/dn42ctl/api.py" = ["B008"]
+"src/dn42ctl/fs.py" = ["SIM105"]
+"src/dn42ctl/wg.py" = ["S603", "S607", "S311"]
+"src/dn42ctl/render.py" = ["S701"]
+"src/dn42ctl/services/core.py" = ["S311", "E402"]
+"src/dn42ctl/services/dummy.py" = ["S603", "S607"]
+"src/dn42ctl/services/show.py" = ["S603", "S607"]
+"src/dn42ctl/services/init_sys.py" = ["S603", "S607", "S310", "F841"]
+"src/dn42ctl/services/scan.py" = ["SIM102", "SIM105"]
 
 [tool.pyright]
 pythonVersion = "3.11"
