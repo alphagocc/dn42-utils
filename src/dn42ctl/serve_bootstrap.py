@@ -26,9 +26,9 @@ from dn42ctl.node_config import NodeConfig, load_node_config, save_node_config
 @dataclass(frozen=True)
 class SelfRegistrationResult:
     node_id: str
-    created_node_id: bool         # True if self_node_id file was newly generated
-    upserted_managed_node: bool   # True if managed_nodes row was created or updated
-    rotated_token: bool           # True if a fresh self token was generated
+    created_node_id: bool  # True if self_node_id file was newly generated
+    upserted_managed_node: bool  # True if managed_nodes row was created or updated
+    rotated_token: bool  # True if a fresh self token was generated
     node_toml_path: Path
 
 

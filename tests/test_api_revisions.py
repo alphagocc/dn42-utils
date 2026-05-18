@@ -128,9 +128,7 @@ class TestRollbackRoute:
     def test_node_token_cannot_rollback(self, client: TestClient, db_path: Path) -> None:
         token = _register(client)
         _seed_peer(db_path, 4242421111)
-        first = client.get(
-            f"/api/v1/nodes/{NODE_A}/desired", headers={"Authorization": f"Bearer {token}"}
-        ).json()
+        first = client.get(f"/api/v1/nodes/{NODE_A}/desired", headers={"Authorization": f"Bearer {token}"}).json()
         resp = client.post(
             f"/api/admin/nodes/{NODE_A}/rollback",
             json={"revision": first["revision"]},

@@ -37,15 +37,19 @@ def _mock_wg(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Stub WireGuard generation so create_*_peer doesn't shell out."""
     from conftest import FAKE_WG_PRIVKEY, FAKE_WG_PUBKEY
 
-    with patch(
-        "dn42ctl.services.core.generate_wg_keypair",
-        return_value=(FAKE_WG_PRIVKEY, FAKE_WG_PUBKEY),
-    ), patch(
-        "dn42ctl.services.bgp.generate_random_lla_cidr",
-        return_value="fe80::abcd:1234/64",
-    ), patch(
-        "dn42ctl.services.ibgp.generate_random_lla_cidr",
-        return_value="fe80::abcd:5678/64",
+    with (
+        patch(
+            "dn42ctl.services.core.generate_wg_keypair",
+            return_value=(FAKE_WG_PRIVKEY, FAKE_WG_PUBKEY),
+        ),
+        patch(
+            "dn42ctl.services.bgp.generate_random_lla_cidr",
+            return_value="fe80::abcd:1234/64",
+        ),
+        patch(
+            "dn42ctl.services.ibgp.generate_random_lla_cidr",
+            return_value="fe80::abcd:5678/64",
+        ),
     ):
         yield
 
@@ -88,7 +92,10 @@ class TestAcceptBgpAdd:
         # not in the central host's own self node (sample_config.node_id).
         _register(db_path)
         p = submit_proposal(
-            db_path=db_path, node_id=NODE_A, source="push", kind="peer_add",
+            db_path=db_path,
+            node_id=NODE_A,
+            source="push",
+            kind="peer_add",
             payload=_bgp_add_payload(),
         )
         result = accept_proposal(config=sample_config, db_path=db_path, proposal_id=p.id)
@@ -107,7 +114,10 @@ class TestAcceptIbgpAdd:
     def test_creates_ibgp_peer(self, sample_config: AppConfig, db_path: Path) -> None:
         _register(db_path)
         p = submit_proposal(
-            db_path=db_path, node_id=NODE_A, source="push", kind="peer_add",
+            db_path=db_path,
+            node_id=NODE_A,
+            source="push",
+            kind="peer_add",
             payload=_ibgp_add_payload(),
         )
         result = accept_proposal(config=sample_config, db_path=db_path, proposal_id=p.id)
@@ -125,13 +135,19 @@ class TestAcceptFailureKeepsPending:
         _register(db_path)
         # First accept: ok
         p1 = submit_proposal(
-            db_path=db_path, node_id=NODE_A, source="push", kind="peer_add",
+            db_path=db_path,
+            node_id=NODE_A,
+            source="push",
+            kind="peer_add",
             payload=_bgp_add_payload(),
         )
         accept_proposal(config=sample_config, db_path=db_path, proposal_id=p1.id)
         # Second accept of same ASN: must fail and keep pending.
         p2 = submit_proposal(
-            db_path=db_path, node_id=NODE_A, source="push", kind="peer_add",
+            db_path=db_path,
+            node_id=NODE_A,
+            source="push",
+            kind="peer_add",
             payload=_bgp_add_payload(),
         )
         with pytest.raises(Dn42CtlError):
@@ -144,12 +160,18 @@ class TestAcceptDelete:
     def test_deletes(self, sample_config: AppConfig, db_path: Path) -> None:
         _register(db_path)
         add = submit_proposal(
-            db_path=db_path, node_id=NODE_A, source="push", kind="peer_add",
+            db_path=db_path,
+            node_id=NODE_A,
+            source="push",
+            kind="peer_add",
             payload=_bgp_add_payload(),
         )
         accept_proposal(config=sample_config, db_path=db_path, proposal_id=add.id)
         delete = submit_proposal(
-            db_path=db_path, node_id=NODE_A, source="push", kind="peer_delete",
+            db_path=db_path,
+            node_id=NODE_A,
+            source="push",
+            kind="peer_delete",
             payload={"peer_kind": "bgp", "key": {"peer_asn": 4242421234}},
         )
         accept_proposal(config=sample_config, db_path=db_path, proposal_id=delete.id)
@@ -164,7 +186,10 @@ class TestReject:
     def test_marks_rejected(self, sample_config: AppConfig, db_path: Path) -> None:
         _register(db_path)
         p = submit_proposal(
-            db_path=db_path, node_id=NODE_A, source="push", kind="peer_add",
+            db_path=db_path,
+            node_id=NODE_A,
+            source="push",
+            kind="peer_add",
             payload=_bgp_add_payload(),
         )
         result = reject_proposal(db_path=db_path, proposal_id=p.id, reason="not now")
@@ -174,7 +199,10 @@ class TestReject:
     def test_empty_reason(self, db_path: Path) -> None:
         _register(db_path)
         p = submit_proposal(
-            db_path=db_path, node_id=NODE_A, source="push", kind="peer_add",
+            db_path=db_path,
+            node_id=NODE_A,
+            source="push",
+            kind="peer_add",
             payload=_bgp_add_payload(),
         )
         with pytest.raises(Dn42CtlError, match="reason"):
@@ -185,7 +213,10 @@ class TestAcceptAlreadyDecided:
     def test_cannot_reaccept(self, sample_config: AppConfig, db_path: Path) -> None:
         _register(db_path)
         p = submit_proposal(
-            db_path=db_path, node_id=NODE_A, source="push", kind="peer_add",
+            db_path=db_path,
+            node_id=NODE_A,
+            source="push",
+            kind="peer_add",
             payload=_bgp_add_payload(),
         )
         accept_proposal(config=sample_config, db_path=db_path, proposal_id=p.id)
@@ -198,10 +229,15 @@ class TestAutoAccept:
         _register(db_path)
         # Switch policy.
         from dn42ctl.services import set_policy
+
         set_policy(db_path=db_path, node_id=NODE_A, peer_add="auto_accept")
         p = submit_proposal(
-            db_path=db_path, node_id=NODE_A, source="push", kind="peer_add",
-            payload=_bgp_add_payload(), config=sample_config,
+            db_path=db_path,
+            node_id=NODE_A,
+            source="push",
+            kind="peer_add",
+            payload=_bgp_add_payload(),
+            config=sample_config,
         )
         assert p.status == "accepted"
         db = Database.open(db_path)
@@ -210,29 +246,34 @@ class TestAutoAccept:
         finally:
             db.close()
 
-    def test_auto_accept_failure_marks_rejected(
-        self, sample_config: AppConfig, db_path: Path
-    ) -> None:
+    def test_auto_accept_failure_marks_rejected(self, sample_config: AppConfig, db_path: Path) -> None:
         _register(db_path)
         from dn42ctl.services import set_policy
+
         set_policy(db_path=db_path, node_id=NODE_A, peer_add="auto_accept")
         # Submit twice; second fails validation (duplicate ASN).
         submit_proposal(
-            db_path=db_path, node_id=NODE_A, source="push", kind="peer_add",
-            payload=_bgp_add_payload(), config=sample_config,
+            db_path=db_path,
+            node_id=NODE_A,
+            source="push",
+            kind="peer_add",
+            payload=_bgp_add_payload(),
+            config=sample_config,
         )
         p2 = submit_proposal(
-            db_path=db_path, node_id=NODE_A, source="push", kind="peer_add",
-            payload=_bgp_add_payload(), config=sample_config,
+            db_path=db_path,
+            node_id=NODE_A,
+            source="push",
+            kind="peer_add",
+            payload=_bgp_add_payload(),
+            config=sample_config,
         )
         assert p2.status == "rejected"
         assert p2.message and "auto_accept" in p2.message
 
 
 class TestAcceptDoesNotRenderFiles:
-    def test_no_bird_or_networkd_files_written(
-        self, sample_config: AppConfig, db_path: Path
-    ) -> None:
+    def test_no_bird_or_networkd_files_written(self, sample_config: AppConfig, db_path: Path) -> None:
         """accept_proposal must not write /etc/bird, /etc/systemd/network etc.
 
         The server runs sandboxed and those paths are out of bounds; the spoke
@@ -245,7 +286,10 @@ class TestAcceptDoesNotRenderFiles:
 
         _register(db_path)
         p = submit_proposal(
-            db_path=db_path, node_id=NODE_A, source="push", kind="peer_add",
+            db_path=db_path,
+            node_id=NODE_A,
+            source="push",
+            kind="peer_add",
             payload=_bgp_add_payload(),
         )
         accept_proposal(config=sample_config, db_path=db_path, proposal_id=p.id)
@@ -258,7 +302,9 @@ class TestImportReport:
     def test_imports_scan_result(self, sample_config: AppConfig, db_path: Path) -> None:
         _register(db_path)
         r = submit_report(
-            db_path=db_path, node_id=NODE_A, kind="scan_result",
+            db_path=db_path,
+            node_id=NODE_A,
+            kind="scan_result",
             payload={
                 "bgp_peers": [_bgp_add_payload()["peer"]],
                 "ibgp_peers": [_ibgp_add_payload()["peer"]],
@@ -282,13 +328,17 @@ class TestImportReport:
     def test_reimport_skips_existing(self, sample_config: AppConfig, db_path: Path) -> None:
         _register(db_path)
         r1 = submit_report(
-            db_path=db_path, node_id=NODE_A, kind="scan_result",
+            db_path=db_path,
+            node_id=NODE_A,
+            kind="scan_result",
             payload={"bgp_peers": [_bgp_add_payload()["peer"]], "ibgp_peers": []},
         )
         import_report(config=sample_config, db_path=db_path, report_id=r1.id)
         # Second submission, second import -> peer exists, skipped.
         r2 = submit_report(
-            db_path=db_path, node_id=NODE_A, kind="scan_result",
+            db_path=db_path,
+            node_id=NODE_A,
+            kind="scan_result",
             payload={"bgp_peers": [_bgp_add_payload()["peer"]], "ibgp_peers": []},
         )
         counts = import_report(config=sample_config, db_path=db_path, report_id=r2.id)
@@ -297,16 +347,16 @@ class TestImportReport:
 
     def test_reject_non_scan_kind(self, sample_config: AppConfig, db_path: Path) -> None:
         _register(db_path)
-        r = submit_report(
-            db_path=db_path, node_id=NODE_A, kind="apply_result", payload={}
-        )
+        r = submit_report(db_path=db_path, node_id=NODE_A, kind="apply_result", payload={})
         with pytest.raises(Dn42CtlError, match="scan_result"):
             import_report(config=sample_config, db_path=db_path, report_id=r.id)
 
     def test_reject_double_import(self, sample_config: AppConfig, db_path: Path) -> None:
         _register(db_path)
         r = submit_report(
-            db_path=db_path, node_id=NODE_A, kind="scan_result",
+            db_path=db_path,
+            node_id=NODE_A,
+            kind="scan_result",
             payload={"bgp_peers": [], "ibgp_peers": []},
         )
         import_report(config=sample_config, db_path=db_path, report_id=r.id)

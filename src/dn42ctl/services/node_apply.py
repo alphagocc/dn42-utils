@@ -45,7 +45,7 @@ class ResolvedPaths:
 class ApplyDiff:
     path: Path
     action: str  # "create" | "update" | "unchanged" | "delete"
-    diff: str    # unified diff, empty if unchanged
+    diff: str  # unified diff, empty if unchanged
 
 
 @dataclass(frozen=True)
@@ -113,9 +113,7 @@ def _diff(path: Path, new_content: str) -> ApplyDiff:
     return ApplyDiff(path=path, action="update", diff=diff)
 
 
-def _render_bgp_peer_files(
-    peer: dict[str, Any], paths: ResolvedPaths, node_id: str
-) -> list[tuple[Path, str, int]]:
+def _render_bgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths, node_id: str) -> list[tuple[Path, str, int]]:
     """Return [(path, content, mode), ...] for this BGP peer."""
     ifname = peer["ifname"]
     out: list[tuple[Path, str, int]] = []
@@ -124,9 +122,7 @@ def _render_bgp_peer_files(
     out.append(
         (
             bird_path,
-            render_bird_bgp_peer_conf(
-                ifname=ifname, peer_lla=peer["peer_lla"], peer_asn=int(peer["peer_asn"])
-            ),
+            render_bird_bgp_peer_conf(ifname=ifname, peer_lla=peer["peer_lla"], peer_asn=int(peer["peer_asn"])),
             FILE_MODE_PRIVATE,
         )
     )
@@ -179,9 +175,7 @@ def _render_bgp_peer_files(
     return out
 
 
-def _render_ibgp_peer_files(
-    peer: dict[str, Any], paths: ResolvedPaths, node_id: str
-) -> list[tuple[Path, str, int]]:
+def _render_ibgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths, node_id: str) -> list[tuple[Path, str, int]]:
     name = peer["name"]
     ifname = peer["ifname"]
     out: list[tuple[Path, str, int]] = []
@@ -273,8 +267,10 @@ def _managed_paths(paths: ResolvedPaths) -> list[tuple[Path, tuple[tuple[str, st
         (
             paths.networkd_dir,
             (
-                ("dn42_", ".netdev"), ("dn42_", ".network"),
-                ("wg_", ".netdev"), ("wg_", ".network"),
+                ("dn42_", ".netdev"),
+                ("dn42_", ".network"),
+                ("wg_", ".netdev"),
+                ("wg_", ".network"),
             ),
         ),
         (
@@ -351,7 +347,11 @@ def apply(
                 pass
 
     return ApplyResult(
-        revision=cached.revision, diffs=diffs, written=written, deleted=deleted, dry_run=dry_run,
+        revision=cached.revision,
+        diffs=diffs,
+        written=written,
+        deleted=deleted,
+        dry_run=dry_run,
     )
 
 

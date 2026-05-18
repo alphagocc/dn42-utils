@@ -28,15 +28,19 @@ def _fast_argon2(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 def _mock_wg(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     from conftest import FAKE_WG_PRIVKEY, FAKE_WG_PUBKEY
 
-    with patch(
-        "dn42ctl.services.core.generate_wg_keypair",
-        return_value=(FAKE_WG_PRIVKEY, FAKE_WG_PUBKEY),
-    ), patch(
-        "dn42ctl.services.bgp.generate_random_lla_cidr",
-        return_value="fe80::abcd:1234/64",
-    ), patch(
-        "dn42ctl.services.ibgp.generate_random_lla_cidr",
-        return_value="fe80::abcd:5678/64",
+    with (
+        patch(
+            "dn42ctl.services.core.generate_wg_keypair",
+            return_value=(FAKE_WG_PRIVKEY, FAKE_WG_PUBKEY),
+        ),
+        patch(
+            "dn42ctl.services.bgp.generate_random_lla_cidr",
+            return_value="fe80::abcd:1234/64",
+        ),
+        patch(
+            "dn42ctl.services.ibgp.generate_random_lla_cidr",
+            return_value="fe80::abcd:5678/64",
+        ),
     ):
         yield
 

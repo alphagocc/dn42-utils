@@ -52,6 +52,9 @@ Notes:
 # Lint
 uv run ruff check src/ tests/
 
+# Format (CI 用 --check 强制阻断,提交前务必跑;不要只跑 ruff check)
+uv run ruff format src/ tests/
+
 # Type check
 uv run pyright src/
 
@@ -64,6 +67,8 @@ uv run pytest --cov=dn42ctl --cov-report=term-missing
 # Compile check
 uv run python -m compileall -q src
 ```
+
+> 提交前一站式检查: `uv run ruff format src/ tests/ && uv run ruff check src/ tests/ && uv run pyright src/ && uv run pytest -q`
 
 ## Documentation (link, don’t duplicate)
 

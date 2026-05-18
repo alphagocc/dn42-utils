@@ -44,15 +44,11 @@ class TestPullDesired:
             client.pull_desired()
 
     def test_5xx(self, client: NodeClient, mock_server) -> None:
-        mock_server.get(f"/api/v1/nodes/{NODE_ID}/desired").mock(
-            return_value=httpx.Response(500, text="boom")
-        )
+        mock_server.get(f"/api/v1/nodes/{NODE_ID}/desired").mock(return_value=httpx.Response(500, text="boom"))
         with pytest.raises(NodeClientError, match="500"):
             client.pull_desired()
 
     def test_network_error(self, client: NodeClient, mock_server) -> None:
-        mock_server.get(f"/api/v1/nodes/{NODE_ID}/desired").mock(
-            side_effect=httpx.ConnectError("no route")
-        )
+        mock_server.get(f"/api/v1/nodes/{NODE_ID}/desired").mock(side_effect=httpx.ConnectError("no route"))
         with pytest.raises(NodeClientError, match="无法访问"):
             client.pull_desired()

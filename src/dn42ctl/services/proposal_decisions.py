@@ -132,13 +132,19 @@ def _apply_peer_delete(*, config: AppConfig, db_path: Path, target_node_id: str,
         raise Dn42CtlError("payload.key 缺失或不是对象")
     if peer_kind == "bgp":
         delete_bgp_peer(
-            config=config, db_path=db_path, peer_asn=int(key["peer_asn"]),
-            node_id=target_node_id, render_files=False,
+            config=config,
+            db_path=db_path,
+            peer_asn=int(key["peer_asn"]),
+            node_id=target_node_id,
+            render_files=False,
         )
     else:
         delete_ibgp_peer(
-            config=config, db_path=db_path, name=str(key["name"]),
-            node_id=target_node_id, render_files=False,
+            config=config,
+            db_path=db_path,
+            name=str(key["name"]),
+            node_id=target_node_id,
+            render_files=False,
         )
 
 

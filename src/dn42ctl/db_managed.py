@@ -628,9 +628,7 @@ class RevisionStore:
 
     def get(self, revision_id: int) -> ConfigRevision | None:
         try:
-            row = self._conn.execute(
-                "SELECT * FROM config_revisions WHERE id=?", (revision_id,)
-            ).fetchone()
+            row = self._conn.execute("SELECT * FROM config_revisions WHERE id=?", (revision_id,)).fetchone()
         except sqlite3.Error as exc:
             raise DatabaseError("查询 revision 失败") from exc
         return None if row is None else _row_to_revision(row)
@@ -721,9 +719,7 @@ class RevisionStore:
     def get_pin(self, node_id: str) -> ConfigRevision | None:
         """Return the pinned revision row, or None if no pin (i.e. follow latest)."""
         try:
-            pin_row = self._conn.execute(
-                "SELECT revision FROM node_desired_pin WHERE node_id=?", (node_id,)
-            ).fetchone()
+            pin_row = self._conn.execute("SELECT revision FROM node_desired_pin WHERE node_id=?", (node_id,)).fetchone()
         except sqlite3.Error as exc:
             raise DatabaseError("查询 pin 失败") from exc
         if pin_row is None:

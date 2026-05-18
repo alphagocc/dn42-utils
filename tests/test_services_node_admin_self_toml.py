@@ -94,7 +94,10 @@ class TestRemoveSelf:
         _seed_self_toml(toml, token="placeholder")
         assert toml.exists()
         removed = remove_node(
-            db_path=db_path, node_id=NODE_SELF, force=True, self_node_toml_path=toml,
+            db_path=db_path,
+            node_id=NODE_SELF,
+            force=True,
+            self_node_toml_path=toml,
         )
         assert removed.is_self is True
         assert not toml.exists()
@@ -108,7 +111,10 @@ class TestRemoveSelf:
         toml = tmp_path / "node.toml"
         _seed_self_toml(toml, token="unrelated")
         remove_node(
-            db_path=db_path, node_id=NODE_A, force=False, self_node_toml_path=toml,
+            db_path=db_path,
+            node_id=NODE_A,
+            force=False,
+            self_node_toml_path=toml,
         )
         assert toml.exists()  # untouched
         assert load_node_config(toml).token == "unrelated"
@@ -119,7 +125,10 @@ class TestRemoveSelf:
         _seed_self_toml(toml, token="placeholder")
         with pytest.raises(Dn42CtlError, match="self"):
             remove_node(
-                db_path=db_path, node_id=NODE_SELF, force=False, self_node_toml_path=toml,
+                db_path=db_path,
+                node_id=NODE_SELF,
+                force=False,
+                self_node_toml_path=toml,
             )
         # toml untouched.
         assert toml.exists()

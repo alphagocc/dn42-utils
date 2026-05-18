@@ -85,9 +85,7 @@ class TestAdminNodesCrud:
         assert any(n["node_id"] == NODE_A for n in listed)
 
     def test_add_invalid_uuid(self, admin_client: TestClient) -> None:
-        resp = admin_client.post(
-            "/api/admin/nodes", json={"node_id": "bad", "name": "x"}, headers=ADMIN_H
-        )
+        resp = admin_client.post("/api/admin/nodes", json={"node_id": "bad", "name": "x"}, headers=ADMIN_H)
         assert resp.status_code == 400
 
     def test_get(self, admin_client: TestClient) -> None:

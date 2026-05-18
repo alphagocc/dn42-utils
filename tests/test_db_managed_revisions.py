@@ -17,7 +17,9 @@ class TestRecord:
     def test_basic(self, mem_db: Database) -> None:
         store = _store(mem_db)
         rev = store.record(
-            node_id=NODE_A, revision="r1", generated_at="2026-05-19T00:00:00+00:00",
+            node_id=NODE_A,
+            revision="r1",
+            generated_at="2026-05-19T00:00:00+00:00",
             payload={"hello": "world"},
         )
         assert rev.revision == "r1"

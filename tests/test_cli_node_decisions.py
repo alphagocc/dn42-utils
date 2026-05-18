@@ -26,15 +26,19 @@ def _fast_argon2(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 def _mock_wg(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     from conftest import FAKE_WG_PRIVKEY, FAKE_WG_PUBKEY
 
-    with patch(
-        "dn42ctl.services.core.generate_wg_keypair",
-        return_value=(FAKE_WG_PRIVKEY, FAKE_WG_PUBKEY),
-    ), patch(
-        "dn42ctl.services.bgp.generate_random_lla_cidr",
-        return_value="fe80::abcd:1234/64",
-    ), patch(
-        "dn42ctl.services.ibgp.generate_random_lla_cidr",
-        return_value="fe80::abcd:5678/64",
+    with (
+        patch(
+            "dn42ctl.services.core.generate_wg_keypair",
+            return_value=(FAKE_WG_PRIVKEY, FAKE_WG_PUBKEY),
+        ),
+        patch(
+            "dn42ctl.services.bgp.generate_random_lla_cidr",
+            return_value="fe80::abcd:1234/64",
+        ),
+        patch(
+            "dn42ctl.services.ibgp.generate_random_lla_cidr",
+            return_value="fe80::abcd:5678/64",
+        ),
     ):
         yield
 
@@ -45,18 +49,14 @@ def runner() -> CliRunner:
 
 
 @pytest.fixture
-def setup(
-    sample_config: AppConfig, db_path: Path, tmp_path: Path
-) -> tuple[list[str], AppConfig]:
+def setup(sample_config: AppConfig, db_path: Path, tmp_path: Path) -> tuple[list[str], AppConfig]:
     """Write a real AppConfig file so accept/import (which require_config_or_exit) works."""
     cfg_path = tmp_path / "config.toml"
     save_config(cfg_path, sample_config)
     return (["--db-path", str(db_path), "--config-path", str(cfg_path)], sample_config)
 
 
-def _register_and_submit(
-    runner: CliRunner, base_args: list[str], tmp_path: Path
-) -> int:
+def _register_and_submit(runner: CliRunner, base_args: list[str], tmp_path: Path) -> int:
     """Add node and submit a peer_add proposal via the service layer directly,
     returning the proposal id. (CLI push requires a live server fixture.)
     """
@@ -97,9 +97,7 @@ class TestRejectProposal:
     def test_with_reason(self, runner: CliRunner, setup, tmp_path: Path) -> None:
         base_args, _ = setup
         pid = _register_and_submit(runner, base_args, tmp_path)
-        result = runner.invoke(
-            app, [*base_args, "node", "reject-proposal", str(pid), "--reason", "nope"]
-        )
+        result = runner.invoke(app, [*base_args, "node", "reject-proposal", str(pid), "--reason", "nope"])
         assert result.exit_code == 0, result.output
         assert "已拒绝" in result.output
 

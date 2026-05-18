@@ -160,9 +160,7 @@ def node_toml_path(tmp_path: Path) -> Path:
 
 
 class TestStatusCli:
-    def test_lists_local_state(
-        self, runner: CliRunner, cli_base_args: list[str], node_toml_path: Path
-    ) -> None:
+    def test_lists_local_state(self, runner: CliRunner, cli_base_args: list[str], node_toml_path: Path) -> None:
         with respx.mock(base_url=SERVER) as router:
             router.get(f"/api/v1/nodes/{NODE_A}/status").mock(
                 return_value=httpx.Response(
@@ -188,22 +186,16 @@ class TestStatusCli:
         assert "pinned_revision: (none)" in result.output
         assert "(没有缓存" in result.output  # no cache yet
 
-    def test_no_node_toml(
-        self, runner: CliRunner, cli_base_args: list[str], tmp_path: Path
-    ) -> None:
+    def test_no_node_toml(self, runner: CliRunner, cli_base_args: list[str], tmp_path: Path) -> None:
         result = runner.invoke(
             cli_app,
             [*cli_base_args, "node", "status", "--node-config-path", str(tmp_path / "nope.toml")],
         )
         assert result.exit_code != 0
 
-    def test_server_unreachable(
-        self, runner: CliRunner, cli_base_args: list[str], node_toml_path: Path
-    ) -> None:
+    def test_server_unreachable(self, runner: CliRunner, cli_base_args: list[str], node_toml_path: Path) -> None:
         with respx.mock(base_url=SERVER) as router:
-            router.get(f"/api/v1/nodes/{NODE_A}/status").mock(
-                side_effect=httpx.ConnectError("no route")
-            )
+            router.get(f"/api/v1/nodes/{NODE_A}/status").mock(side_effect=httpx.ConnectError("no route"))
             result = runner.invoke(
                 cli_app,
                 [*cli_base_args, "node", "status", "--node-config-path", str(node_toml_path)],

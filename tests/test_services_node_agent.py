@@ -84,9 +84,7 @@ class TestPull:
     def test_cache_format(self, tmp_path: Path, mock_server) -> None:
         cfg = _node_cfg(tmp_path)
         payload = _desired_payload()
-        mock_server.get(f"/api/v1/nodes/{NODE_ID}/desired").mock(
-            return_value=httpx.Response(200, json=payload)
-        )
+        mock_server.get(f"/api/v1/nodes/{NODE_ID}/desired").mock(return_value=httpx.Response(200, json=payload))
         pull(node_config=cfg)
         cached = read_cache(node_config=cfg)
         assert cached is not None

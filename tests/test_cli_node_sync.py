@@ -85,9 +85,7 @@ class TestNodePull:
             encoding="utf-8",
         )
         with respx.mock(base_url=SERVER) as router:
-            router.get(f"/api/v1/nodes/{NODE_A}/desired").mock(
-                return_value=httpx.Response(200, json=_desired())
-            )
+            router.get(f"/api/v1/nodes/{NODE_A}/desired").mock(return_value=httpx.Response(200, json=_desired()))
             result = runner.invoke(
                 app,
                 [*base_args, "node", "pull", "--node-config-path", str(node_toml_path)],
@@ -98,9 +96,7 @@ class TestNodePull:
 
 
 class TestNodeApply:
-    def test_apply_dry_run(
-        self, runner: CliRunner, base_args: list[str], node_toml_path: Path, tmp_path: Path
-    ) -> None:
+    def test_apply_dry_run(self, runner: CliRunner, base_args: list[str], node_toml_path: Path, tmp_path: Path) -> None:
         cache_db = tmp_path / "node-cache.sqlite3"
         # Render target dirs in tmp_path.
         peers_dir = tmp_path / "peers"
@@ -113,13 +109,11 @@ class TestNodeApply:
         )
         node_toml_path.write_text(
             f'server = "{SERVER}"\nnode_id = "{NODE_A}"\ntoken = "tok"\n'
-            f"{apply_overrides}[cache]\ndb_path = \"{cache_db}\"\n",
+            f'{apply_overrides}[cache]\ndb_path = "{cache_db}"\n',
             encoding="utf-8",
         )
         with respx.mock(base_url=SERVER) as router:
-            router.get(f"/api/v1/nodes/{NODE_A}/desired").mock(
-                return_value=httpx.Response(200, json=_desired())
-            )
+            router.get(f"/api/v1/nodes/{NODE_A}/desired").mock(return_value=httpx.Response(200, json=_desired()))
             runner.invoke(app, [*base_args, "node", "pull", "--node-config-path", str(node_toml_path)])
         result = runner.invoke(
             app,
@@ -142,16 +136,12 @@ class TestNodeOnce:
             f'peers_dir = "{tmp_path / "peers"}"\n'
             f'networkd_dir = "{tmp_path / "networkd"}"\n'
             f'nm_dir = "{tmp_path / "nm"}"\n'
-            f"[cache]\ndb_path = \"{cache_db}\"\n",
+            f'[cache]\ndb_path = "{cache_db}"\n',
             encoding="utf-8",
         )
         with respx.mock(base_url=SERVER) as router:
-            router.get(f"/api/v1/nodes/{NODE_A}/desired").mock(
-                return_value=httpx.Response(200, json=_desired())
-            )
-            result = runner.invoke(
-                app, [*base_args, "node", "once", "--node-config-path", str(node_toml_path)]
-            )
+            router.get(f"/api/v1/nodes/{NODE_A}/desired").mock(return_value=httpx.Response(200, json=_desired()))
+            result = runner.invoke(app, [*base_args, "node", "once", "--node-config-path", str(node_toml_path)])
         assert result.exit_code == 0, result.output
         assert babel.exists()
 

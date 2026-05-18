@@ -31,7 +31,9 @@ class TestRunSelfRegistration:
     def test_first_run_creates_everything(self, tmp_path: Path) -> None:
         db, sid, ncfg = _paths(tmp_path)
         result = run_self_registration(
-            db_path=db, self_node_id_path=sid, node_toml_path=ncfg,
+            db_path=db,
+            self_node_id_path=sid,
+            node_toml_path=ncfg,
             server_url="http://[::1]:4242",
         )
         assert result.created_node_id is True
@@ -83,8 +85,7 @@ class TestRunSelfRegistration:
         db, sid, ncfg = _paths(tmp_path)
         # Write a stale node.toml first.
         ncfg.write_text(
-            'server = "http://[::1]:4242"\nnode_id = "00000000-0000-4000-8000-000000000000"\n'
-            'token = "ancient"\n',
+            'server = "http://[::1]:4242"\nnode_id = "00000000-0000-4000-8000-000000000000"\ntoken = "ancient"\n',
             encoding="utf-8",
         )
         result = run_self_registration(db_path=db, self_node_id_path=sid, node_toml_path=ncfg)

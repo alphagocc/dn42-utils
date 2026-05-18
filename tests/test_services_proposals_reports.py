@@ -39,9 +39,7 @@ def _register(db_path: Path) -> None:
 class TestSubmitProposal:
     def test_basic(self, db_path: Path) -> None:
         _register(db_path)
-        p = submit_proposal(
-            db_path=db_path, node_id=NODE_A, source="push", kind="peer_add", payload={"asn": 1}
-        )
+        p = submit_proposal(db_path=db_path, node_id=NODE_A, source="push", kind="peer_add", payload={"asn": 1})
         assert p.status == "pending"
         assert p.kind == "peer_add"
 
@@ -49,39 +47,33 @@ class TestSubmitProposal:
         # Database must exist so we just create it empty.
         Database.open(db_path).close()
         with pytest.raises(Dn42CtlError, match="不存在"):
-            submit_proposal(
-                db_path=db_path, node_id=NODE_A, source="push", kind="peer_add", payload={}
-            )
+            submit_proposal(db_path=db_path, node_id=NODE_A, source="push", kind="peer_add", payload={})
 
     def test_invalid_kind(self, db_path: Path) -> None:
         _register(db_path)
         with pytest.raises(Dn42CtlError, match="kind"):
-            submit_proposal(
-                db_path=db_path, node_id=NODE_A, source="push", kind="bogus", payload={}
-            )
+            submit_proposal(db_path=db_path, node_id=NODE_A, source="push", kind="bogus", payload={})
 
     def test_invalid_source(self, db_path: Path) -> None:
         _register(db_path)
         with pytest.raises(Dn42CtlError, match="source"):
-            submit_proposal(
-                db_path=db_path, node_id=NODE_A, source="bogus", kind="peer_add", payload={}
-            )
+            submit_proposal(db_path=db_path, node_id=NODE_A, source="bogus", kind="peer_add", payload={})
 
     def test_invalid_payload(self, db_path: Path) -> None:
         _register(db_path)
         with pytest.raises(Dn42CtlError):
             submit_proposal(
-                db_path=db_path, node_id=NODE_A, source="push", kind="peer_add", payload="x"  # type: ignore[arg-type]
+                db_path=db_path,
+                node_id=NODE_A,
+                source="push",
+                kind="peer_add",
+                payload="x",  # type: ignore[arg-type]
             )
 
     def test_list_and_get(self, db_path: Path) -> None:
         _register(db_path)
-        a = submit_proposal(
-            db_path=db_path, node_id=NODE_A, source="push", kind="peer_add", payload={"n": 1}
-        )
-        b = submit_proposal(
-            db_path=db_path, node_id=NODE_A, source="scan", kind="peer_add", payload={"n": 2}
-        )
+        a = submit_proposal(db_path=db_path, node_id=NODE_A, source="push", kind="peer_add", payload={"n": 1})
+        b = submit_proposal(db_path=db_path, node_id=NODE_A, source="scan", kind="peer_add", payload={"n": 2})
         listed = list_proposals(db_path=db_path, node_id=NODE_A)
         assert {p.id for p in listed} == {a.id, b.id}
         fetched = get_proposal(db_path=db_path, proposal_id=a.id)
@@ -91,9 +83,7 @@ class TestSubmitProposal:
 class TestSubmitReport:
     def test_basic(self, db_path: Path) -> None:
         _register(db_path)
-        r = submit_report(
-            db_path=db_path, node_id=NODE_A, kind="apply_result", payload={"ok": True}
-        )
+        r = submit_report(db_path=db_path, node_id=NODE_A, kind="apply_result", payload={"ok": True})
         assert r.kind == "apply_result"
         assert r.imported_at is None
 

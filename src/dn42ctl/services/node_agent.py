@@ -92,9 +92,7 @@ def read_cache(*, node_config: NodeConfig) -> PullResult | None:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     try:
-        row = conn.execute(
-            "SELECT revision, payload_json, fetched_at FROM cached_desired WHERE id=1"
-        ).fetchone()
+        row = conn.execute("SELECT revision, payload_json, fetched_at FROM cached_desired WHERE id=1").fetchone()
     finally:
         conn.close()
     if row is None:

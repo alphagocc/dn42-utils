@@ -166,6 +166,7 @@ def rotate_token(
 @dataclass(frozen=True)
 class NodeStatus:
     """Central-side view of a node's current status."""
+
     node_id: str
     name: str
     enabled: bool

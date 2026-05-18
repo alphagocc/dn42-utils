@@ -62,8 +62,13 @@ class TestPush:
             result = runner.invoke(
                 app,
                 [
-                    *base_args, "node", "push", "--json", str(json_file),
-                    "--node-config-path", str(node_toml_path),
+                    *base_args,
+                    "node",
+                    "push",
+                    "--json",
+                    str(json_file),
+                    "--node-config-path",
+                    str(node_toml_path),
                 ],
             )
         assert result.exit_code == 0, result.output
@@ -77,8 +82,13 @@ class TestPush:
         result = runner.invoke(
             app,
             [
-                *base_args, "node", "push", "--json", str(json_file),
-                "--node-config-path", str(node_toml_path),
+                *base_args,
+                "node",
+                "push",
+                "--json",
+                str(json_file),
+                "--node-config-path",
+                str(node_toml_path),
             ],
         )
         assert result.exit_code != 0
@@ -99,10 +109,15 @@ class TestReport:
             result = runner.invoke(
                 app,
                 [
-                    *base_args, "node", "report",
-                    "--kind", "apply_result",
-                    "--json", str(json_file),
-                    "--node-config-path", str(node_toml_path),
+                    *base_args,
+                    "node",
+                    "report",
+                    "--kind",
+                    "apply_result",
+                    "--json",
+                    str(json_file),
+                    "--node-config-path",
+                    str(node_toml_path),
                 ],
             )
         assert result.exit_code == 0, result.output
@@ -116,10 +131,15 @@ class TestReport:
         result = runner.invoke(
             app,
             [
-                *base_args, "node", "report",
-                "--kind", "apply_result",
-                "--json", str(json_file),
-                "--node-config-path", str(node_toml_path),
+                *base_args,
+                "node",
+                "report",
+                "--kind",
+                "apply_result",
+                "--json",
+                str(json_file),
+                "--node-config-path",
+                str(node_toml_path),
             ],
         )
         assert result.exit_code != 0

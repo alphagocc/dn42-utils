@@ -64,9 +64,7 @@ def submit_proposal(
         # proposal_decisions.py (which itself imports services for create/modify).
         from dn42ctl.services.proposal_decisions import try_auto_accept
 
-        proposal = try_auto_accept(
-            config=config, db_path=db_path, proposal=proposal, policy=policy
-        )
+        proposal = try_auto_accept(config=config, db_path=db_path, proposal=proposal, policy=policy)
     return proposal
 
 

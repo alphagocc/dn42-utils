@@ -89,9 +89,7 @@ def import_report(
     if report is None:
         raise Dn42CtlError(f"report 不存在: {report_id}")
     if report.kind != "scan_result":
-        raise Dn42CtlError(
-            f"只能导入 kind=scan_result 的 report (当前 #{report_id} kind={report.kind})"
-        )
+        raise Dn42CtlError(f"只能导入 kind=scan_result 的 report (当前 #{report_id} kind={report.kind})")
     if report.imported_at is not None:
         raise Dn42CtlError(f"report #{report_id} 已被导入过 (imported_at={report.imported_at})")
 
@@ -107,9 +105,7 @@ def import_report(
         if not isinstance(peer, dict):
             continue
         try:
-            res = _import_bgp(
-                config=config, db_path=db_path, target_node_id=target_node_id, peer=peer
-            )
+            res = _import_bgp(config=config, db_path=db_path, target_node_id=target_node_id, peer=peer)
         except Dn42CtlError as exc:
             raise Dn42CtlError(f"导入 BGP peer 失败 ({peer.get('peer_asn')}): {exc}") from exc
         counts[f"bgp_{res}"] += 1
@@ -117,9 +113,7 @@ def import_report(
         if not isinstance(peer, dict):
             continue
         try:
-            res = _import_ibgp(
-                config=config, db_path=db_path, target_node_id=target_node_id, peer=peer
-            )
+            res = _import_ibgp(config=config, db_path=db_path, target_node_id=target_node_id, peer=peer)
         except Dn42CtlError as exc:
             raise Dn42CtlError(f"导入 iBGP peer 失败 ({peer.get('name')}): {exc}") from exc
         counts[f"ibgp_{res}"] += 1

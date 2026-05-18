@@ -1205,7 +1205,9 @@ def cmd_node_remove(
 
     try:
         node = remove_node(
-            db_path=appctx.db_path, node_id=node_id, force=force,
+            db_path=appctx.db_path,
+            node_id=node_id,
+            force=force,
             self_node_toml_path=node_config_path,
         )
     except Dn42CtlError as exc:
@@ -1234,7 +1236,9 @@ def cmd_node_token_rotate(
 
     try:
         rotated = rotate_token(
-            db_path=appctx.db_path, node_id=node_id, self_node_toml_path=node_config_path,
+            db_path=appctx.db_path,
+            node_id=node_id,
+            self_node_toml_path=node_config_path,
         )
     except Dn42CtlError as exc:
         raise typer.BadParameter(str(exc)) from exc
@@ -1305,9 +1309,7 @@ def cmd_node_init(
     server: str = typer.Option(..., "--server", help="中心 server URL (含 scheme), 如 https://center.example"),
     node_id: str = typer.Option(..., "--node-id", help="本节点 UUIDv4 (由中心管理员告知)"),
     token: str = typer.Option(..., "--token", help="本节点 token (中心 rotate 后的明文)"),
-    node_config_path: Path = typer.Option(
-        None, "--node-config-path", help="覆盖默认 /etc/dn42ctl/node.toml 路径"
-    ),
+    node_config_path: Path = typer.Option(None, "--node-config-path", help="覆盖默认 /etc/dn42ctl/node.toml 路径"),
 ) -> None:
     appctx: AppContext = ctx.obj
     from dn42ctl.node_config import NodeConfig, save_node_config
@@ -1485,7 +1487,10 @@ def cmd_node_status(
 
     typer.echo(f"server: {node_cfg.server}")
     client = NodeClient(
-        server=node_cfg.server, node_id=node_cfg.node_id, token=node_cfg.token, timeout=3.0,
+        server=node_cfg.server,
+        node_id=node_cfg.node_id,
+        token=node_cfg.token,
+        timeout=3.0,
     )
     try:
         remote = client.fetch_status()
@@ -1539,9 +1544,7 @@ def cmd_node_push(
             typer.echo(f"错误: 跳过非法 item: {item}", err=True)
             continue
         try:
-            res = post_proposal(
-                node_config=node_cfg, kind=item["kind"], payload=item["payload"], source=source
-            )
+            res = post_proposal(node_config=node_cfg, kind=item["kind"], payload=item["payload"], source=source)
         except Dn42CtlError as exc:
             typer.echo(f"错误: {exc}", err=True)
             raise typer.Exit(1) from exc

@@ -129,9 +129,7 @@ class TestReportsRoute:
             json={"kind": "scan_result", "payload": {}},
             headers={"Authorization": f"Bearer {token}"},
         )
-        resp = client.get(
-            f"/api/admin/nodes/{NODE_A}/reports?kind=apply_result", headers=ADMIN_H
-        )
+        resp = client.get(f"/api/admin/nodes/{NODE_A}/reports?kind=apply_result", headers=ADMIN_H)
         assert resp.status_code == 200
         items = resp.json()
         assert len(items) == 1
@@ -168,9 +166,7 @@ class TestProposalIsolation:
         assert a_list[0]["payload"]["n"] == 1
         assert b_list[0]["payload"]["n"] == 2
 
-    def test_unauthoritative_changes_not_in_bgp_table(
-        self, client: TestClient, sample_config: AppConfig
-    ) -> None:
+    def test_unauthoritative_changes_not_in_bgp_table(self, client: TestClient, sample_config: AppConfig) -> None:
         """Proposals MUST NOT touch business tables."""
         token = _register(client, NODE_A)
         client.post(
