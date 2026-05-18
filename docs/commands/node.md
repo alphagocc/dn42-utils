@@ -122,14 +122,27 @@ token   = "<token>"
 
 ### `dn42ctl node push`
 
-读取本机配置（或 SQLite 节点缓存），与 server 当前权威表比对，把差异打包成 `peer_add` / `peer_modify` / `peer_delete` proposals 推送到 `POST /api/v1/nodes/{id}/proposals`。
+把一组结构化 proposals 推送到 server (`POST /api/v1/nodes/{id}/proposals`)。
+
+- 输入 JSON 通过 `--json <file>`，文件顶层是数组：
+  ```json
+  [
+    {"kind": "peer_add",    "payload": {"peer_kind": "bgp",  "peer": {...}}},
+    {"kind": "peer_modify", "payload": {"peer_kind": "ibgp", "peer": {...}}},
+    {"kind": "peer_delete", "payload": {"peer_kind": "bgp",  "key": {"peer_asn": ...}}}
+  ]
+  ```
+- `--source push|scan` 标注来源（默认 `push`）。
+- proposal 的 `kind` 与 payload schema 详见 `docs/architecture/sync_hub_spoke.md`。
+- 计划中"自动扫描本机配置 → 与中心比对 → 自动判定 add/modify/delete"由 `dn42ctl node scan` 承担，目前尚未实现（见下）。
 
 ### `dn42ctl node scan`
 
-复用现有 `dn42ctl scan` 的逻辑扫描本机 `/etc/systemd/network` 或 NetworkManager 连接，把扫到的 peer 信息转换为 proposals 推送给 server。
-
-- 与 `node push` 的区别：`push` 比对的是本机 SQLite 缓存；`scan` 比对的是本机网络后端文件系统状态。
-- 不会修改本机 SQLite。
+> **尚未实现**。占位文档保留，待实现时本节会更新。
+>
+> 计划：复用现有 `dn42ctl scan` 的逻辑扫描本机 `/etc/systemd/network` 或 NetworkManager 连接，把扫到的 peer 信息转换为 proposals 推送给 server。与 `node push` 的区别：`push` 读 JSON 文件；`scan` 比对的是本机网络后端文件系统状态。
+>
+> 当前替代方案：手工生成 JSON 后用 `dn42ctl node push --source scan --json <file>` 推送。
 
 ### `dn42ctl node report`
 
@@ -137,18 +150,19 @@ token   = "<token>"
 
 ### `dn42ctl node once`
 
-= `pull && apply && report`。供 `dn42ctl-node-once.timer` 调用。
+= `pull && apply && report (apply_result)`。供 `dn42ctl-node-once.timer` 调用。
 
-- 任一步失败：整个命令以非零退出，由 timer 下一轮重试。
+- 任一步失败：整个命令以非零退出，由 timer 下一轮重试；失败时尽量上报 `kind=error` 的 report（best-effort）。
 - 不做指数退避（timer `OnUnitActiveSec=10min` 已经够稳）。
+- `--no-report` 关闭自动 apply_result 上报。
 
 ### `dn42ctl node status`
 
-本地诊断输出，不调 server：
+本地诊断 + 中心视角探活：
 
-- 当前 revision / 上次 apply 时间 / 缓存 fresh 度
-- node.toml 路径与权限检查
-- server URL 可达性（`HEAD /api/v1/nodes/{id}/status`，超时 3s）
+- 本地：node.toml 路径与权限、当前缓存 revision 与 fetched_at
+- 远程：发起 `GET /api/v1/nodes/{id}/status`（5s 超时），打印中心视角的 `last_seen_at` / `current_revision` / `pinned_revision`
+- 自动对比本地缓存 revision 与中心 `current_revision`，标记"同步"或"不一致"
 
 ---
 
