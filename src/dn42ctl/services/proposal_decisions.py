@@ -52,7 +52,7 @@ def _require_peer_kind(payload: dict[str, Any]) -> str:
     return pk
 
 
-def _apply_peer_add(*, config: AppConfig, db_path: Path, payload: dict[str, Any]) -> None:
+def _apply_peer_add(*, config: AppConfig, db_path: Path, target_node_id: str, payload: dict[str, Any]) -> None:
     peer_kind = _require_peer_kind(payload)
     peer = payload.get("peer")
     if not isinstance(peer, dict):
@@ -67,6 +67,8 @@ def _apply_peer_add(*, config: AppConfig, db_path: Path, payload: dict[str, Any]
             peer_lla=str(peer["peer_lla"]),
             net_backend=str(peer.get("net_backend") or "networkd"),
             listen_port=peer.get("listen_port"),
+            node_id=target_node_id,
+            render_files=False,
         )
     else:
         create_ibgp_peer(
@@ -82,10 +84,12 @@ def _apply_peer_add(*, config: AppConfig, db_path: Path, payload: dict[str, Any]
             babel_rxcost=int(peer.get("babel_rxcost", 0)),
             babel_type=str(peer.get("babel_type") or "tunnel"),
             listen_port=peer.get("listen_port"),
+            node_id=target_node_id,
+            render_files=False,
         )
 
 
-def _apply_peer_modify(*, config: AppConfig, db_path: Path, payload: dict[str, Any]) -> None:
+def _apply_peer_modify(*, config: AppConfig, db_path: Path, target_node_id: str, payload: dict[str, Any]) -> None:
     peer_kind = _require_peer_kind(payload)
     peer = payload.get("peer")
     if not isinstance(peer, dict):
@@ -100,6 +104,8 @@ def _apply_peer_modify(*, config: AppConfig, db_path: Path, payload: dict[str, A
             peer_lla=str(peer["peer_lla"]),
             net_backend=str(peer.get("net_backend") or "networkd"),
             listen_port=peer.get("listen_port"),
+            node_id=target_node_id,
+            render_files=False,
         )
     else:
         modify_ibgp_peer(
@@ -114,28 +120,41 @@ def _apply_peer_modify(*, config: AppConfig, db_path: Path, payload: dict[str, A
             babel_rxcost=int(peer.get("babel_rxcost", 120)),
             babel_type=str(peer.get("babel_type") or "tunnel"),
             listen_port=peer.get("listen_port"),
+            node_id=target_node_id,
+            render_files=False,
         )
 
 
-def _apply_peer_delete(*, config: AppConfig, db_path: Path, payload: dict[str, Any]) -> None:
+def _apply_peer_delete(*, config: AppConfig, db_path: Path, target_node_id: str, payload: dict[str, Any]) -> None:
     peer_kind = _require_peer_kind(payload)
     key = payload.get("key")
     if not isinstance(key, dict):
         raise Dn42CtlError("payload.key 缺失或不是对象")
     if peer_kind == "bgp":
-        delete_bgp_peer(config=config, db_path=db_path, peer_asn=int(key["peer_asn"]))
+        delete_bgp_peer(
+            config=config, db_path=db_path, peer_asn=int(key["peer_asn"]),
+            node_id=target_node_id, render_files=False,
+        )
     else:
-        delete_ibgp_peer(config=config, db_path=db_path, name=str(key["name"]))
+        delete_ibgp_peer(
+            config=config, db_path=db_path, name=str(key["name"]),
+            node_id=target_node_id, render_files=False,
+        )
 
 
 def _apply_proposal(*, config: AppConfig, db_path: Path, proposal: ConfigProposal) -> None:
-    """Translate the proposal into service-layer calls. Raises Dn42CtlError on failure."""
+    """Translate the proposal into service-layer calls.
+
+    Writes target the proposal's own node_id (not the central self node_id) and
+    skip filesystem rendering — that is the spoke's responsibility on next pull.
+    """
+    target = proposal.node_id
     if proposal.kind == "peer_add":
-        _apply_peer_add(config=config, db_path=db_path, payload=proposal.payload)
+        _apply_peer_add(config=config, db_path=db_path, target_node_id=target, payload=proposal.payload)
     elif proposal.kind == "peer_modify":
-        _apply_peer_modify(config=config, db_path=db_path, payload=proposal.payload)
+        _apply_peer_modify(config=config, db_path=db_path, target_node_id=target, payload=proposal.payload)
     elif proposal.kind == "peer_delete":
-        _apply_peer_delete(config=config, db_path=db_path, payload=proposal.payload)
+        _apply_peer_delete(config=config, db_path=db_path, target_node_id=target, payload=proposal.payload)
     else:  # pragma: no cover — schema CHECK already enforces this
         raise Dn42CtlError(f"未知 proposal kind: {proposal.kind}")
 

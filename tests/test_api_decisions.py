@@ -151,6 +151,7 @@ class TestImportReportRoute:
 class TestAutoAcceptViaApi:
     def test_peer_add_auto_accept_writes_during_submit(self, client: TestClient) -> None:
         token = _register(client)
+        token_h = {"Authorization": f"Bearer {token}"}
         # Switch policy.
         client.patch(
             f"/api/admin/nodes/{NODE_A}/policy",
@@ -160,11 +161,11 @@ class TestAutoAcceptViaApi:
         sub = client.post(
             f"/api/v1/nodes/{NODE_A}/proposals",
             json=_bgp_add_payload(),
-            headers={"Authorization": f"Bearer {token}"},
+            headers=token_h,
         )
         assert sub.status_code == 201
         body = sub.json()
         assert body["status"] == "accepted"
-        # And the BGP peer is in the table.
-        peers = client.get("/api/bgp/peers?live=false", headers=ADMIN_H).json()
-        assert any(p["peer_asn"] == 4242421234 for p in peers)
+        # The peer must land under NODE_A's desired state (not the central self).
+        desired = client.get(f"/api/v1/nodes/{NODE_A}/desired", headers=token_h).json()
+        assert any(p["peer_asn"] == 4242421234 for p in desired["bgp_peers"])

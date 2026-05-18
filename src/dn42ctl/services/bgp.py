@@ -37,10 +37,20 @@ def create_bgp_peer(
     wg_private_key: str | None = None,
     wg_public_key: str | None = None,
     local_lla: str | None = None,
+    node_id: str | None = None,
+    render_files: bool = True,
 ) -> PeerResult:
+    """Create a BGP peer.
+
+    - `node_id` overrides `config.node_id`. Use this when writing on behalf of a
+      remote node (e.g. accept_proposal / import_report on the central server).
+    - `render_files=False` skips writing Bird / network backend files. The server
+      process is sandbox-restricted and cannot touch /etc/bird etc.; only the DB
+      row is created.
+    """
     backend = normalize_net_backend(net_backend)
 
-    node_id = config.node_id
+    node_id = node_id or config.node_id
     db = open_db_and_ensure_node(db_path, node_id)
 
     try:
@@ -91,22 +101,22 @@ def create_bgp_peer(
 
     generated: list[Path] = []
 
-    write_bird_bgp_peer(config=config, ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn, generated=generated)
-
-    write_net_backend_files(
-        config=config,
-        node_id=node_id,
-        backend=backend,
-        ifname=ifname,
-        private_key=private_key,
-        listen_port=listen_port,
-        peer_public_key=peer_public_key,
-        endpoint=endpoint,
-        allowed_ips=allowed_ips,
-        local_lla=local_lla_cidr,
-        peer_lla=peer_lla,
-        generated=generated,
-    )
+    if render_files:
+        write_bird_bgp_peer(config=config, ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn, generated=generated)
+        write_net_backend_files(
+            config=config,
+            node_id=node_id,
+            backend=backend,
+            ifname=ifname,
+            private_key=private_key,
+            listen_port=listen_port,
+            peer_public_key=peer_public_key,
+            endpoint=endpoint,
+            allowed_ips=allowed_ips,
+            local_lla=local_lla_cidr,
+            peer_lla=peer_lla,
+            generated=generated,
+        )
 
     return PeerResult(
         ifname=ifname,
@@ -127,10 +137,12 @@ def modify_bgp_peer(
     peer_lla: str,
     net_backend: str,
     listen_port: int | None = None,
+    node_id: str | None = None,
+    render_files: bool = True,
 ) -> PeerResult:
     backend = normalize_net_backend(net_backend)
 
-    node_id = config.node_id
+    node_id = node_id or config.node_id
     db = open_db_and_ensure_node(db_path, node_id)
 
     try:
@@ -176,22 +188,22 @@ def modify_bgp_peer(
         raise Dn42CtlError(str(exc)) from exc
 
     generated: list[Path] = []
-    write_bird_bgp_peer(config=config, ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn, generated=generated)
-
-    write_net_backend_files(
-        config=config,
-        node_id=node_id,
-        backend=backend,
-        ifname=ifname,
-        private_key=private_key,
-        listen_port=new_listen_port,
-        peer_public_key=peer_public_key,
-        endpoint=endpoint,
-        allowed_ips=allowed_ips,
-        local_lla=local_lla,
-        peer_lla=peer_lla,
-        generated=generated,
-    )
+    if render_files:
+        write_bird_bgp_peer(config=config, ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn, generated=generated)
+        write_net_backend_files(
+            config=config,
+            node_id=node_id,
+            backend=backend,
+            ifname=ifname,
+            private_key=private_key,
+            listen_port=new_listen_port,
+            peer_public_key=peer_public_key,
+            endpoint=endpoint,
+            allowed_ips=allowed_ips,
+            local_lla=local_lla,
+            peer_lla=peer_lla,
+            generated=generated,
+        )
 
     return PeerResult(
         ifname=ifname,
@@ -207,9 +219,11 @@ def delete_bgp_peer(
     config: AppConfig,
     db_path: Path,
     peer_asn: int,
+    node_id: str | None = None,
+    render_files: bool = True,
 ) -> DeleteResult:
     db = open_db(db_path)
-    node_id = config.node_id
+    node_id = node_id or config.node_id
     try:
         row = db.get_bgp_peer(node_id, peer_asn)
     except DatabaseError as exc:
@@ -219,9 +233,12 @@ def delete_bgp_peer(
 
     ifname = str(row["ifname"])
     net_backend = str(row["net_backend"])
-    files = peer_files_for_backend(config=config, ifname=ifname, net_backend=net_backend, kind="bgp")
 
-    deleted, missing = delete_files_and_collect_status(files)
+    deleted: list[str] = []
+    missing: list[str] = []
+    if render_files:
+        files = peer_files_for_backend(config=config, ifname=ifname, net_backend=net_backend, kind="bgp")
+        deleted, missing = delete_files_and_collect_status(files)
 
     try:
         db.delete_bgp_peer(node_id, peer_asn)

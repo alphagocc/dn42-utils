@@ -49,8 +49,14 @@ def create_ibgp_peer(
     wg_private_key: str | None = None,
     wg_public_key: str | None = None,
     local_lla: str | None = None,
+    node_id: str | None = None,
+    render_files: bool = True,
 ) -> PeerResult:
-    node_id = config.node_id
+    """Create an iBGP peer.
+
+    See create_bgp_peer for `node_id` / `render_files` semantics.
+    """
+    node_id = node_id or config.node_id
     db = open_db_and_ensure_node(db_path, node_id)
 
     peer_name = sanitize_name(name)
@@ -129,32 +135,33 @@ def create_ibgp_peer(
 
     generated: list[Path] = []
 
-    bird_peer_path = Path(config.bird_peers_dir) / f"ibgp_{peer_name}.conf"
-    try:
-        bird_conf_text = render_bird_ibgp_peer_conf(name=peer_name, ifname=ifname, peer_ip=peer_ip)
-    except ValueError as exc:
-        raise Dn42CtlError(str(exc)) from exc
-    write_text(bird_peer_path, bird_conf_text)
-    generated.append(bird_peer_path)
+    if render_files:
+        bird_peer_path = Path(config.bird_peers_dir) / f"ibgp_{peer_name}.conf"
+        try:
+            bird_conf_text = render_bird_ibgp_peer_conf(name=peer_name, ifname=ifname, peer_ip=peer_ip)
+        except ValueError as exc:
+            raise Dn42CtlError(str(exc)) from exc
+        write_text(bird_peer_path, bird_conf_text)
+        generated.append(bird_peer_path)
 
-    if has_wg:
-        write_net_backend_files(
-            config=config,
-            node_id=node_id,
-            backend=backend,
-            ifname=ifname,
-            private_key=private_key,
-            listen_port=listen_port,
-            peer_public_key=peer_public_key or "",
-            endpoint=endpoint or "",
-            allowed_ips=allowed_ips,
-            local_lla=local_lla_cidr,
-            peer_lla=peer_lla or "",
-            generated=generated,
-        )
+        if has_wg:
+            write_net_backend_files(
+                config=config,
+                node_id=node_id,
+                backend=backend,
+                ifname=ifname,
+                private_key=private_key,
+                listen_port=listen_port,
+                peer_public_key=peer_public_key or "",
+                endpoint=endpoint or "",
+                allowed_ips=allowed_ips,
+                local_lla=local_lla_cidr,
+                peer_lla=peer_lla or "",
+                generated=generated,
+            )
 
-        babel_path = regenerate_babel_conf(config=config, db=db, node_id=node_id)
-        generated.append(babel_path)
+            babel_path = regenerate_babel_conf(config=config, db=db, node_id=node_id)
+            generated.append(babel_path)
 
     return PeerResult(
         ifname=ifname,
@@ -170,9 +177,11 @@ def delete_ibgp_peer(
     config: AppConfig,
     db_path: Path,
     name: str,
+    node_id: str | None = None,
+    render_files: bool = True,
 ) -> DeleteResult:
     db = open_db(db_path)
-    node_id = config.node_id
+    node_id = node_id or config.node_id
 
     peer_name = sanitize_name(name)
     try:
@@ -186,21 +195,23 @@ def delete_ibgp_peer(
     net_backend = str(row["net_backend"])
     row_has_wg = bool(row["has_wg"])
 
-    if row_has_wg:
-        files = peer_files_for_backend(
-            config=config,
-            ifname=ifname,
-            net_backend=net_backend,
-            kind="ibgp",
-            ibgp_name=peer_name,
-        )
-        babel_path = Path(config.bird_babel_conf_path)
-        files = [p for p in files if p != babel_path]
-    else:
-        bird_peer_path = Path(config.bird_peers_dir) / f"ibgp_{peer_name}.conf"
-        files = [bird_peer_path]
-
-    deleted, missing = delete_files_and_collect_status(files)
+    deleted: list[str] = []
+    missing: list[str] = []
+    if render_files:
+        if row_has_wg:
+            files = peer_files_for_backend(
+                config=config,
+                ifname=ifname,
+                net_backend=net_backend,
+                kind="ibgp",
+                ibgp_name=peer_name,
+            )
+            babel_path = Path(config.bird_babel_conf_path)
+            files = [p for p in files if p != babel_path]
+        else:
+            bird_peer_path = Path(config.bird_peers_dir) / f"ibgp_{peer_name}.conf"
+            files = [bird_peer_path]
+        deleted, missing = delete_files_and_collect_status(files)
 
     try:
         db.delete_ibgp_peer(node_id, peer_name)
@@ -208,7 +219,7 @@ def delete_ibgp_peer(
         raise Dn42CtlError(str(exc)) from exc
 
     regenerated: list[str] = []
-    if row_has_wg:
+    if render_files and row_has_wg:
         babel_path = Path(config.bird_babel_conf_path)
         regenerate_babel_conf(config=config, db=db, node_id=node_id)
         regenerated.append(str(babel_path))
@@ -236,6 +247,8 @@ def modify_ibgp_peer(
     babel_type: str,
     peer_ip: str,
     listen_port: int | None = None,
+    node_id: str | None = None,
+    render_files: bool = True,
 ) -> PeerResult:
     backend = normalize_net_backend(net_backend)
 
@@ -249,7 +262,7 @@ def modify_ibgp_peer(
     except ValidationError as exc:
         raise Dn42CtlError(str(exc)) from exc
 
-    node_id = config.node_id
+    node_id = node_id or config.node_id
     db = open_db_and_ensure_node(db_path, node_id)
 
     peer_name = sanitize_name(name)
@@ -303,31 +316,32 @@ def modify_ibgp_peer(
 
     generated: list[Path] = []
 
-    bird_peer_path = Path(config.bird_peers_dir) / f"ibgp_{peer_name}.conf"
-    try:
-        bird_conf_text = render_bird_ibgp_peer_conf(name=peer_name, ifname=ifname, peer_ip=peer_ip)
-    except ValueError as exc:
-        raise Dn42CtlError(str(exc)) from exc
-    write_text(bird_peer_path, bird_conf_text)
-    generated.append(bird_peer_path)
+    if render_files:
+        bird_peer_path = Path(config.bird_peers_dir) / f"ibgp_{peer_name}.conf"
+        try:
+            bird_conf_text = render_bird_ibgp_peer_conf(name=peer_name, ifname=ifname, peer_ip=peer_ip)
+        except ValueError as exc:
+            raise Dn42CtlError(str(exc)) from exc
+        write_text(bird_peer_path, bird_conf_text)
+        generated.append(bird_peer_path)
 
-    write_net_backend_files(
-        config=config,
-        node_id=node_id,
-        backend=backend,
-        ifname=ifname,
-        private_key=private_key,
-        listen_port=new_listen_port,
-        peer_public_key=peer_public_key,
-        endpoint=endpoint,
-        allowed_ips=allowed_ips,
-        local_lla=local_lla,
-        peer_lla=peer_lla,
-        generated=generated,
-    )
+        write_net_backend_files(
+            config=config,
+            node_id=node_id,
+            backend=backend,
+            ifname=ifname,
+            private_key=private_key,
+            listen_port=new_listen_port,
+            peer_public_key=peer_public_key,
+            endpoint=endpoint,
+            allowed_ips=allowed_ips,
+            local_lla=local_lla,
+            peer_lla=peer_lla,
+            generated=generated,
+        )
 
-    babel_path = regenerate_babel_conf(config=config, db=db, node_id=node_id)
-    generated.append(babel_path)
+        babel_path = regenerate_babel_conf(config=config, db=db, node_id=node_id)
+        generated.append(babel_path)
 
     return PeerResult(
         ifname=ifname,

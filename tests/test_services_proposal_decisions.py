@@ -84,9 +84,8 @@ def _ibgp_add_payload(name: str = "alpha") -> dict:
 
 class TestAcceptBgpAdd:
     def test_creates_bgp_peer(self, sample_config: AppConfig, db_path: Path) -> None:
-        # In sample_config, node_id is "test-node"; we accept proposals against THAT node_id
-        # (the central host's own AppConfig). So the proposal source node and the config
-        # target are separate concepts.
+        # The proposal's node_id is NODE_A, so the peer must land in NODE_A's table,
+        # not in the central host's own self node (sample_config.node_id).
         _register(db_path)
         p = submit_proposal(
             db_path=db_path, node_id=NODE_A, source="push", kind="peer_add",
@@ -95,10 +94,11 @@ class TestAcceptBgpAdd:
         result = accept_proposal(config=sample_config, db_path=db_path, proposal_id=p.id)
         assert result.status == "accepted"
         assert result.decided_at is not None
-        # Verify peer landed in BGP table for the central node_id
         db = Database.open(db_path)
         try:
-            assert db.get_bgp_peer(sample_config.node_id, 4242421234) is not None
+            # Lands in NODE_A (the reporting node), not the central self.
+            assert db.get_bgp_peer(NODE_A, 4242421234) is not None
+            assert db.get_bgp_peer(sample_config.node_id, 4242421234) is None
         finally:
             db.close()
 
@@ -114,7 +114,8 @@ class TestAcceptIbgpAdd:
         assert result.status == "accepted"
         db = Database.open(db_path)
         try:
-            assert db.get_ibgp_peer(sample_config.node_id, "alpha") is not None
+            assert db.get_ibgp_peer(NODE_A, "alpha") is not None
+            assert db.get_ibgp_peer(sample_config.node_id, "alpha") is None
         finally:
             db.close()
 
@@ -142,13 +143,11 @@ class TestAcceptFailureKeepsPending:
 class TestAcceptDelete:
     def test_deletes(self, sample_config: AppConfig, db_path: Path) -> None:
         _register(db_path)
-        # First, add a peer normally (not via proposal) - but easier: accept add proposal first.
         add = submit_proposal(
             db_path=db_path, node_id=NODE_A, source="push", kind="peer_add",
             payload=_bgp_add_payload(),
         )
         accept_proposal(config=sample_config, db_path=db_path, proposal_id=add.id)
-        # Now delete proposal:
         delete = submit_proposal(
             db_path=db_path, node_id=NODE_A, source="push", kind="peer_delete",
             payload={"peer_kind": "bgp", "key": {"peer_asn": 4242421234}},
@@ -156,7 +155,7 @@ class TestAcceptDelete:
         accept_proposal(config=sample_config, db_path=db_path, proposal_id=delete.id)
         db = Database.open(db_path)
         try:
-            assert db.get_bgp_peer(sample_config.node_id, 4242421234) is None
+            assert db.get_bgp_peer(NODE_A, 4242421234) is None
         finally:
             db.close()
 
@@ -207,7 +206,7 @@ class TestAutoAccept:
         assert p.status == "accepted"
         db = Database.open(db_path)
         try:
-            assert db.get_bgp_peer(sample_config.node_id, 4242421234) is not None
+            assert db.get_bgp_peer(NODE_A, 4242421234) is not None
         finally:
             db.close()
 
@@ -230,6 +229,31 @@ class TestAutoAccept:
         assert p2.message and "auto_accept" in p2.message
 
 
+class TestAcceptDoesNotRenderFiles:
+    def test_no_bird_or_networkd_files_written(
+        self, sample_config: AppConfig, db_path: Path
+    ) -> None:
+        """accept_proposal must not write /etc/bird, /etc/systemd/network etc.
+
+        The server runs sandboxed and those paths are out of bounds; the spoke
+        renders them on next pull/apply.
+        """
+        peers_dir = Path(sample_config.bird_peers_dir)
+        networkd_dir = Path(sample_config.networkd_dir)
+        before_peers = set(peers_dir.iterdir())
+        before_networkd = set(networkd_dir.iterdir())
+
+        _register(db_path)
+        p = submit_proposal(
+            db_path=db_path, node_id=NODE_A, source="push", kind="peer_add",
+            payload=_bgp_add_payload(),
+        )
+        accept_proposal(config=sample_config, db_path=db_path, proposal_id=p.id)
+
+        assert set(peers_dir.iterdir()) == before_peers
+        assert set(networkd_dir.iterdir()) == before_networkd
+
+
 class TestImportReport:
     def test_imports_scan_result(self, sample_config: AppConfig, db_path: Path) -> None:
         _register(db_path)
@@ -242,9 +266,18 @@ class TestImportReport:
         )
         counts = import_report(config=sample_config, db_path=db_path, report_id=r.id)
         assert counts == {"bgp_created": 1, "bgp_skipped": 0, "ibgp_created": 1, "ibgp_skipped": 0}
-        # imported_at filled
         listed = list_reports(db_path=db_path, node_id=NODE_A)
         assert listed[0].imported_at is not None
+        # The created peer must belong to NODE_A (the reporting node),
+        # not the central host's own self node.
+        db = Database.open(db_path)
+        try:
+            assert db.get_bgp_peer(NODE_A, 4242421234) is not None
+            assert db.get_bgp_peer(sample_config.node_id, 4242421234) is None
+            assert db.get_ibgp_peer(NODE_A, "alpha") is not None
+            assert db.get_ibgp_peer(sample_config.node_id, "alpha") is None
+        finally:
+            db.close()
 
     def test_reimport_skips_existing(self, sample_config: AppConfig, db_path: Path) -> None:
         _register(db_path)

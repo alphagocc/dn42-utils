@@ -19,11 +19,11 @@ from dn42ctl.services.core import Dn42CtlError
 from dn42ctl.services.ibgp import create_ibgp_peer
 
 
-def _import_bgp(*, config: AppConfig, db_path: Path, peer: dict[str, Any]) -> str:
+def _import_bgp(*, config: AppConfig, db_path: Path, target_node_id: str, peer: dict[str, Any]) -> str:
     """Returns 'created' | 'skipped'."""
     db = Database.open(db_path)
     try:
-        existing = db.get_bgp_peer(config.node_id, int(peer["peer_asn"]))
+        existing = db.get_bgp_peer(target_node_id, int(peer["peer_asn"]))
     finally:
         db.close()
     if existing is not None:
@@ -37,14 +37,16 @@ def _import_bgp(*, config: AppConfig, db_path: Path, peer: dict[str, Any]) -> st
         peer_lla=str(peer["peer_lla"]),
         net_backend=str(peer.get("net_backend") or "networkd"),
         listen_port=peer.get("listen_port"),
+        node_id=target_node_id,
+        render_files=False,
     )
     return "created"
 
 
-def _import_ibgp(*, config: AppConfig, db_path: Path, peer: dict[str, Any]) -> str:
+def _import_ibgp(*, config: AppConfig, db_path: Path, target_node_id: str, peer: dict[str, Any]) -> str:
     db = Database.open(db_path)
     try:
-        existing = db.get_ibgp_peer(config.node_id, str(peer["name"]))
+        existing = db.get_ibgp_peer(target_node_id, str(peer["name"]))
     finally:
         db.close()
     if existing is not None:
@@ -62,6 +64,8 @@ def _import_ibgp(*, config: AppConfig, db_path: Path, peer: dict[str, Any]) -> s
         babel_rxcost=int(peer.get("babel_rxcost", 0)),
         babel_type=str(peer.get("babel_type") or "tunnel"),
         listen_port=peer.get("listen_port"),
+        node_id=target_node_id,
+        render_files=False,
     )
     return "created"
 
@@ -72,7 +76,10 @@ def import_report(
     db_path: Path,
     report_id: int,
 ) -> dict[str, int]:
-    """Import a scan_result report. Returns counts of created/skipped per peer kind."""
+    """Import a scan_result report. Writes target the report's reporting node_id
+    (NOT the central self), and skips filesystem rendering (server sandbox).
+    Returns counts of created/skipped per peer kind.
+    """
     db = Database.open(db_path)
     try:
         store = ReportStore(db.connection)
@@ -88,6 +95,8 @@ def import_report(
     if report.imported_at is not None:
         raise Dn42CtlError(f"report #{report_id} 已被导入过 (imported_at={report.imported_at})")
 
+    target_node_id = report.node_id
+
     bgp_peers = report.payload.get("bgp_peers", [])
     ibgp_peers = report.payload.get("ibgp_peers", [])
     if not isinstance(bgp_peers, list) or not isinstance(ibgp_peers, list):
@@ -98,7 +107,9 @@ def import_report(
         if not isinstance(peer, dict):
             continue
         try:
-            res = _import_bgp(config=config, db_path=db_path, peer=peer)
+            res = _import_bgp(
+                config=config, db_path=db_path, target_node_id=target_node_id, peer=peer
+            )
         except Dn42CtlError as exc:
             raise Dn42CtlError(f"导入 BGP peer 失败 ({peer.get('peer_asn')}): {exc}") from exc
         counts[f"bgp_{res}"] += 1
@@ -106,7 +117,9 @@ def import_report(
         if not isinstance(peer, dict):
             continue
         try:
-            res = _import_ibgp(config=config, db_path=db_path, peer=peer)
+            res = _import_ibgp(
+                config=config, db_path=db_path, target_node_id=target_node_id, peer=peer
+            )
         except Dn42CtlError as exc:
             raise Dn42CtlError(f"导入 iBGP peer 失败 ({peer.get('name')}): {exc}") from exc
         counts[f"ibgp_{res}"] += 1
