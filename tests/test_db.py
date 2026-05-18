@@ -15,17 +15,22 @@ class TestMigrations:
         assert "nodes" in tables
         assert "bgp_peers" in tables
         assert "ibgp_peers" in tables
+        # v5 hub-spoke sync tables
+        assert "managed_nodes" in tables
+        assert "config_proposals" in tables
+        assert "node_reports" in tables
+        assert "config_revisions" in tables
 
     def test_all_versions_applied(self, mem_db: Database) -> None:
         rows = mem_db._conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
         versions = [row[0] for row in rows]
-        assert versions == [1, 2, 3, 4]
+        assert versions == [1, 2, 3, 4, 5]
 
     def test_migrate_idempotent(self, mem_db: Database) -> None:
         mem_db.migrate()
         mem_db.migrate()
         rows = mem_db._conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
-        assert len(rows) == 4
+        assert len(rows) == 5
 
 
 class TestEnsureNode:

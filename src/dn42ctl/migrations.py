@@ -79,4 +79,61 @@ MIGRATIONS: list[tuple[int, str]] = [
         ALTER TABLE ibgp_peers ADD COLUMN babel_type TEXT NOT NULL DEFAULT 'tunnel';
         """.strip(),
     ),
+    (
+        5,
+        """
+        CREATE TABLE IF NOT EXISTS managed_nodes (
+            node_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            api_token_hash TEXT,
+            write_policy TEXT NOT NULL DEFAULT
+                '{"peer_add":"review","peer_modify":"review","peer_delete":"review","report":"auto"}',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            is_self INTEGER NOT NULL DEFAULT 0,
+            last_seen_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(node_id) REFERENCES nodes(node_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS config_proposals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            received_at TEXT NOT NULL,
+            decided_at TEXT,
+            message TEXT,
+            FOREIGN KEY(node_id) REFERENCES nodes(node_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_config_proposals_node_status
+            ON config_proposals(node_id, status);
+
+        CREATE TABLE IF NOT EXISTS node_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            received_at TEXT NOT NULL,
+            imported_at TEXT,
+            FOREIGN KEY(node_id) REFERENCES nodes(node_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_node_reports_node_kind
+            ON node_reports(node_id, kind, received_at);
+
+        CREATE TABLE IF NOT EXISTS config_revisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_id TEXT NOT NULL,
+            revision TEXT NOT NULL,
+            generated_at TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            UNIQUE(node_id, revision),
+            FOREIGN KEY(node_id) REFERENCES nodes(node_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_config_revisions_node_time
+            ON config_revisions(node_id, generated_at);
+        """.strip(),
+    ),
 ]

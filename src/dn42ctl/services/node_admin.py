@@ -1,0 +1,136 @@
+"""Admin-side node management service: wraps ManagedNodeStore with token signing and
+input validation. Used by both CLI (`dn42ctl node ...`) and admin REST API
+(`/api/admin/nodes/...`).
+"""
+
+from __future__ import annotations
+
+import secrets
+import uuid
+from dataclasses import dataclass
+from pathlib import Path
+
+from dn42ctl.db import Database, DatabaseError
+from dn42ctl.db_managed import ManagedNode, ManagedNodeStore
+from dn42ctl.services.core import Dn42CtlError
+
+
+def _store_for(db_path: Path) -> tuple[Database, ManagedNodeStore]:
+    db = Database.open(db_path)
+    return db, ManagedNodeStore(db.connection)
+
+
+def _validate_node_id(node_id: str) -> str:
+    try:
+        uuid.UUID(node_id)
+    except ValueError as exc:
+        raise Dn42CtlError(f"node_id 必须是合法 UUID: {node_id}") from exc
+    return node_id
+
+
+@dataclass(frozen=True)
+class RotatedToken:
+    node_id: str
+    plaintext: str
+
+
+def add_node(*, db_path: Path, node_id: str, name: str) -> ManagedNode:
+    _validate_node_id(node_id)
+    if not name.strip():
+        raise Dn42CtlError("name 不能为空")
+    db, store = _store_for(db_path)
+    try:
+        return store.add(node_id, name.strip())
+    except DatabaseError as exc:
+        raise Dn42CtlError(str(exc)) from exc
+    finally:
+        db.close()
+
+
+def list_nodes(*, db_path: Path) -> list[ManagedNode]:
+    db, store = _store_for(db_path)
+    try:
+        return store.list_all()
+    except DatabaseError as exc:
+        raise Dn42CtlError(str(exc)) from exc
+    finally:
+        db.close()
+
+
+def get_node(*, db_path: Path, node_id: str) -> ManagedNode:
+    _validate_node_id(node_id)
+    db, store = _store_for(db_path)
+    try:
+        node = store.get(node_id)
+    except DatabaseError as exc:
+        raise Dn42CtlError(str(exc)) from exc
+    finally:
+        db.close()
+    if node is None:
+        raise Dn42CtlError(f"节点不存在: {node_id}")
+    return node
+
+
+def remove_node(*, db_path: Path, node_id: str, force: bool = False) -> ManagedNode:
+    _validate_node_id(node_id)
+    db, store = _store_for(db_path)
+    try:
+        removed = store.delete(node_id, force=force)
+    except DatabaseError as exc:
+        raise Dn42CtlError(str(exc)) from exc
+    finally:
+        db.close()
+    if removed is None:
+        raise Dn42CtlError(f"节点不存在: {node_id}")
+    return removed
+
+
+def rotate_token(*, db_path: Path, node_id: str) -> RotatedToken:
+    _validate_node_id(node_id)
+    db, store = _store_for(db_path)
+    try:
+        node = store.get(node_id)
+        if node is None:
+            raise Dn42CtlError(f"节点不存在: {node_id}")
+        plaintext = secrets.token_urlsafe(32)
+        store.rotate_token(node_id, plaintext)
+    except DatabaseError as exc:
+        raise Dn42CtlError(str(exc)) from exc
+    finally:
+        db.close()
+    return RotatedToken(node_id=node_id, plaintext=plaintext)
+
+
+def set_policy(
+    *,
+    db_path: Path,
+    node_id: str,
+    peer_add: str | None = None,
+    peer_modify: str | None = None,
+    peer_delete: str | None = None,
+    report: str | None = None,
+) -> ManagedNode:
+    """Partially update write_policy; unspecified fields are preserved."""
+    _validate_node_id(node_id)
+    db, store = _store_for(db_path)
+    try:
+        node = store.get(node_id)
+        if node is None:
+            raise Dn42CtlError(f"节点不存在: {node_id}")
+        new_policy = dict(node.write_policy)
+        if peer_add is not None:
+            new_policy["peer_add"] = peer_add
+        if peer_modify is not None:
+            new_policy["peer_modify"] = peer_modify
+        if peer_delete is not None:
+            new_policy["peer_delete"] = peer_delete
+        if report is not None:
+            new_policy["report"] = report
+        try:
+            return store.set_write_policy(node_id, new_policy)
+        except ValueError as exc:
+            raise Dn42CtlError(str(exc)) from exc
+    except DatabaseError as exc:
+        raise Dn42CtlError(str(exc)) from exc
+    finally:
+        db.close()

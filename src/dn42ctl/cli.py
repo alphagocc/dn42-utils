@@ -1069,9 +1069,9 @@ app.add_typer(show_app, name="show")
 @app.command("serve")
 def cmd_serve(
     ctx: typer.Context,
-    host: str = typer.Option("127.0.0.1", "--host", help="绑定地址 (默认 127.0.0.1)"),
+    host: str = typer.Option("::1", "--host", help="绑定地址 (默认 ::1, IPv6 loopback)"),
     port: int = typer.Option(4242, "--port", help="监听端口 (默认 4242)"),
-    token: str = typer.Option(..., "--token", envvar="DN42CTL_API_TOKEN", help="Bearer Token (必须提供)"),
+    token: str = typer.Option(..., "--token", envvar="DN42CTL_API_TOKEN", help="Admin Bearer Token (必须提供)"),
 ) -> None:
     appctx: AppContext = ctx.obj
     config = _require_config_or_exit(appctx)
@@ -1081,6 +1081,169 @@ def cmd_serve(
 
     configure(config=config, db_path=appctx.db_path, token=token)
 
+    if host not in ("::1", "127.0.0.1", "localhost"):
+        typer.echo(
+            f"警告: --host={host} 非 loopback 地址。dn42ctl 不处理 TLS,推荐仅监听 loopback 并由 nginx 反代。",
+            err=True,
+        )
+
     import uvicorn
 
     uvicorn.run(api_app, host=host, port=port)
+
+
+# --- node management (admin subcommands) ---
+
+node_app = typer.Typer(help="多节点中心化同步: admin 与节点同步命令")
+
+
+def _print_managed_node(node) -> None:
+    flag = " [self]" if node.is_self else ""
+    has_token = "yes" if node.api_token_hash else "no"
+    typer.echo(f"node_id={node.node_id}{flag} name={node.name} enabled={node.enabled} token={has_token}")
+    typer.echo(f"  write_policy: {json.dumps(node.write_policy, ensure_ascii=False)}")
+    typer.echo(f"  last_seen_at: {node.last_seen_at or '-'}")
+    typer.echo(f"  created_at:   {node.created_at}")
+    typer.echo(f"  updated_at:   {node.updated_at}")
+
+
+@node_app.command("add")
+def cmd_node_add(
+    ctx: typer.Context,
+    node_id: str = typer.Argument(..., help="UUIDv4 node id"),
+    name: str = typer.Option(..., "--name", help="节点显示名"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    from dn42ctl.services import add_node
+
+    try:
+        node = add_node(db_path=appctx.db_path, node_id=node_id, name=name)
+    except Dn42CtlError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except DatabaseError as exc:
+        typer.echo(_db_open_hint(appctx.db_path), err=True)
+        raise typer.Exit(code=1) from exc
+    _print_managed_node(node)
+
+
+@node_app.command("list")
+def cmd_node_list(ctx: typer.Context) -> None:
+    appctx: AppContext = ctx.obj
+    from dn42ctl.services import list_nodes
+
+    try:
+        nodes = list_nodes(db_path=appctx.db_path)
+    except Dn42CtlError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except DatabaseError as exc:
+        typer.echo(_db_open_hint(appctx.db_path), err=True)
+        raise typer.Exit(code=1) from exc
+    if not nodes:
+        typer.echo("(没有已注册的 managed_nodes)")
+        return
+    for n in nodes:
+        flag = "[self] " if n.is_self else "       "
+        token = "T" if n.api_token_hash else "-"
+        typer.echo(f"{flag}{n.node_id}  name={n.name}  enabled={int(n.enabled)}  token={token}")
+
+
+@node_app.command("show")
+def cmd_node_show(
+    ctx: typer.Context,
+    node_id: str = typer.Argument(..., help="节点 UUID"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    from dn42ctl.services import get_node
+
+    try:
+        node = get_node(db_path=appctx.db_path, node_id=node_id)
+    except Dn42CtlError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except DatabaseError as exc:
+        typer.echo(_db_open_hint(appctx.db_path), err=True)
+        raise typer.Exit(code=1) from exc
+    _print_managed_node(node)
+
+
+@node_app.command("remove")
+def cmd_node_remove(
+    ctx: typer.Context,
+    node_id: str = typer.Argument(..., help="节点 UUID"),
+    force: bool = typer.Option(False, "--force", help="允许删除 self 节点"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    from dn42ctl.services import remove_node
+
+    try:
+        node = remove_node(db_path=appctx.db_path, node_id=node_id, force=force)
+    except Dn42CtlError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except DatabaseError as exc:
+        typer.echo(_db_open_hint(appctx.db_path), err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"已删除: {node.node_id} ({node.name})")
+
+
+token_app = typer.Typer(help="节点 token 管理")
+
+
+@token_app.command("rotate")
+def cmd_node_token_rotate(
+    ctx: typer.Context,
+    node_id: str = typer.Argument(..., help="节点 UUID"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    from dn42ctl.services import rotate_token
+
+    try:
+        rotated = rotate_token(db_path=appctx.db_path, node_id=node_id)
+    except Dn42CtlError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except DatabaseError as exc:
+        typer.echo(_db_open_hint(appctx.db_path), err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"node_id: {rotated.node_id}")
+    typer.echo(f"token (明文,仅显示一次): {rotated.plaintext}")
+
+
+node_app.add_typer(token_app, name="token")
+
+
+policy_app = typer.Typer(help="节点写策略 (write_policy) 管理")
+
+
+@policy_app.command("set")
+def cmd_node_policy_set(
+    ctx: typer.Context,
+    node_id: str = typer.Argument(..., help="节点 UUID"),
+    peer_add: str = typer.Option(None, "--peer-add", help="review | auto_accept"),
+    peer_modify: str = typer.Option(None, "--peer-modify", help="review (固定)"),
+    peer_delete: str = typer.Option(None, "--peer-delete", help="review (固定)"),
+    report: str = typer.Option(None, "--report", help="review | auto"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    from dn42ctl.services import set_policy
+
+    if peer_add is None and peer_modify is None and peer_delete is None and report is None:
+        raise typer.BadParameter("至少指定一个 --peer-add / --peer-modify / --peer-delete / --report")
+    try:
+        node = set_policy(
+            db_path=appctx.db_path,
+            node_id=node_id,
+            peer_add=peer_add,
+            peer_modify=peer_modify,
+            peer_delete=peer_delete,
+            report=report,
+        )
+    except Dn42CtlError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except DatabaseError as exc:
+        typer.echo(_db_open_hint(appctx.db_path), err=True)
+        raise typer.Exit(code=1) from exc
+    _print_managed_node(node)
+
+
+node_app.add_typer(policy_app, name="policy")
+
+
+app.add_typer(node_app, name="node")
