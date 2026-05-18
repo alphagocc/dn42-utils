@@ -1,0 +1,23 @@
+# 放到 /etc/nginx/conf.d/dn42ctl.conf
+# 仅对外暴露给远程节点 / 管理员; self 节点不经过这里 (走 http://[::1]:4242)
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name center.example;
+
+    ssl_certificate     /etc/letsencrypt/live/center.example/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/center.example/privkey.pem;
+
+    # 可选: 限制到 dn42 / wireguard 内网
+    # allow fd00::/8;
+    # deny all;
+
+    location /api/ {
+        proxy_pass         http://[::1]:4242;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Forwarded-For   $remote_addr;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+}

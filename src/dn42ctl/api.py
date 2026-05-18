@@ -15,6 +15,7 @@ from dn42ctl.db_managed import ManagedNodeStore
 from dn42ctl.services import (
     Dn42CtlError,
     add_node,
+    build_desired_state,
     create_bgp_peer,
     create_ibgp_peer,
     delete_bgp_peer,
@@ -25,6 +26,7 @@ from dn42ctl.services import (
     modify_bgp_peer,
     modify_ibgp_peer,
     remove_node,
+    require_managed_node_exists,
     rotate_token,
     set_policy,
     show_bgp_peers,
@@ -114,15 +116,31 @@ def require_admin(
     return principal
 
 
+def require_node_self_or_admin(
+    node_id: str,
+    principal: Annotated[Principal, Depends(_resolve_principal)],
+) -> Principal:
+    """Allow admins to act on any node; node tokens must match the path node_id."""
+    if principal.kind == "admin":
+        return principal
+    if principal.kind == "node" and principal.node_id == node_id:
+        return principal
+    raise HTTPException(status_code=403, detail="Forbidden")
+
+
 app = FastAPI(title="dn42ctl API")
 router_prefix = "/api"
 admin_prefix = "/api/admin"
+node_prefix = "/api/v1/nodes"
 
 # Legacy admin-token routes (/api/bgp, /api/ibgp, /api/show/all, /api/wg, /api/genconf).
 _admin_router = APIRouter(prefix="", dependencies=[Depends(require_admin)])
 
 # New admin node-management endpoints under /api/admin/.
 _admin_nodes_router = APIRouter(prefix=admin_prefix, dependencies=[Depends(require_admin)])
+
+# Node-token endpoints under /api/v1/nodes/{node_id}/...
+_node_router = APIRouter(prefix=node_prefix)
 
 
 # --- Pydantic models ---
@@ -619,7 +637,33 @@ def api_patch_node_policy(node_id: str, body: NodePolicyPatchRequest) -> dict:
     return _managed_node_to_dict(node)
 
 
+# --- Node-token routes (/api/v1/nodes/{node_id}/...) ---
+
+
+@_node_router.get("/{node_id}/desired")
+def api_node_desired(
+    node_id: str,
+    _: Annotated[Principal, Depends(require_node_self_or_admin)],
+) -> dict:
+    try:
+        require_managed_node_exists(db_path=_get_db_path(), node_id=node_id)
+        state = build_desired_state(db_path=_get_db_path(), node_id=node_id)
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # Touch last_seen on successful pull (best-effort, ignore failures).
+    try:
+        db = Database.open(_get_db_path())
+        try:
+            ManagedNodeStore(db.connection).touch_last_seen(node_id)
+        finally:
+            db.close()
+    except Exception:  # noqa: BLE001, S110 — touch_last_seen is best-effort
+        pass
+    return state.to_dict()
+
+
 # --- Mount routers ---
 
 app.include_router(_admin_router)
 app.include_router(_admin_nodes_router)
+app.include_router(_node_router)

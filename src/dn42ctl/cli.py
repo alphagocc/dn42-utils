@@ -1072,6 +1072,9 @@ def cmd_serve(
     host: str = typer.Option("::1", "--host", help="绑定地址 (默认 ::1, IPv6 loopback)"),
     port: int = typer.Option(4242, "--port", help="监听端口 (默认 4242)"),
     token: str = typer.Option(..., "--token", envvar="DN42CTL_API_TOKEN", help="Admin Bearer Token (必须提供)"),
+    no_self_register: bool = typer.Option(
+        False, "--no-self-register", help="跳过 self node 自动注册 (测试 / 不希望中心机自管时使用)"
+    ),
 ) -> None:
     appctx: AppContext = ctx.obj
     config = _require_config_or_exit(appctx)
@@ -1086,6 +1089,29 @@ def cmd_serve(
             f"警告: --host={host} 非 loopback 地址。dn42ctl 不处理 TLS,推荐仅监听 loopback 并由 nginx 反代。",
             err=True,
         )
+
+    if not no_self_register:
+        from dn42ctl.paths import NODE_CONFIG_PATH, SELF_NODE_ID_PATH
+        from dn42ctl.serve_bootstrap import run_self_registration
+
+        try:
+            result = run_self_registration(
+                db_path=appctx.db_path,
+                self_node_id_path=SELF_NODE_ID_PATH,
+                node_toml_path=NODE_CONFIG_PATH,
+                server_url=f"http://[{host}]:{port}" if ":" in host else f"http://{host}:{port}",
+            )
+        except (PermissionError, OSError) as exc:
+            typer.echo(f"警告: self node 自动注册失败: {exc}", err=True)
+        else:
+            note = []
+            if result.created_node_id:
+                note.append("生成新 self_node_id")
+            if result.rotated_token:
+                note.append("签发新 self token")
+            if note:
+                typer.echo(f"self node 自动注册: {result.node_id} ({'; '.join(note)})")
+                typer.echo(f"  node.toml -> {result.node_toml_path}")
 
     import uvicorn
 
@@ -1247,3 +1273,129 @@ node_app.add_typer(policy_app, name="policy")
 
 
 app.add_typer(node_app, name="node")
+
+
+# --- node sync subcommands (spoke side: init / pull / apply / once) ---
+
+
+def _resolve_node_config_path(appctx: AppContext, override: Path | None) -> Path:
+    if override is not None:
+        return override
+    return Path("/etc/dn42ctl/node.toml")
+
+
+@node_app.command("init")
+def cmd_node_init(
+    ctx: typer.Context,
+    server: str = typer.Option(..., "--server", help="中心 server URL (含 scheme), 如 https://center.example"),
+    node_id: str = typer.Option(..., "--node-id", help="本节点 UUIDv4 (由中心管理员告知)"),
+    token: str = typer.Option(..., "--token", help="本节点 token (中心 rotate 后的明文)"),
+    node_config_path: Path = typer.Option(
+        None, "--node-config-path", help="覆盖默认 /etc/dn42ctl/node.toml 路径"
+    ),
+) -> None:
+    appctx: AppContext = ctx.obj
+    from dn42ctl.node_config import NodeConfig, save_node_config
+
+    path = _resolve_node_config_path(appctx, node_config_path)
+    try:
+        save_node_config(path, NodeConfig(server=server, node_id=node_id, token=token))
+    except (PermissionError, OSError) as exc:
+        typer.echo(f"错误: 无法写入 {path}: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"已写入: {path}")
+
+
+@node_app.command("pull")
+def cmd_node_pull(
+    ctx: typer.Context,
+    node_config_path: Path = typer.Option(None, "--node-config-path"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    from dn42ctl.node_config import NodeConfigError, load_node_config
+    from dn42ctl.services.node_agent import pull
+
+    path = _resolve_node_config_path(appctx, node_config_path)
+    try:
+        node_cfg = load_node_config(path)
+    except NodeConfigError as exc:
+        typer.echo(f"错误: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    try:
+        result = pull(node_config=node_cfg)
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"已 pull: revision={result.revision} (cache: {node_cfg.cache_db_path})")
+
+
+@node_app.command("apply")
+def cmd_node_apply(
+    ctx: typer.Context,
+    dry_run: bool = typer.Option(False, "--dry-run", help="不写文件,仅输出 diff"),
+    from_server: bool = typer.Option(False, "--from-server", help="apply 前先 pull"),
+    node_config_path: Path = typer.Option(None, "--node-config-path"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    from dn42ctl.node_config import NodeConfigError, load_node_config
+    from dn42ctl.services.node_agent import pull
+    from dn42ctl.services.node_apply import apply, apply_diff_text, apply_summary
+
+    path = _resolve_node_config_path(appctx, node_config_path)
+    try:
+        node_cfg = load_node_config(path)
+    except NodeConfigError as exc:
+        typer.echo(f"错误: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+    if from_server:
+        try:
+            pull(node_config=node_cfg)
+        except Dn42CtlError as exc:
+            typer.echo(f"错误 (pull): {exc}", err=True)
+            raise typer.Exit(1) from exc
+
+    try:
+        result = apply(node_config=node_cfg, dry_run=dry_run)
+    except Dn42CtlError as exc:
+        typer.echo(f"错误 (apply): {exc}", err=True)
+        raise typer.Exit(1) from exc
+    except (PermissionError, OSError) as exc:
+        typer.echo(f"错误: 写文件失败: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+    if dry_run:
+        typer.echo(apply_diff_text(result))
+    else:
+        typer.echo(apply_summary(result))
+
+
+@node_app.command("once")
+def cmd_node_once(
+    ctx: typer.Context,
+    node_config_path: Path = typer.Option(None, "--node-config-path"),
+) -> None:
+    """pull -> apply (report 在阶段 3 接入)"""
+    appctx: AppContext = ctx.obj
+    from dn42ctl.node_config import NodeConfigError, load_node_config
+    from dn42ctl.services.node_agent import pull
+    from dn42ctl.services.node_apply import apply, apply_summary
+
+    path = _resolve_node_config_path(appctx, node_config_path)
+    try:
+        node_cfg = load_node_config(path)
+    except NodeConfigError as exc:
+        typer.echo(f"错误: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+    try:
+        pull_res = pull(node_config=node_cfg)
+        typer.echo(f"pulled: revision={pull_res.revision}")
+        apply_res = apply(node_config=node_cfg)
+        typer.echo(apply_summary(apply_res))
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    except (PermissionError, OSError) as exc:
+        typer.echo(f"错误: 写文件失败: {exc}", err=True)
+        raise typer.Exit(1) from exc

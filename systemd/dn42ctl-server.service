@@ -1,0 +1,52 @@
+[Unit]
+Description=dn42ctl API server (hub)
+Documentation=https://github.com/alphagocc/dn42-utils
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=dn42ctl
+Group=dn42ctl
+EnvironmentFile=/etc/dn42ctl/server.env
+ExecStart=/usr/local/bin/dn42ctl serve --host ::1 --port 4242
+Restart=on-failure
+RestartSec=3s
+
+# ---- 文件系统 ----
+ReadWritePaths=/var/lib/dn42ctl /etc/dn42ctl
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+UMask=0077
+
+# ---- 内核接口 ----
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+
+# ---- 进程能力 ----
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=true
+RestrictRealtime=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount @debug @cpu-emulation @obsolete @raw-io @reboot @swap
+
+# ---- 网络 ----
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressAllow=localhost
+IPAddressDeny=any
+
+[Install]
+WantedBy=multi-user.target

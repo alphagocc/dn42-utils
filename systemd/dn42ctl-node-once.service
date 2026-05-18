@@ -1,0 +1,23 @@
+[Unit]
+Description=dn42ctl node sync (pull/apply/report)
+Documentation=https://github.com/alphagocc/dn42-utils
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# node once 写 /etc/bird /etc/systemd/network /etc/NetworkManager,
+# 调用 wg / ip / nmcli,默认以 root 运行。sandbox 比 server 宽松。
+ExecStart=/usr/local/bin/dn42ctl node once
+
+# ---- 文件系统 ----
+ReadWritePaths=/etc/bird /etc/systemd/network /etc/NetworkManager/system-connections /var/lib/dn42ctl /etc/dn42ctl
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+# ---- 进程能力 ----
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+LockPersonality=true

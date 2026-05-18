@@ -13,3 +13,8 @@ DEFAULT_BIRD_ROA_V6_CONF_PATH = DEFAULT_BIRD_DIR / "roa_dn42_v6.conf"
 
 DEFAULT_NETWORKD_DIR = Path("/etc/systemd/network")
 DEFAULT_NM_SYSTEM_CONNECTIONS_DIR = Path("/etc/NetworkManager/system-connections")
+
+# Hub-spoke node sync (stage 2+).
+NODE_CONFIG_PATH = Path("/etc/dn42ctl/node.toml")
+NODE_CACHE_DB_PATH = Path("/var/lib/dn42ctl/node-cache.sqlite3")
+SELF_NODE_ID_PATH = Path("/var/lib/dn42ctl/self_node_id")

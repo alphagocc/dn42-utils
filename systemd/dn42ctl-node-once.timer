@@ -1,0 +1,11 @@
+[Unit]
+Description=Run dn42ctl node once periodically
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+RandomizedDelaySec=30s
+Unit=dn42ctl-node-once.service
+
+[Install]
+WantedBy=timers.target
