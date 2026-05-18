@@ -163,6 +163,50 @@ def rotate_token(
     )
 
 
+@dataclass(frozen=True)
+class NodeStatus:
+    """Central-side view of a node's current status."""
+    node_id: str
+    name: str
+    enabled: bool
+    is_self: bool
+    has_token: bool
+    last_seen_at: str | None
+    current_revision: str | None
+    pinned_revision: str | None
+
+
+def get_node_status(*, db_path: Path, node_id: str) -> NodeStatus:
+    _validate_node_id(node_id)
+    db, store = _store_for(db_path)
+    try:
+        node = store.get(node_id)
+        if node is None:
+            raise Dn42CtlError(f"节点不存在: {node_id}")
+        # Lazy import to avoid cycles.
+        from dn42ctl.db_managed import RevisionStore
+
+        rev_store = RevisionStore(db.connection)
+        revisions = rev_store.list_for_node(node_id, limit=1)
+        current_revision = revisions[0].revision if revisions else None
+        pin = rev_store.get_pin(node_id)
+        pinned_revision = pin.revision if pin else None
+    except DatabaseError as exc:
+        raise Dn42CtlError(str(exc)) from exc
+    finally:
+        db.close()
+    return NodeStatus(
+        node_id=node.node_id,
+        name=node.name,
+        enabled=node.enabled,
+        is_self=node.is_self,
+        has_token=node.api_token_hash is not None,
+        last_seen_at=node.last_seen_at,
+        current_revision=current_revision,
+        pinned_revision=pinned_revision,
+    )
+
+
 def set_policy(
     *,
     db_path: Path,

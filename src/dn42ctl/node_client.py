@@ -48,3 +48,18 @@ class NodeClient:
         if resp.status_code >= 400:
             raise NodeClientError(f"server 错误 {resp.status_code}: {resp.text}")
         return resp.json()
+
+    def fetch_status(self, *, timeout: float | None = None) -> dict[str, Any]:
+        """GET /status. Uses a shorter timeout by default (status is a probe)."""
+        eff_timeout = timeout if timeout is not None else min(self._timeout, 5.0)
+        try:
+            resp = httpx.get(self._url("/status"), headers=self._headers, timeout=eff_timeout)
+        except httpx.HTTPError as exc:
+            raise NodeClientError(f"无法访问 server: {exc}") from exc
+        if resp.status_code == 401:
+            raise NodeClientError("server 拒绝鉴权 (401)")
+        if resp.status_code == 403:
+            raise NodeClientError("server 返回 403: node_id 与 token 不匹配")
+        if resp.status_code >= 400:
+            raise NodeClientError(f"server 错误 {resp.status_code}: {resp.text}")
+        return resp.json()

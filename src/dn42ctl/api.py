@@ -24,6 +24,7 @@ from dn42ctl.services import (
     delete_ibgp_peer,
     genconf,
     get_node,
+    get_node_status,
     get_pinned,
     import_report,
     list_nodes,
@@ -745,6 +746,28 @@ def api_node_post_report(
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _report_to_dict(report)
+
+
+@_node_router.get("/{node_id}/status")
+def api_node_status(
+    node_id: str,
+    _: Annotated[Principal, Depends(require_node_self_or_admin)],
+) -> dict:
+    """Central-side view of the node: last_seen, current revision, pinned revision."""
+    try:
+        status = get_node_status(db_path=_get_db_path(), node_id=node_id)
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "node_id": status.node_id,
+        "name": status.name,
+        "enabled": status.enabled,
+        "is_self": status.is_self,
+        "has_token": status.has_token,
+        "last_seen_at": status.last_seen_at,
+        "current_revision": status.current_revision,
+        "pinned_revision": status.pinned_revision,
+    }
 
 
 # --- Admin: proposals / reports listing ---

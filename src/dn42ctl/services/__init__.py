@@ -7,9 +7,11 @@ from .dummy import DummyResult, ensure_dummy_interface
 from .ibgp import create_ibgp_peer, delete_ibgp_peer, modify_ibgp_peer
 from .init_sys import genconf, init_node
 from .node_admin import (
+    NodeStatus,
     RotatedToken,
     add_node,
     get_node,
+    get_node_status,
     list_nodes,
     remove_node,
     rotate_token,
@@ -28,6 +30,7 @@ __all__ = [
     "DesiredState",
     "Dn42CtlError",
     "DummyResult",
+    "NodeStatus",
     "RotatedToken",
     "accept_proposal",
     "add_node",
@@ -42,6 +45,7 @@ __all__ = [
     "ensure_dummy_interface",
     "genconf",
     "get_node",
+    "get_node_status",
     "get_pinned",
     "get_proposal",
     "get_report",

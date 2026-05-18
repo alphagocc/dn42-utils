@@ -1440,6 +1440,66 @@ def cmd_node_once(
         raise typer.Exit(1) from exc
 
 
+@node_app.command("status")
+def cmd_node_status(
+    ctx: typer.Context,
+    node_config_path: Path = typer.Option(None, "--node-config-path"),
+) -> None:
+    """节点端本地诊断: 读 node.toml + cache + 探活 server。
+
+    打印:
+      - node.toml 路径与权限
+      - 本地缓存 revision / fetched_at
+      - server 可达性 (GET /status) + 中心视角 (last_seen / current_revision / pinned)
+    """
+    appctx: AppContext = ctx.obj
+    from dn42ctl.node_client import NodeClient, NodeClientError
+    from dn42ctl.node_config import NodeConfigError, load_node_config
+    from dn42ctl.services.node_agent import read_cache
+
+    path = _resolve_node_config_path(appctx, node_config_path)
+    typer.echo(f"node.toml: {path}")
+    try:
+        st = path.stat()
+        typer.echo(f"  权限: 0o{st.st_mode & 0o777:o}")
+    except FileNotFoundError:
+        typer.echo("  错误: 文件不存在 (先运行 dn42ctl node init)")
+        raise typer.Exit(1) from None
+
+    try:
+        node_cfg = load_node_config(path)
+    except NodeConfigError as exc:
+        typer.echo(f"  错误: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"  server: {node_cfg.server}")
+    typer.echo(f"  node_id: {node_cfg.node_id}")
+    typer.echo(f"  token: {'<set>' if node_cfg.token else '<missing>'}")
+
+    typer.echo(f"cache: {node_cfg.cache_db_path}")
+    cached = read_cache(node_config=node_cfg)
+    if cached is None:
+        typer.echo("  (没有缓存; 运行 dn42ctl node pull)")
+    else:
+        typer.echo(f"  revision: {cached.revision}")
+        typer.echo(f"  fetched_at: {cached.fetched_at}")
+
+    typer.echo(f"server: {node_cfg.server}")
+    client = NodeClient(
+        server=node_cfg.server, node_id=node_cfg.node_id, token=node_cfg.token, timeout=3.0,
+    )
+    try:
+        remote = client.fetch_status()
+    except NodeClientError as exc:
+        typer.echo(f"  不可达: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"  last_seen_at: {remote.get('last_seen_at') or '-'}")
+    typer.echo(f"  current_revision: {remote.get('current_revision') or '-'}")
+    typer.echo(f"  pinned_revision: {remote.get('pinned_revision') or '(none)'}")
+    if cached is not None and remote.get("current_revision"):
+        diff = "同步" if cached.revision == remote["current_revision"] else "落后/超前 (revision 不一致)"
+        typer.echo(f"  本地缓存 vs 中心: {diff}")
+
+
 # --- stage 3: node push/scan/report (spoke) + admin proposals/reports listing ---
 
 
