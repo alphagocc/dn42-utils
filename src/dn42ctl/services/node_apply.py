@@ -44,7 +44,7 @@ class ResolvedPaths:
 @dataclass(frozen=True)
 class ApplyDiff:
     path: Path
-    action: str  # "create" | "update" | "unchanged"
+    action: str  # "create" | "update" | "unchanged" | "delete"
     diff: str    # unified diff, empty if unchanged
 
 
@@ -53,6 +53,7 @@ class ApplyResult:
     revision: str
     diffs: list[ApplyDiff] = field(default_factory=list)
     written: list[Path] = field(default_factory=list)
+    deleted: list[Path] = field(default_factory=list)
     dry_run: bool = False
 
 
@@ -256,6 +257,56 @@ def _render_babel(payload: dict[str, Any], paths: ResolvedPaths) -> tuple[Path, 
     return paths.babel_conf_path, render_babel_conf(interfaces=interfaces), FILE_MODE_PRIVATE
 
 
+def _managed_paths(paths: ResolvedPaths) -> list[tuple[Path, tuple[tuple[str, str], ...]]]:
+    """Return (directory, (prefix, suffix)+) describing which files in each
+    directory are managed by dn42ctl and therefore eligible for stale-deletion.
+
+    Bird peers dir owns:    dn42_*.conf (BGP)  +  ibgp_*.conf (iBGP)
+    networkd dir owns:      dn42_*.netdev/.network  +  wg_*.netdev/.network
+    NM dir owns:            dn42_*.nmconnection  +  wg_*.nmconnection
+    """
+    return [
+        (
+            paths.bird_peers_dir,
+            (("dn42_", ".conf"), ("ibgp_", ".conf")),
+        ),
+        (
+            paths.networkd_dir,
+            (
+                ("dn42_", ".netdev"), ("dn42_", ".network"),
+                ("wg_", ".netdev"), ("wg_", ".network"),
+            ),
+        ),
+        (
+            paths.nm_dir,
+            (("dn42_", ".nmconnection"), ("wg_", ".nmconnection")),
+        ),
+    ]
+
+
+def _is_managed(name: str, patterns: tuple[tuple[str, str], ...]) -> bool:
+    return any(name.startswith(prefix) and name.endswith(suffix) for prefix, suffix in patterns)
+
+
+def _collect_stale(expected: set[Path], paths: ResolvedPaths) -> list[Path]:
+    """Find existing files matching dn42ctl's own naming under paths.* but not in `expected`."""
+    stale: list[Path] = []
+    for directory, patterns in _managed_paths(paths):
+        try:
+            entries = list(directory.iterdir())
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+        for entry in entries:
+            if not entry.is_file():
+                continue
+            if not _is_managed(entry.name, patterns):
+                continue
+            if entry in expected:
+                continue
+            stale.append(entry)
+    return stale
+
+
 def apply(
     *,
     node_config: NodeConfig,
@@ -279,26 +330,41 @@ def apply(
         files.extend(_render_ibgp_peer_files(peer, paths, node_id))
     files.append(_render_babel(payload, paths))
 
+    expected_paths: set[Path] = {path for path, _content, _mode in files}
+    stale = _collect_stale(expected_paths, paths)
+
     diffs = [_diff(path, content) for path, content, _mode in files]
+    for s in stale:
+        diffs.append(ApplyDiff(path=s, action="delete", diff=""))
 
     written: list[Path] = []
+    deleted: list[Path] = []
     if not dry_run:
         for path, content, mode in files:
             _atomic_write(path, content, mode=mode)
             written.append(path)
+        for s in stale:
+            try:
+                s.unlink()
+                deleted.append(s)
+            except FileNotFoundError:
+                pass
 
-    return ApplyResult(revision=cached.revision, diffs=diffs, written=written, dry_run=dry_run)
+    return ApplyResult(
+        revision=cached.revision, diffs=diffs, written=written, deleted=deleted, dry_run=dry_run,
+    )
 
 
 def apply_summary(result: ApplyResult) -> str:
     """Human-readable summary."""
-    by_action: dict[str, int] = {"create": 0, "update": 0, "unchanged": 0}
+    by_action: dict[str, int] = {"create": 0, "update": 0, "unchanged": 0, "delete": 0}
     for d in result.diffs:
         by_action[d.action] = by_action.get(d.action, 0) + 1
     suffix = " (dry-run)" if result.dry_run else ""
     return (
         f"revision={result.revision}{suffix}: "
-        f"create={by_action['create']} update={by_action['update']} unchanged={by_action['unchanged']}"
+        f"create={by_action['create']} update={by_action['update']} "
+        f"unchanged={by_action['unchanged']} delete={by_action['delete']}"
     )
 
 
@@ -310,6 +376,8 @@ def apply_diff_text(result: ApplyResult) -> str:
             parts.append(f"= {d.path}")
         elif d.action == "create":
             parts.append(f"+ {d.path}  (新文件)")
+        elif d.action == "delete":
+            parts.append(f"- {d.path}  (stale, 将删除)")
         else:
             parts.append(f"~ {d.path}")
             parts.append(d.diff)

@@ -238,6 +238,97 @@ class TestAtomicWrite:
         assert leftovers == []
 
 
+class TestStaleDeletion:
+    def test_deletes_files_no_longer_in_desired_state(self, tmp_path: Path) -> None:
+        cfg = _cfg(tmp_path)
+        # First apply with one BGP peer.
+        payload_a = _make_payload(tmp_path, bgp=[_bgp_peer()])
+        _seed_cache(cfg.cache_db_path, payload_a)
+        apply(node_config=cfg)
+        peers_dir = Path(payload_a["paths"]["peers_dir"])
+        networkd_dir = Path(payload_a["paths"]["networkd_dir"])
+        assert (peers_dir / "dn42_1234.conf").exists()
+        assert (networkd_dir / "dn42_1234.netdev").exists()
+
+        # Second apply with the peer removed entirely.
+        payload_b = _make_payload(tmp_path, bgp=[])
+        _seed_cache(cfg.cache_db_path, payload_b)
+        result = apply(node_config=cfg)
+        assert not (peers_dir / "dn42_1234.conf").exists()
+        assert not (networkd_dir / "dn42_1234.netdev").exists()
+        assert not (networkd_dir / "dn42_1234.network").exists()
+        # Result should record the deletions.
+        actions = {d.action for d in result.diffs}
+        assert "delete" in actions
+
+    def test_dry_run_does_not_delete(self, tmp_path: Path) -> None:
+        cfg = _cfg(tmp_path)
+        payload_a = _make_payload(tmp_path, bgp=[_bgp_peer()])
+        _seed_cache(cfg.cache_db_path, payload_a)
+        apply(node_config=cfg)
+        payload_b = _make_payload(tmp_path, bgp=[])
+        _seed_cache(cfg.cache_db_path, payload_b)
+        result = apply(node_config=cfg, dry_run=True)
+        peers_dir = Path(payload_a["paths"]["peers_dir"])
+        # Files still on disk.
+        assert (peers_dir / "dn42_1234.conf").exists()
+        # But diff records pending deletes.
+        assert any(d.action == "delete" for d in result.diffs)
+
+    def test_does_not_delete_unrelated_files(self, tmp_path: Path) -> None:
+        cfg = _cfg(tmp_path)
+        payload = _make_payload(tmp_path, bgp=[_bgp_peer()])
+        _seed_cache(cfg.cache_db_path, payload)
+        apply(node_config=cfg)
+        # Drop a user-written file with non-dn42ctl naming.
+        peers_dir = Path(payload["paths"]["peers_dir"])
+        custom = peers_dir / "mycustom.conf"
+        custom.write_text("custom peer config\n")
+        # Now re-apply; mycustom.conf must not be touched.
+        apply(node_config=cfg)
+        assert custom.exists()
+
+    def test_does_not_delete_files_outside_managed_dirs(self, tmp_path: Path) -> None:
+        cfg = _cfg(tmp_path)
+        payload = _make_payload(tmp_path, bgp=[_bgp_peer()])
+        _seed_cache(cfg.cache_db_path, payload)
+        apply(node_config=cfg)
+        unrelated = tmp_path / "unrelated"
+        unrelated.mkdir(exist_ok=True)
+        marker = unrelated / "dn42_9999.netdev"
+        marker.write_text("not managed\n")
+        apply(node_config=cfg)
+        assert marker.exists()
+
+    def test_ibgp_removal_cleans_files(self, tmp_path: Path) -> None:
+        cfg = _cfg(tmp_path)
+        payload_a = _make_payload(tmp_path, ibgp=[_ibgp_peer()])
+        _seed_cache(cfg.cache_db_path, payload_a)
+        apply(node_config=cfg)
+        peers_dir = Path(payload_a["paths"]["peers_dir"])
+        networkd_dir = Path(payload_a["paths"]["networkd_dir"])
+        assert (peers_dir / "ibgp_alpha.conf").exists()
+        assert (networkd_dir / "wg_alpha.netdev").exists()
+
+        payload_b = _make_payload(tmp_path, ibgp=[])
+        _seed_cache(cfg.cache_db_path, payload_b)
+        apply(node_config=cfg)
+        assert not (peers_dir / "ibgp_alpha.conf").exists()
+        assert not (networkd_dir / "wg_alpha.netdev").exists()
+
+    def test_nm_backend_stale_cleanup(self, tmp_path: Path) -> None:
+        cfg = _cfg(tmp_path)
+        payload_a = _make_payload(tmp_path, bgp=[_bgp_peer(backend="nm")])
+        _seed_cache(cfg.cache_db_path, payload_a)
+        apply(node_config=cfg)
+        nm_dir = Path(payload_a["paths"]["nm_dir"])
+        assert (nm_dir / "dn42_1234.nmconnection").exists()
+        payload_b = _make_payload(tmp_path, bgp=[])
+        _seed_cache(cfg.cache_db_path, payload_b)
+        apply(node_config=cfg)
+        assert not (nm_dir / "dn42_1234.nmconnection").exists()
+
+
 class TestSummary:
     def test_summary_counts(self, tmp_path: Path) -> None:
         cfg = _cfg(tmp_path)

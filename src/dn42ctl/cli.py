@@ -1406,6 +1406,7 @@ def cmd_node_once(
                         "create": sum(1 for d in apply_res.diffs if d.action == "create"),
                         "update": sum(1 for d in apply_res.diffs if d.action == "update"),
                         "unchanged": sum(1 for d in apply_res.diffs if d.action == "unchanged"),
+                        "delete": sum(1 for d in apply_res.diffs if d.action == "delete"),
                     },
                 )
             except Exception as exc:  # noqa: BLE001
