@@ -11,6 +11,7 @@
 - 网络后端：同时支持 `systemd-networkd` 与 `NetworkManager`。
 - 强制约束：WireGuard 的 AllowedIPs **必须写入**，但**禁止自动修改路由表**。
 - 数据落库：所有状态写入 SQLite，便于多端/多节点集中管理；以 `node_id` 区分节点。
+- 多节点中心化同步：hub-spoke 架构，详见 `docs/architecture/sync_hub_spoke.md`。
 - 分层：CLI/Service/Render/DB 解耦，便于未来接入 RESTful API。
 
 ## 运行环境与安装
@@ -90,6 +91,8 @@
 - 数据库：`docs/architecture/database.md`
 - 网络后端：`docs/architecture/network_backends.md`
 - REST API：`docs/architecture/rest_api.md`
+- 多节点中心化同步：`docs/architecture/sync_hub_spoke.md`
+- 部署（systemd + nginx）：`docs/architecture/deployment.md`
 - 输入校验：`docs/architecture/validation.md`
 - 测试基础设施：`docs/architecture/testing.md`
 
@@ -101,3 +104,4 @@
 - ibgp peer (add/modify/del)：`docs/commands/ibgp_peer.md`
 - show / peer del：`docs/commands/show_and_del.md`
 - scan：`docs/commands/scan.md`
+- node (admin + 节点同步)：`docs/commands/node.md`
