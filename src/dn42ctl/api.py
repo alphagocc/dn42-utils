@@ -23,6 +23,8 @@ from dn42ctl.services import (
     genconf,
     get_node,
     list_nodes,
+    list_proposals,
+    list_reports,
     modify_bgp_peer,
     modify_ibgp_peer,
     remove_node,
@@ -32,6 +34,8 @@ from dn42ctl.services import (
     show_bgp_peers,
     show_ibgp_peers,
     show_wg_tunnels,
+    submit_proposal,
+    submit_report,
 )
 from dn42ctl.validators import (
     validate_asn,
@@ -640,6 +644,42 @@ def api_patch_node_policy(node_id: str, body: NodePolicyPatchRequest) -> dict:
 # --- Node-token routes (/api/v1/nodes/{node_id}/...) ---
 
 
+class ProposalSubmitRequest(BaseModel):
+    source: str = "push"
+    kind: str
+    payload: dict
+
+
+class ReportSubmitRequest(BaseModel):
+    kind: str
+    payload: dict
+
+
+def _proposal_to_dict(p) -> dict:  # noqa: ANN001
+    return {
+        "id": p.id,
+        "node_id": p.node_id,
+        "source": p.source,
+        "kind": p.kind,
+        "payload": p.payload,
+        "status": p.status,
+        "received_at": p.received_at,
+        "decided_at": p.decided_at,
+        "message": p.message,
+    }
+
+
+def _report_to_dict(r) -> dict:  # noqa: ANN001
+    return {
+        "id": r.id,
+        "node_id": r.node_id,
+        "kind": r.kind,
+        "payload": r.payload,
+        "received_at": r.received_at,
+        "imported_at": r.imported_at,
+    }
+
+
 @_node_router.get("/{node_id}/desired")
 def api_node_desired(
     node_id: str,
@@ -660,6 +700,72 @@ def api_node_desired(
     except Exception:  # noqa: BLE001, S110 — touch_last_seen is best-effort
         pass
     return state.to_dict()
+
+
+@_node_router.post("/{node_id}/proposals", status_code=201)
+def api_node_post_proposal(
+    node_id: str,
+    body: ProposalSubmitRequest,
+    _: Annotated[Principal, Depends(require_node_self_or_admin)],
+) -> dict:
+    try:
+        proposal = submit_proposal(
+            db_path=_get_db_path(),
+            node_id=node_id,
+            source=body.source,
+            kind=body.kind,
+            payload=body.payload,
+        )
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _proposal_to_dict(proposal)
+
+
+@_node_router.post("/{node_id}/reports", status_code=201)
+def api_node_post_report(
+    node_id: str,
+    body: ReportSubmitRequest,
+    _: Annotated[Principal, Depends(require_node_self_or_admin)],
+) -> dict:
+    try:
+        report = submit_report(
+            db_path=_get_db_path(),
+            node_id=node_id,
+            kind=body.kind,
+            payload=body.payload,
+        )
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _report_to_dict(report)
+
+
+# --- Admin: proposals / reports listing ---
+
+
+@_admin_nodes_router.get("/nodes/{node_id}/proposals")
+def api_list_proposals(
+    node_id: str,
+    status: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 200,
+) -> list[dict]:
+    try:
+        rows = list_proposals(db_path=_get_db_path(), node_id=node_id, status=status, limit=limit)
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return [_proposal_to_dict(p) for p in rows]
+
+
+@_admin_nodes_router.get("/nodes/{node_id}/reports")
+def api_list_reports(
+    node_id: str,
+    kind: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 50,
+) -> list[dict]:
+    try:
+        rows = list_reports(db_path=_get_db_path(), node_id=node_id, kind=kind, limit=limit)
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return [_report_to_dict(r) for r in rows]
 
 
 # --- Mount routers ---

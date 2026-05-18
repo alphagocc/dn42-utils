@@ -15,6 +15,9 @@ from .node_admin import (
     rotate_token,
     set_policy,
 )
+from .node_push import build_peer_add_payload, post_proposal, post_report
+from .proposals import get_proposal, list_proposals, submit_proposal
+from .reports import get_report, list_reports, submit_report
 from .scan import discover_bird_paths, scan_local_configs
 from .show import show_bgp_peers, show_ibgp_peers, show_wg_tunnels
 
@@ -25,6 +28,7 @@ __all__ = [
     "RotatedToken",
     "add_node",
     "build_desired_state",
+    "build_peer_add_payload",
     "create_bgp_peer",
     "create_ibgp_peer",
     "delete_bgp_peer",
@@ -33,10 +37,16 @@ __all__ = [
     "ensure_dummy_interface",
     "genconf",
     "get_node",
+    "get_proposal",
+    "get_report",
     "init_node",
     "list_nodes",
+    "list_proposals",
+    "list_reports",
     "modify_bgp_peer",
     "modify_ibgp_peer",
+    "post_proposal",
+    "post_report",
     "remove_node",
     "require_managed_node_exists",
     "rotate_token",
@@ -45,4 +55,6 @@ __all__ = [
     "show_bgp_peers",
     "show_ibgp_peers",
     "show_wg_tunnels",
+    "submit_proposal",
+    "submit_report",
 ]

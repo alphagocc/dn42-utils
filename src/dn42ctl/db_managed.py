@@ -316,3 +316,248 @@ class ManagedNodeStore:
         except sqlite3.Error as exc:
             self._conn.rollback()
             raise DatabaseError("更新 last_seen_at 失败") from exc
+
+
+# --- config_proposals ---
+
+
+VALID_PROPOSAL_SOURCES = frozenset({"push", "scan"})
+VALID_PROPOSAL_KINDS = frozenset({"peer_add", "peer_modify", "peer_delete"})
+VALID_PROPOSAL_STATUSES = frozenset({"pending", "accepted", "rejected"})
+
+
+@dataclass(frozen=True)
+class ConfigProposal:
+    id: int
+    node_id: str
+    source: str
+    kind: str
+    payload: dict
+    status: str
+    received_at: str
+    decided_at: str | None
+    message: str | None
+
+
+def _row_to_proposal(row: sqlite3.Row) -> ConfigProposal:
+    return ConfigProposal(
+        id=row["id"],
+        node_id=row["node_id"],
+        source=row["source"],
+        kind=row["kind"],
+        payload=json.loads(row["payload_json"]),
+        status=row["status"],
+        received_at=row["received_at"],
+        decided_at=row["decided_at"],
+        message=row["message"],
+    )
+
+
+class ProposalStore:
+    """CRUD for config_proposals."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+
+    def add(
+        self,
+        *,
+        node_id: str,
+        source: str,
+        kind: str,
+        payload: dict,
+    ) -> ConfigProposal:
+        if source not in VALID_PROPOSAL_SOURCES:
+            raise DatabaseError(f"非法 source: {source}")
+        if kind not in VALID_PROPOSAL_KINDS:
+            raise DatabaseError(f"非法 kind: {kind}")
+        now = _now_iso()
+        try:
+            cur = self._conn.execute(
+                """
+                INSERT INTO config_proposals(node_id, source, kind, payload_json, status, received_at)
+                VALUES (?,?,?,?,'pending',?)
+                """,
+                (node_id, source, kind, json.dumps(payload, ensure_ascii=False), now),
+            )
+            self._conn.commit()
+        except sqlite3.Error as exc:
+            self._conn.rollback()
+            raise DatabaseError("插入 config_proposal 失败") from exc
+        row_id = cur.lastrowid
+        if row_id is None:  # pragma: no cover
+            raise DatabaseError("插入 proposal 后未拿到 id")
+        proposal = self.get(row_id)
+        if proposal is None:  # pragma: no cover
+            raise DatabaseError("插入后无法读取 proposal")
+        return proposal
+
+    def get(self, proposal_id: int) -> ConfigProposal | None:
+        try:
+            row = self._conn.execute(
+                "SELECT * FROM config_proposals WHERE id=?",
+                (proposal_id,),
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise DatabaseError("查询 proposal 失败") from exc
+        return None if row is None else _row_to_proposal(row)
+
+    def list_for_node(
+        self,
+        node_id: str,
+        *,
+        status: str | None = None,
+        limit: int = 200,
+    ) -> list[ConfigProposal]:
+        params: list[object] = [node_id]
+        where = "node_id=?"
+        if status is not None:
+            if status not in VALID_PROPOSAL_STATUSES:
+                raise DatabaseError(f"非法 status 过滤: {status}")
+            where += " AND status=?"
+            params.append(status)
+        params.append(limit)
+        try:
+            rows = self._conn.execute(
+                f"SELECT * FROM config_proposals WHERE {where} ORDER BY id DESC LIMIT ?",  # noqa: S608
+                tuple(params),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise DatabaseError("列出 proposals 失败") from exc
+        return [_row_to_proposal(r) for r in rows]
+
+    def set_status(
+        self,
+        proposal_id: int,
+        status: str,
+        *,
+        message: str | None = None,
+    ) -> ConfigProposal:
+        if status not in VALID_PROPOSAL_STATUSES:
+            raise DatabaseError(f"非法 status: {status}")
+        now = _now_iso()
+        try:
+            cur = self._conn.execute(
+                "UPDATE config_proposals SET status=?, decided_at=?, message=? WHERE id=?",
+                (status, now, message, proposal_id),
+            )
+            if cur.rowcount == 0:
+                raise DatabaseError(f"proposal 不存在: {proposal_id}")
+            self._conn.commit()
+        except sqlite3.Error as exc:
+            self._conn.rollback()
+            raise DatabaseError("更新 proposal 状态失败") from exc
+        proposal = self.get(proposal_id)
+        if proposal is None:  # pragma: no cover
+            raise DatabaseError("更新后无法读取 proposal")
+        return proposal
+
+
+# --- node_reports ---
+
+
+VALID_REPORT_KINDS = frozenset({"apply_result", "scan_result", "live_status", "error"})
+
+
+@dataclass(frozen=True)
+class NodeReport:
+    id: int
+    node_id: str
+    kind: str
+    payload: dict
+    received_at: str
+    imported_at: str | None
+
+
+def _row_to_report(row: sqlite3.Row) -> NodeReport:
+    return NodeReport(
+        id=row["id"],
+        node_id=row["node_id"],
+        kind=row["kind"],
+        payload=json.loads(row["payload_json"]),
+        received_at=row["received_at"],
+        imported_at=row["imported_at"],
+    )
+
+
+class ReportStore:
+    """CRUD for node_reports."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+
+    def add(self, *, node_id: str, kind: str, payload: dict) -> NodeReport:
+        if kind not in VALID_REPORT_KINDS:
+            raise DatabaseError(f"非法 report kind: {kind}")
+        now = _now_iso()
+        try:
+            cur = self._conn.execute(
+                """
+                INSERT INTO node_reports(node_id, kind, payload_json, received_at)
+                VALUES (?,?,?,?)
+                """,
+                (node_id, kind, json.dumps(payload, ensure_ascii=False), now),
+            )
+            self._conn.commit()
+        except sqlite3.Error as exc:
+            self._conn.rollback()
+            raise DatabaseError("插入 node_report 失败") from exc
+        row_id = cur.lastrowid
+        if row_id is None:  # pragma: no cover
+            raise DatabaseError("插入 report 后未拿到 id")
+        report = self.get(row_id)
+        if report is None:  # pragma: no cover
+            raise DatabaseError("插入后无法读取 report")
+        return report
+
+    def get(self, report_id: int) -> NodeReport | None:
+        try:
+            row = self._conn.execute(
+                "SELECT * FROM node_reports WHERE id=?",
+                (report_id,),
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise DatabaseError("查询 report 失败") from exc
+        return None if row is None else _row_to_report(row)
+
+    def list_for_node(
+        self,
+        node_id: str,
+        *,
+        kind: str | None = None,
+        limit: int = 50,
+    ) -> list[NodeReport]:
+        params: list[object] = [node_id]
+        where = "node_id=?"
+        if kind is not None:
+            if kind not in VALID_REPORT_KINDS:
+                raise DatabaseError(f"非法 kind 过滤: {kind}")
+            where += " AND kind=?"
+            params.append(kind)
+        params.append(limit)
+        try:
+            rows = self._conn.execute(
+                f"SELECT * FROM node_reports WHERE {where} ORDER BY id DESC LIMIT ?",  # noqa: S608
+                tuple(params),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise DatabaseError("列出 reports 失败") from exc
+        return [_row_to_report(r) for r in rows]
+
+    def mark_imported(self, report_id: int) -> NodeReport:
+        now = _now_iso()
+        try:
+            cur = self._conn.execute(
+                "UPDATE node_reports SET imported_at=? WHERE id=?",
+                (now, report_id),
+            )
+            if cur.rowcount == 0:
+                raise DatabaseError(f"report 不存在: {report_id}")
+            self._conn.commit()
+        except sqlite3.Error as exc:
+            self._conn.rollback()
+            raise DatabaseError("更新 report imported_at 失败") from exc
+        report = self.get(report_id)
+        if report is None:  # pragma: no cover
+            raise DatabaseError("更新后无法读取 report")
+        return report

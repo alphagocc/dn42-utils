@@ -1399,3 +1399,138 @@ def cmd_node_once(
     except (PermissionError, OSError) as exc:
         typer.echo(f"错误: 写文件失败: {exc}", err=True)
         raise typer.Exit(1) from exc
+
+
+# --- stage 3: node push/scan/report (spoke) + admin proposals/reports listing ---
+
+
+@node_app.command("push")
+def cmd_node_push(
+    ctx: typer.Context,
+    json_path: Path = typer.Option(..., "--json", help="proposals 列表 JSON 文件: [{kind,payload}, ...]"),
+    source: str = typer.Option("push", "--source", help="push | scan"),
+    node_config_path: Path = typer.Option(None, "--node-config-path"),
+) -> None:
+    """Push 一组结构化 proposals 到 server。
+
+    JSON 格式: [{"kind": "peer_add", "payload": {...}}, ...]
+    kind ∈ {peer_add, peer_modify, peer_delete}.
+    """
+    appctx: AppContext = ctx.obj
+    from dn42ctl.node_config import NodeConfigError, load_node_config
+    from dn42ctl.services import post_proposal
+
+    path = _resolve_node_config_path(appctx, node_config_path)
+    try:
+        node_cfg = load_node_config(path)
+    except NodeConfigError as exc:
+        typer.echo(f"错误: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    try:
+        items = json.loads(json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        typer.echo(f"错误: 无法读取 JSON: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    if not isinstance(items, list):
+        typer.echo("错误: JSON 顶层必须是数组", err=True)
+        raise typer.Exit(1)
+    submitted = 0
+    for item in items:
+        if not isinstance(item, dict) or "kind" not in item or "payload" not in item:
+            typer.echo(f"错误: 跳过非法 item: {item}", err=True)
+            continue
+        try:
+            res = post_proposal(
+                node_config=node_cfg, kind=item["kind"], payload=item["payload"], source=source
+            )
+        except Dn42CtlError as exc:
+            typer.echo(f"错误: {exc}", err=True)
+            raise typer.Exit(1) from exc
+        typer.echo(f"提案 #{res['id']} kind={res['kind']} status={res['status']}")
+        submitted += 1
+    typer.echo(f"共提交 {submitted} 条提案")
+
+
+@node_app.command("report")
+def cmd_node_report(
+    ctx: typer.Context,
+    kind: str = typer.Option(..., "--kind", help="apply_result | scan_result | live_status | error"),
+    json_path: Path = typer.Option(..., "--json", help="payload JSON 文件"),
+    node_config_path: Path = typer.Option(None, "--node-config-path"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    from dn42ctl.node_config import NodeConfigError, load_node_config
+    from dn42ctl.services import post_report
+
+    path = _resolve_node_config_path(appctx, node_config_path)
+    try:
+        node_cfg = load_node_config(path)
+    except NodeConfigError as exc:
+        typer.echo(f"错误: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    try:
+        payload = json.loads(json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        typer.echo(f"错误: 无法读取 JSON: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    if not isinstance(payload, dict):
+        typer.echo("错误: report payload 必须是对象", err=True)
+        raise typer.Exit(1)
+    try:
+        res = post_report(node_config=node_cfg, kind=kind, payload=payload)
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"上报 #{res['id']} kind={res['kind']} at={res['received_at']}")
+
+
+@node_app.command("proposals")
+def cmd_node_proposals(
+    ctx: typer.Context,
+    node_id: str = typer.Argument(..., help="节点 UUID"),
+    status: str = typer.Option(None, "--status", help="过滤: pending | accepted | rejected"),
+    limit: int = typer.Option(200, "--limit", help="最大返回数"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    from dn42ctl.services import list_proposals
+
+    try:
+        rows = list_proposals(db_path=appctx.db_path, node_id=node_id, status=status, limit=limit)
+    except Dn42CtlError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except DatabaseError as exc:
+        typer.echo(_db_open_hint(appctx.db_path), err=True)
+        raise typer.Exit(code=1) from exc
+    if not rows:
+        typer.echo("(没有 proposal)")
+        return
+    for p in rows:
+        decided = p.decided_at or "-"
+        typer.echo(
+            f"#{p.id} kind={p.kind} source={p.source} status={p.status} received={p.received_at} decided={decided}"
+        )
+
+
+@node_app.command("reports")
+def cmd_node_reports(
+    ctx: typer.Context,
+    node_id: str = typer.Argument(..., help="节点 UUID"),
+    kind: str = typer.Option(None, "--kind", help="apply_result | scan_result | live_status | error"),
+    limit: int = typer.Option(50, "--limit", help="最大返回数"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    from dn42ctl.services import list_reports
+
+    try:
+        rows = list_reports(db_path=appctx.db_path, node_id=node_id, kind=kind, limit=limit)
+    except Dn42CtlError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except DatabaseError as exc:
+        typer.echo(_db_open_hint(appctx.db_path), err=True)
+        raise typer.Exit(code=1) from exc
+    if not rows:
+        typer.echo("(没有 report)")
+        return
+    for r in rows:
+        imp = r.imported_at or "-"
+        typer.echo(f"#{r.id} kind={r.kind} received={r.received_at} imported={imp}")
