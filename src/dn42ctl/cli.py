@@ -1374,10 +1374,12 @@ def cmd_node_apply(
 def cmd_node_once(
     ctx: typer.Context,
     node_config_path: Path = typer.Option(None, "--node-config-path"),
+    no_report: bool = typer.Option(False, "--no-report", help="跳过 apply_result 上报"),
 ) -> None:
-    """pull -> apply (report 在阶段 3 接入)"""
+    """pull -> apply -> report (apply_result)"""
     appctx: AppContext = ctx.obj
     from dn42ctl.node_config import NodeConfigError, load_node_config
+    from dn42ctl.services import post_report
     from dn42ctl.services.node_agent import pull
     from dn42ctl.services.node_apply import apply, apply_summary
 
@@ -1393,7 +1395,28 @@ def cmd_node_once(
         typer.echo(f"pulled: revision={pull_res.revision}")
         apply_res = apply(node_config=node_cfg)
         typer.echo(apply_summary(apply_res))
+        if not no_report:
+            try:
+                post_report(
+                    node_config=node_cfg,
+                    kind="apply_result",
+                    payload={
+                        "ok": True,
+                        "revision": apply_res.revision,
+                        "create": sum(1 for d in apply_res.diffs if d.action == "create"),
+                        "update": sum(1 for d in apply_res.diffs if d.action == "update"),
+                        "unchanged": sum(1 for d in apply_res.diffs if d.action == "unchanged"),
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001
+                typer.echo(f"警告: 上报失败: {exc}", err=True)
     except Dn42CtlError as exc:
+        if not no_report:
+            # Best-effort error report; failures here are not the user's concern.
+            try:
+                post_report(node_config=node_cfg, kind="error", payload={"message": str(exc)})
+            except Exception as report_exc:  # noqa: BLE001
+                typer.echo(f"警告: 错误上报失败: {report_exc}", err=True)
         typer.echo(f"错误: {exc}", err=True)
         raise typer.Exit(1) from exc
     except (PermissionError, OSError) as exc:
@@ -1601,3 +1624,66 @@ def cmd_node_import_report(
         f"bgp(created={counts['bgp_created']}, skipped={counts['bgp_skipped']}), "
         f"ibgp(created={counts['ibgp_created']}, skipped={counts['ibgp_skipped']})"
     )
+
+
+# --- stage 5: revisions / rollback ---
+
+
+@node_app.command("revisions")
+def cmd_node_revisions(
+    ctx: typer.Context,
+    node_id: str = typer.Argument(..., help="节点 UUID"),
+    limit: int = typer.Option(50, "--limit"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    from dn42ctl.services import get_pinned, list_revisions
+
+    try:
+        rows = list_revisions(db_path=appctx.db_path, node_id=node_id, limit=limit)
+        pin = get_pinned(db_path=appctx.db_path, node_id=node_id)
+    except Dn42CtlError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except DatabaseError as exc:
+        typer.echo(_db_open_hint(appctx.db_path), err=True)
+        raise typer.Exit(code=1) from exc
+    pin_rev = pin.revision if pin else None
+    typer.echo(f"pinned: {pin_rev or '(none, following latest)'}")
+    if not rows:
+        typer.echo("(没有 revision)")
+        return
+    for r in rows:
+        marker = " *" if r.revision == pin_rev else "  "
+        typer.echo(f"{marker} #{r.id} revision={r.revision} generated={r.generated_at}")
+
+
+@node_app.command("rollback")
+def cmd_node_rollback(
+    ctx: typer.Context,
+    node_id: str = typer.Argument(..., help="节点 UUID"),
+    revision: str = typer.Option(..., "--to", help="目标 revision"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    from dn42ctl.services import rollback_to
+
+    try:
+        rev = rollback_to(db_path=appctx.db_path, node_id=node_id, revision=revision)
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"已 pin: node={rev.node_id} revision={rev.revision}")
+
+
+@node_app.command("rollback-clear")
+def cmd_node_rollback_clear(
+    ctx: typer.Context,
+    node_id: str = typer.Argument(..., help="节点 UUID"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    from dn42ctl.services import clear_rollback
+
+    try:
+        clear_rollback(db_path=appctx.db_path, node_id=node_id)
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"已清除 pin: node={node_id} (恢复到最新)")

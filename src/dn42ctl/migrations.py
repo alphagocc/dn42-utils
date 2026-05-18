@@ -136,4 +136,15 @@ MIGRATIONS: list[tuple[int, str]] = [
             ON config_revisions(node_id, generated_at);
         """.strip(),
     ),
+    (
+        6,
+        """
+        CREATE TABLE IF NOT EXISTS node_desired_pin (
+            node_id TEXT PRIMARY KEY,
+            revision TEXT NOT NULL,
+            pinned_at TEXT NOT NULL,
+            FOREIGN KEY(node_id) REFERENCES nodes(node_id) ON DELETE CASCADE
+        );
+        """.strip(),
+    ),
 ]

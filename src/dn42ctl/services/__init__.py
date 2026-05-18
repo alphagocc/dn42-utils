@@ -20,6 +20,7 @@ from .proposal_decisions import accept_proposal, reject_proposal
 from .proposals import get_proposal, list_proposals, submit_proposal
 from .report_import import import_report
 from .reports import get_report, list_reports, submit_report
+from .revisions import clear_rollback, get_pinned, list_revisions, rollback_to
 from .scan import discover_bird_paths, scan_local_configs
 from .show import show_bgp_peers, show_ibgp_peers, show_wg_tunnels
 
@@ -32,6 +33,7 @@ __all__ = [
     "add_node",
     "build_desired_state",
     "build_peer_add_payload",
+    "clear_rollback",
     "create_bgp_peer",
     "create_ibgp_peer",
     "delete_bgp_peer",
@@ -40,6 +42,7 @@ __all__ = [
     "ensure_dummy_interface",
     "genconf",
     "get_node",
+    "get_pinned",
     "get_proposal",
     "get_report",
     "import_report",
@@ -47,6 +50,7 @@ __all__ = [
     "list_nodes",
     "list_proposals",
     "list_reports",
+    "list_revisions",
     "modify_bgp_peer",
     "modify_ibgp_peer",
     "post_proposal",
@@ -54,6 +58,7 @@ __all__ = [
     "reject_proposal",
     "remove_node",
     "require_managed_node_exists",
+    "rollback_to",
     "rotate_token",
     "scan_local_configs",
     "set_policy",

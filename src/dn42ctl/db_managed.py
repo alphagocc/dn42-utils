@@ -561,3 +561,163 @@ class ReportStore:
         if report is None:  # pragma: no cover
             raise DatabaseError("更新后无法读取 report")
         return report
+
+
+# --- config_revisions ---
+
+
+@dataclass(frozen=True)
+class ConfigRevision:
+    id: int
+    node_id: str
+    revision: str
+    generated_at: str
+    payload: dict
+
+
+def _row_to_revision(row: sqlite3.Row) -> ConfigRevision:
+    return ConfigRevision(
+        id=row["id"],
+        node_id=row["node_id"],
+        revision=row["revision"],
+        generated_at=row["generated_at"],
+        payload=json.loads(row["payload_json"]),
+    )
+
+
+class RevisionStore:
+    """CRUD for config_revisions plus node_desired_pin (rollback target)."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+
+    def record(
+        self,
+        *,
+        node_id: str,
+        revision: str,
+        generated_at: str,
+        payload: dict,
+    ) -> ConfigRevision:
+        """Insert a revision snapshot. If the (node_id, revision) pair already
+        exists (i.e. desired-state hash unchanged since last build), return the
+        existing row without creating a duplicate.
+        """
+        existing = self.get_by_revision(node_id, revision)
+        if existing is not None:
+            return existing
+        try:
+            cur = self._conn.execute(
+                """
+                INSERT INTO config_revisions(node_id, revision, generated_at, payload_json)
+                VALUES (?,?,?,?)
+                """,
+                (node_id, revision, generated_at, json.dumps(payload, ensure_ascii=False)),
+            )
+            self._conn.commit()
+        except sqlite3.Error as exc:
+            self._conn.rollback()
+            raise DatabaseError("插入 config_revision 失败") from exc
+        row_id = cur.lastrowid
+        if row_id is None:  # pragma: no cover
+            raise DatabaseError("插入 revision 后未拿到 id")
+        rev = self.get(row_id)
+        if rev is None:  # pragma: no cover
+            raise DatabaseError("插入后无法读取 revision")
+        return rev
+
+    def get(self, revision_id: int) -> ConfigRevision | None:
+        try:
+            row = self._conn.execute(
+                "SELECT * FROM config_revisions WHERE id=?", (revision_id,)
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise DatabaseError("查询 revision 失败") from exc
+        return None if row is None else _row_to_revision(row)
+
+    def get_by_revision(self, node_id: str, revision: str) -> ConfigRevision | None:
+        try:
+            row = self._conn.execute(
+                "SELECT * FROM config_revisions WHERE node_id=? AND revision=?",
+                (node_id, revision),
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise DatabaseError("查询 revision 失败") from exc
+        return None if row is None else _row_to_revision(row)
+
+    def list_for_node(self, node_id: str, *, limit: int = 50) -> list[ConfigRevision]:
+        try:
+            rows = self._conn.execute(
+                "SELECT * FROM config_revisions WHERE node_id=? ORDER BY id DESC LIMIT ?",
+                (node_id, limit),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise DatabaseError("列出 revisions 失败") from exc
+        return [_row_to_revision(r) for r in rows]
+
+    def trim(self, node_id: str, *, keep_latest: int = 50) -> int:
+        """Delete all but the most recent `keep_latest` revisions for `node_id`.
+
+        Returns the number of rows deleted.
+        """
+        try:
+            cur = self._conn.execute(
+                """
+                DELETE FROM config_revisions
+                WHERE node_id=? AND id NOT IN (
+                    SELECT id FROM config_revisions WHERE node_id=?
+                    ORDER BY id DESC LIMIT ?
+                )
+                """,
+                (node_id, node_id, keep_latest),
+            )
+            self._conn.commit()
+        except sqlite3.Error as exc:
+            self._conn.rollback()
+            raise DatabaseError("trim revisions 失败") from exc
+        return cur.rowcount
+
+    # --- rollback pin ---
+
+    def pin(self, node_id: str, revision: str) -> None:
+        """Mark `revision` as the desired revision for `node_id`. The revision
+        must exist in config_revisions.
+        """
+        existing = self.get_by_revision(node_id, revision)
+        if existing is None:
+            raise DatabaseError(f"revision 不存在: node={node_id} revision={revision}")
+        now = _now_iso()
+        try:
+            self._conn.execute(
+                """
+                INSERT INTO node_desired_pin(node_id, revision, pinned_at) VALUES (?,?,?)
+                ON CONFLICT(node_id) DO UPDATE SET
+                    revision=excluded.revision,
+                    pinned_at=excluded.pinned_at
+                """,
+                (node_id, revision, now),
+            )
+            self._conn.commit()
+        except sqlite3.Error as exc:
+            self._conn.rollback()
+            raise DatabaseError("pin revision 失败") from exc
+
+    def unpin(self, node_id: str) -> None:
+        try:
+            self._conn.execute("DELETE FROM node_desired_pin WHERE node_id=?", (node_id,))
+            self._conn.commit()
+        except sqlite3.Error as exc:
+            self._conn.rollback()
+            raise DatabaseError("unpin revision 失败") from exc
+
+    def get_pin(self, node_id: str) -> ConfigRevision | None:
+        """Return the pinned revision row, or None if no pin (i.e. follow latest)."""
+        try:
+            pin_row = self._conn.execute(
+                "SELECT revision FROM node_desired_pin WHERE node_id=?", (node_id,)
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise DatabaseError("查询 pin 失败") from exc
+        if pin_row is None:
+            return None
+        return self.get_by_revision(node_id, pin_row["revision"])

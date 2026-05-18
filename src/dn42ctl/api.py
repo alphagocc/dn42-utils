@@ -17,21 +17,25 @@ from dn42ctl.services import (
     accept_proposal,
     add_node,
     build_desired_state,
+    clear_rollback,
     create_bgp_peer,
     create_ibgp_peer,
     delete_bgp_peer,
     delete_ibgp_peer,
     genconf,
     get_node,
+    get_pinned,
     import_report,
     list_nodes,
     list_proposals,
     list_reports,
+    list_revisions,
     modify_bgp_peer,
     modify_ibgp_peer,
     reject_proposal,
     remove_node,
     require_managed_node_exists,
+    rollback_to,
     rotate_token,
     set_policy,
     show_bgp_peers,
@@ -804,6 +808,56 @@ def api_import_report(report_id: int) -> dict:
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"report_id": report_id, **counts}
+
+
+# --- Admin: revisions / rollback (stage 5) ---
+
+
+class NodeRollbackRequest(BaseModel):
+    revision: str
+
+
+def _revision_to_dict(rev) -> dict:  # noqa: ANN001
+    return {
+        "id": rev.id,
+        "node_id": rev.node_id,
+        "revision": rev.revision,
+        "generated_at": rev.generated_at,
+    }
+
+
+@_admin_nodes_router.get("/nodes/{node_id}/revisions")
+def api_list_revisions(
+    node_id: str,
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
+) -> dict:
+    try:
+        rows = list_revisions(db_path=_get_db_path(), node_id=node_id, limit=limit)
+        pin = get_pinned(db_path=_get_db_path(), node_id=node_id)
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "pinned_revision": pin.revision if pin else None,
+        "revisions": [_revision_to_dict(r) for r in rows],
+    }
+
+
+@_admin_nodes_router.post("/nodes/{node_id}/rollback")
+def api_rollback(node_id: str, body: NodeRollbackRequest) -> dict:
+    try:
+        rev = rollback_to(db_path=_get_db_path(), node_id=node_id, revision=body.revision)
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"pinned": _revision_to_dict(rev)}
+
+
+@_admin_nodes_router.delete("/nodes/{node_id}/rollback")
+def api_clear_rollback(node_id: str) -> dict:
+    try:
+        clear_rollback(db_path=_get_db_path(), node_id=node_id)
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"node_id": node_id, "pinned": None}
 
 
 # --- Mount routers ---

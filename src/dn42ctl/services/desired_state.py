@@ -96,10 +96,20 @@ def _compute_revision(payload_without_revision: dict[str, Any], generated_at: st
     return f"{generated_at}-{digest}"
 
 
-def build_desired_state(*, db_path: Path, node_id: str) -> DesiredState:
+def build_desired_state(
+    *, db_path: Path, node_id: str, record_revision: bool = True, keep_latest: int = 50
+) -> DesiredState:
     """Read all peers for the given node_id from the authoritative DB and
-    produce a DesiredState. The DB row layout is the v1-v4 schema; we don't
-    require migration v5 tables to exist here.
+    produce a DesiredState.
+
+    Side effects (when `record_revision=True`):
+      * Record the freshly-built revision into `config_revisions` (idempotent
+        on the (node_id, revision) UNIQUE constraint).
+      * Trim old revisions down to `keep_latest`.
+
+    If `node_desired_pin` has a row for `node_id`, the pinned (older) revision
+    is returned instead of the freshly computed one. This is how `rollback`
+    works.
     """
     db = Database.open(db_path)
     try:
@@ -119,6 +129,41 @@ def build_desired_state(*, db_path: Path, node_id: str) -> DesiredState:
         "paths": paths,
     }
     revision = _compute_revision(base, generated_at)
+
+    if record_revision:
+        from dn42ctl.db_managed import RevisionStore
+
+        db = Database.open(db_path)
+        try:
+            store = RevisionStore(db.connection)
+            store.record(
+                node_id=node_id,
+                revision=revision,
+                generated_at=generated_at,
+                payload={
+                    "node_id": node_id,
+                    "revision": revision,
+                    "generated_at": generated_at,
+                    "bgp_peers": bgp_peers,
+                    "ibgp_peers": ibgp_peers,
+                    "paths": paths,
+                },
+            )
+            store.trim(node_id, keep_latest=keep_latest)
+            pin = store.get_pin(node_id)
+        finally:
+            db.close()
+        if pin is not None:
+            # Return the pinned revision payload verbatim.
+            return DesiredState(
+                node_id=pin.payload["node_id"],
+                revision=pin.payload["revision"],
+                generated_at=pin.payload["generated_at"],
+                bgp_peers=pin.payload.get("bgp_peers", []),
+                ibgp_peers=pin.payload.get("ibgp_peers", []),
+                paths=pin.payload.get("paths", {}),
+            )
+
     return DesiredState(
         node_id=node_id,
         revision=revision,
