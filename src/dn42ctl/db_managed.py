@@ -658,18 +658,26 @@ class RevisionStore:
     def trim(self, node_id: str, *, keep_latest: int = 50) -> int:
         """Delete all but the most recent `keep_latest` revisions for `node_id`.
 
+        The currently pinned revision (if any) is always preserved, even if it
+        falls outside the recency window. Otherwise enough builds would silently
+        evict the rollback target.
+
         Returns the number of rows deleted.
         """
         try:
             cur = self._conn.execute(
                 """
                 DELETE FROM config_revisions
-                WHERE node_id=? AND id NOT IN (
+                WHERE node_id=?
+                  AND id NOT IN (
                     SELECT id FROM config_revisions WHERE node_id=?
                     ORDER BY id DESC LIMIT ?
-                )
+                  )
+                  AND revision NOT IN (
+                    SELECT revision FROM node_desired_pin WHERE node_id=?
+                  )
                 """,
-                (node_id, node_id, keep_latest),
+                (node_id, node_id, keep_latest, node_id),
             )
             self._conn.commit()
         except sqlite3.Error as exc:

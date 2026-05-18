@@ -47,6 +47,25 @@ class TestTrim:
         remaining = store.list_for_node(NODE_A)
         assert [r.revision for r in remaining] == ["r9", "r8", "r7"]
 
+    def test_preserves_pinned_revision(self, mem_db: Database) -> None:
+        """Pinned revision must survive trim even when it falls outside the recency window."""
+        store = _store(mem_db)
+        store.record(node_id=NODE_A, revision="r-pinned", generated_at="t0", payload={})
+        # Pin the oldest revision.
+        store.pin(NODE_A, "r-pinned")
+        # Add more revisions to push r-pinned out of the recency window.
+        for i in range(1, 10):
+            store.record(node_id=NODE_A, revision=f"r{i}", generated_at=f"t{i}", payload={})
+        store.trim(NODE_A, keep_latest=3)
+        remaining_revisions = {r.revision for r in store.list_for_node(NODE_A, limit=100)}
+        assert "r-pinned" in remaining_revisions
+        # The latest 3 are still there.
+        assert {"r9", "r8", "r7"}.issubset(remaining_revisions)
+        # Get_pin still returns a row (not None).
+        pin = store.get_pin(NODE_A)
+        assert pin is not None
+        assert pin.revision == "r-pinned"
+
 
 class TestPin:
     def test_pin_and_get(self, mem_db: Database) -> None:

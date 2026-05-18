@@ -146,3 +146,22 @@ class TestTrim:
             _delete_peer(db_path, asn)
         rows = list_revisions(db_path=db_path, node_id=NODE_A, limit=100)
         assert len(rows) == 3
+
+    def test_pinned_revision_survives_aggressive_trim(self, db_path: Path) -> None:
+        """Pinned revision must not be silently evicted by subsequent builds."""
+        _register(db_path)
+        _insert_peer(db_path, 4242420001)
+        first_rev = build_desired_state(db_path=db_path, node_id=NODE_A).revision
+        _delete_peer(db_path, 4242420001)
+        rollback_to(db_path=db_path, node_id=NODE_A, revision=first_rev)
+        # Many more builds with small keep_latest -> would evict first_rev without protection.
+        for asn in range(4242420002, 4242420012):
+            _insert_peer(db_path, asn)
+            build_desired_state(db_path=db_path, node_id=NODE_A, keep_latest=2)
+            _delete_peer(db_path, asn)
+        # Pin still resolves; pull returns pinned payload.
+        pin = get_pinned(db_path=db_path, node_id=NODE_A)
+        assert pin is not None
+        assert pin.revision == first_rev
+        ds = build_desired_state(db_path=db_path, node_id=NODE_A, keep_latest=2)
+        assert ds.revision == first_rev
