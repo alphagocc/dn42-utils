@@ -1196,18 +1196,26 @@ def cmd_node_remove(
     ctx: typer.Context,
     node_id: str = typer.Argument(..., help="节点 UUID"),
     force: bool = typer.Option(False, "--force", help="允许删除 self 节点"),
+    node_config_path: Path = typer.Option(
+        None, "--node-config-path", help="覆盖 self node.toml 路径 (force-remove self 节点时被清理)"
+    ),
 ) -> None:
     appctx: AppContext = ctx.obj
     from dn42ctl.services import remove_node
 
     try:
-        node = remove_node(db_path=appctx.db_path, node_id=node_id, force=force)
+        node = remove_node(
+            db_path=appctx.db_path, node_id=node_id, force=force,
+            self_node_toml_path=node_config_path,
+        )
     except Dn42CtlError as exc:
         raise typer.BadParameter(str(exc)) from exc
     except DatabaseError as exc:
         typer.echo(_db_open_hint(appctx.db_path), err=True)
         raise typer.Exit(code=1) from exc
     typer.echo(f"已删除: {node.node_id} ({node.name})")
+    if node.is_self:
+        typer.echo("self 节点的 node.toml 已清理;下次 dn42ctl serve 启动会重新注册")
 
 
 token_app = typer.Typer(help="节点 token 管理")
@@ -1217,12 +1225,17 @@ token_app = typer.Typer(help="节点 token 管理")
 def cmd_node_token_rotate(
     ctx: typer.Context,
     node_id: str = typer.Argument(..., help="节点 UUID"),
+    node_config_path: Path = typer.Option(
+        None, "--node-config-path", help="覆盖 self node.toml 路径 (仅 self 节点轮换 token 时同步)"
+    ),
 ) -> None:
     appctx: AppContext = ctx.obj
     from dn42ctl.services import rotate_token
 
     try:
-        rotated = rotate_token(db_path=appctx.db_path, node_id=node_id)
+        rotated = rotate_token(
+            db_path=appctx.db_path, node_id=node_id, self_node_toml_path=node_config_path,
+        )
     except Dn42CtlError as exc:
         raise typer.BadParameter(str(exc)) from exc
     except DatabaseError as exc:
@@ -1230,6 +1243,8 @@ def cmd_node_token_rotate(
         raise typer.Exit(code=1) from exc
     typer.echo(f"node_id: {rotated.node_id}")
     typer.echo(f"token (明文,仅显示一次): {rotated.plaintext}")
+    if rotated.self_node_toml_updated:
+        typer.echo(f"已同步更新 self node.toml: {rotated.self_node_toml_path}")
 
 
 node_app.add_typer(token_app, name="token")
