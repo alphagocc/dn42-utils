@@ -1,8 +1,9 @@
 """Admin-side proposal management service.
 
-Node-side push/scan handling is split across `node_push.py` (stage 3) and
-`node_admin_proposals.py` (stage 4 accept/reject). This module is the
-server-side handler invoked by both the REST API and the admin CLI.
+Stage 4 wires auto-accept: when `submit_proposal` is called and the node's
+write_policy.peer_add == "auto_accept", the proposal is immediately accepted
+(or rejected with a reason) right after insertion. peer_modify / peer_delete
+are always review by schema design.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from dn42ctl.config import AppConfig
 from dn42ctl.db import Database
 from dn42ctl.db_managed import (
     VALID_PROPOSAL_KINDS,
@@ -28,9 +30,11 @@ def submit_proposal(
     source: str,
     kind: str,
     payload: dict[str, Any],
+    config: AppConfig | None = None,
 ) -> ConfigProposal:
-    """Persist a proposal from a node (or scan). Stage 3 only writes; auto-accept
-    handling (write_policy.peer_add=auto_accept) is wired in stage 4.
+    """Persist a proposal. If the node's write_policy authorizes auto-accept
+    for this kind AND `config` is provided, immediately run the underlying
+    service call (and mark accepted, or rejected on failure).
     """
     if kind not in VALID_PROPOSAL_KINDS:
         raise Dn42CtlError(f"非法 kind: {kind} (允许: {sorted(VALID_PROPOSAL_KINDS)})")
@@ -38,7 +42,6 @@ def submit_proposal(
         raise Dn42CtlError(f"非法 source: {source}")
     if not isinstance(payload, dict):
         raise Dn42CtlError("payload 必须是对象")
-    # Validate payload is JSON-serializable.
     try:
         json.dumps(payload)
     except (TypeError, ValueError) as exc:
@@ -47,12 +50,24 @@ def submit_proposal(
     db = Database.open(db_path)
     try:
         node_store = ManagedNodeStore(db.connection)
-        if node_store.get(node_id) is None:
+        node = node_store.get(node_id)
+        if node is None:
             raise Dn42CtlError(f"managed node 不存在: {node_id}")
         store = ProposalStore(db.connection)
-        return store.add(node_id=node_id, source=source, kind=kind, payload=payload)
+        proposal = store.add(node_id=node_id, source=source, kind=kind, payload=payload)
+        policy = node.write_policy
     finally:
         db.close()
+
+    if config is not None:
+        # Late import to avoid an import cycle between proposals.py and
+        # proposal_decisions.py (which itself imports services for create/modify).
+        from dn42ctl.services.proposal_decisions import try_auto_accept
+
+        proposal = try_auto_accept(
+            config=config, db_path=db_path, proposal=proposal, policy=policy
+        )
+    return proposal
 
 
 def list_proposals(

@@ -16,7 +16,9 @@ from .node_admin import (
     set_policy,
 )
 from .node_push import build_peer_add_payload, post_proposal, post_report
+from .proposal_decisions import accept_proposal, reject_proposal
 from .proposals import get_proposal, list_proposals, submit_proposal
+from .report_import import import_report
 from .reports import get_report, list_reports, submit_report
 from .scan import discover_bird_paths, scan_local_configs
 from .show import show_bgp_peers, show_ibgp_peers, show_wg_tunnels
@@ -26,6 +28,7 @@ __all__ = [
     "Dn42CtlError",
     "DummyResult",
     "RotatedToken",
+    "accept_proposal",
     "add_node",
     "build_desired_state",
     "build_peer_add_payload",
@@ -39,6 +42,7 @@ __all__ = [
     "get_node",
     "get_proposal",
     "get_report",
+    "import_report",
     "init_node",
     "list_nodes",
     "list_proposals",
@@ -47,6 +51,7 @@ __all__ = [
     "modify_ibgp_peer",
     "post_proposal",
     "post_report",
+    "reject_proposal",
     "remove_node",
     "require_managed_node_exists",
     "rotate_token",

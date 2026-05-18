@@ -1534,3 +1534,70 @@ def cmd_node_reports(
     for r in rows:
         imp = r.imported_at or "-"
         typer.echo(f"#{r.id} kind={r.kind} received={r.received_at} imported={imp}")
+
+
+# --- stage 4: admin proposal decisions / report import ---
+
+
+@node_app.command("accept-proposal")
+def cmd_node_accept_proposal(
+    ctx: typer.Context,
+    proposal_id: int = typer.Argument(..., help="proposal id"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    config = _require_config_or_exit(appctx)
+    from dn42ctl.services import accept_proposal
+
+    try:
+        p = accept_proposal(config=config, db_path=appctx.db_path, proposal_id=proposal_id)
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    except DatabaseError as exc:
+        typer.echo(_db_open_hint(appctx.db_path), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"已接受 proposal #{p.id} kind={p.kind} status={p.status} at={p.decided_at}")
+
+
+@node_app.command("reject-proposal")
+def cmd_node_reject_proposal(
+    ctx: typer.Context,
+    proposal_id: int = typer.Argument(..., help="proposal id"),
+    reason: str = typer.Option(..., "--reason", help="拒绝原因 (必填)"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    from dn42ctl.services import reject_proposal
+
+    try:
+        p = reject_proposal(db_path=appctx.db_path, proposal_id=proposal_id, reason=reason)
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    except DatabaseError as exc:
+        typer.echo(_db_open_hint(appctx.db_path), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"已拒绝 proposal #{p.id}: {p.message}")
+
+
+@node_app.command("import-report")
+def cmd_node_import_report(
+    ctx: typer.Context,
+    report_id: int = typer.Argument(..., help="report id"),
+) -> None:
+    appctx: AppContext = ctx.obj
+    config = _require_config_or_exit(appctx)
+    from dn42ctl.services import import_report
+
+    try:
+        counts = import_report(config=config, db_path=appctx.db_path, report_id=report_id)
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    except DatabaseError as exc:
+        typer.echo(_db_open_hint(appctx.db_path), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(
+        f"已导入 report #{report_id}: "
+        f"bgp(created={counts['bgp_created']}, skipped={counts['bgp_skipped']}), "
+        f"ibgp(created={counts['ibgp_created']}, skipped={counts['ibgp_skipped']})"
+    )

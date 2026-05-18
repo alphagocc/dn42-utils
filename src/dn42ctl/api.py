@@ -14,6 +14,7 @@ from dn42ctl.db import Database
 from dn42ctl.db_managed import ManagedNodeStore
 from dn42ctl.services import (
     Dn42CtlError,
+    accept_proposal,
     add_node,
     build_desired_state,
     create_bgp_peer,
@@ -22,11 +23,13 @@ from dn42ctl.services import (
     delete_ibgp_peer,
     genconf,
     get_node,
+    import_report,
     list_nodes,
     list_proposals,
     list_reports,
     modify_bgp_peer,
     modify_ibgp_peer,
+    reject_proposal,
     remove_node,
     require_managed_node_exists,
     rotate_token,
@@ -715,6 +718,7 @@ def api_node_post_proposal(
             source=body.source,
             kind=body.kind,
             payload=body.payload,
+            config=_get_config(),
         )
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -766,6 +770,40 @@ def api_list_reports(
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return [_report_to_dict(r) for r in rows]
+
+
+# --- Admin: proposal decisions / report import ---
+
+
+class ProposalRejectRequest(BaseModel):
+    reason: str
+
+
+@_admin_nodes_router.post("/proposals/{proposal_id}/accept")
+def api_accept_proposal(proposal_id: int) -> dict:
+    try:
+        p = accept_proposal(config=_get_config(), db_path=_get_db_path(), proposal_id=proposal_id)
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _proposal_to_dict(p)
+
+
+@_admin_nodes_router.post("/proposals/{proposal_id}/reject")
+def api_reject_proposal(proposal_id: int, body: ProposalRejectRequest) -> dict:
+    try:
+        p = reject_proposal(db_path=_get_db_path(), proposal_id=proposal_id, reason=body.reason)
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _proposal_to_dict(p)
+
+
+@_admin_nodes_router.post("/reports/{report_id}/import")
+def api_import_report(report_id: int) -> dict:
+    try:
+        counts = import_report(config=_get_config(), db_path=_get_db_path(), report_id=report_id)
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"report_id": report_id, **counts}
 
 
 # --- Mount routers ---
