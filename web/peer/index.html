@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en" class="bg-white text-zinc-900 dark:bg-black dark:text-zinc-100">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>dn42 Auto-peer</title>
+  <script>
+    const saved = localStorage.getItem("theme");
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    if (saved === "dark" || (!saved && prefersDark)) document.documentElement.classList.add("dark");
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: "class" };</script>
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body class="min-h-screen flex flex-col items-center px-4 py-8">
+  <header class="w-full max-w-2xl flex items-center justify-between mb-8">
+    <h1 class="text-2xl font-semibold tracking-tight">dn42 Auto-peer</h1>
+    <button id="theme-toggle" type="button"
+            class="rounded-md border border-zinc-200 dark:border-zinc-800 px-2 py-1 text-xs uppercase tracking-wider hover:bg-zinc-100 dark:hover:bg-zinc-900">
+      Theme
+    </button>
+  </header>
+
+  <!-- step indicator -->
+  <nav class="w-full max-w-2xl flex items-center justify-center gap-2 mb-8" id="step-nav">
+    <span class="step-dot active inline-flex items-center justify-center w-8 h-8 rounded-full border border-zinc-300 dark:border-zinc-700 text-sm font-medium" data-step="1">1</span>
+    <span class="w-8 border-t border-zinc-300 dark:border-zinc-700"></span>
+    <span class="step-dot inline-flex items-center justify-center w-8 h-8 rounded-full border border-zinc-300 dark:border-zinc-700 text-sm font-medium" data-step="2">2</span>
+    <span class="w-8 border-t border-zinc-300 dark:border-zinc-700"></span>
+    <span class="step-dot inline-flex items-center justify-center w-8 h-8 rounded-full border border-zinc-300 dark:border-zinc-700 text-sm font-medium" data-step="3">3</span>
+    <span class="w-8 border-t border-zinc-300 dark:border-zinc-700"></span>
+    <span class="step-dot inline-flex items-center justify-center w-8 h-8 rounded-full border border-zinc-300 dark:border-zinc-700 text-sm font-medium" data-step="4">4</span>
+  </nav>
+
+  <main class="w-full max-w-2xl" id="wizard"></main>
+
+  <footer class="mt-12 text-xs text-zinc-500 text-center">
+    Peering requests are submitted as proposals and require operator approval.
+  </footer>
+
+  <script src="assets/app.js"></script>
+  <script>dn42ctlPeer.boot();</script>
+</body>
+</html>

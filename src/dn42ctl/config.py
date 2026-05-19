@@ -37,6 +37,7 @@ class AppConfig:
     bird_roa_v6_conf_path: str
     networkd_dir: str
     nm_system_connections_dir: str
+    dn42_registry_path: str | None = None
 
 
 class ConfigError(RuntimeError):
@@ -54,6 +55,15 @@ def _require_int(data: dict[str, Any], key: str) -> int:
     value = data.get(key)
     if not isinstance(value, int):
         raise ConfigError(f"Missing/invalid config key: {key}")
+    return value
+
+
+def _optional_str(data: dict[str, Any], key: str) -> str | None:
+    value = data.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise ConfigError(f"Invalid config key (expected non-empty string): {key}")
     return value
 
 
@@ -101,13 +111,14 @@ def load_config(path: Path) -> AppConfig:
         bird_roa_v6_conf_path=_require_str(paths, "bird_roa_v6_conf"),
         networkd_dir=_require_str(paths, "networkd_dir"),
         nm_system_connections_dir=_require_str(paths, "nm_system_connections_dir"),
+        dn42_registry_path=_optional_str(raw, "dn42_registry_path"),
     )
 
 
 def save_config(path: Path, config: AppConfig) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    data = {
+    data: dict[str, Any] = {
         "node_id": config.node_id,
         "own_asn": config.own_asn,
         "router_id": config.router_id,
@@ -123,6 +134,8 @@ def save_config(path: Path, config: AppConfig) -> None:
             "nm_system_connections_dir": config.nm_system_connections_dir,
         },
     }
+    if config.dn42_registry_path is not None:
+        data["dn42_registry_path"] = config.dn42_registry_path
 
     with path.open("wb") as f:
         tomli_w.dump(data, f)

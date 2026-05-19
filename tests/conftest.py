@@ -69,3 +69,60 @@ def mock_wg_keypair():
         return_value=(FAKE_WG_PRIVKEY, FAKE_WG_PUBKEY),
     ) as m:
         yield m
+
+
+@pytest.fixture
+def dn42_registry(tmp_path: Path) -> Path:
+    """Create a minimal fake dn42 registry tree for auto-peer tests."""
+    root = tmp_path / "registry"
+    (root / "data" / "aut-num").mkdir(parents=True)
+    (root / "data" / "mntner").mkdir(parents=True)
+    (root / "data" / "key-cert").mkdir(parents=True)
+
+    # aut-num with two mnt-by lines
+    (root / "data" / "aut-num" / "AS4242421234").write_text(
+        "aut-num:            AS4242421234\n"
+        "as-name:            TEST-AS\n"
+        "mnt-by:             TEST-MNT\n"
+        "mnt-by:             TEST2-MNT\n"
+        "source:             DN42\n",
+        encoding="utf-8",
+    )
+
+    # mntner with ssh + pgp auth
+    (root / "data" / "mntner" / "TEST-MNT").write_text(
+        "mntner:             TEST-MNT\n"
+        "admin-c:            TEST-DN42\n"
+        "auth:               ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFake1234567890FakeKey test@dn42\n"
+        "auth:               pgp-fingerprint AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"
+        "auth:               ed25519-pw somepwhash\n"
+        "mnt-by:             TEST-MNT\n"
+        "source:             DN42\n",
+        encoding="utf-8",
+    )
+
+    # second mntner with only ssh
+    (root / "data" / "mntner" / "TEST2-MNT").write_text(
+        "mntner:             TEST2-MNT\n"
+        "auth:               ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC test2@dn42\n"
+        "mnt-by:             TEST2-MNT\n"
+        "source:             DN42\n",
+        encoding="utf-8",
+    )
+
+    # pgp key-cert
+    (root / "data" / "key-cert" / "PGPKEY-AAAAAAAA").write_text(
+        "key-cert:           PGPKEY-AAAAAAAA\n"
+        "method:             PGP\n"
+        "fingerpr:           AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA\n"
+        "certif:             -----BEGIN PGP PUBLIC KEY BLOCK-----\n"
+        "certif:             \n"
+        "certif:             mQENBFake\n"
+        "certif:             =fake\n"
+        "certif:             -----END PGP PUBLIC KEY BLOCK-----\n"
+        "mnt-by:             TEST-MNT\n"
+        "source:             DN42\n",
+        encoding="utf-8",
+    )
+
+    return root

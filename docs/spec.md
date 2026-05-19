@@ -33,6 +33,7 @@
 
 - 配置文件：`/etc/dn42ctl/config.toml`（可用 `--config-path` 覆盖）
 - SQLite：`/var/lib/dn42ctl/dn42.sqlite3`（可用 `--db-path` 覆盖）
+- dn42 registry（可选）：在 `config.toml` 中通过 `dn42_registry_path = "/var/lib/dn42-registry"` 配置；启用 auto-peer 公共 API 时必需，未配置时 `/api/public/auto-peer/*` 返回 503。
 - Bird：
   - 主配置：`/etc/bird/bird.conf`（部分发行版也可能是 `/etc/bird.conf`）
   - peers 目录：`/etc/bird/peers/`
@@ -95,6 +96,8 @@
 - 部署（systemd + nginx）：`docs/architecture/deployment.md`
 - 输入校验：`docs/architecture/validation.md`
 - 测试基础设施：`docs/architecture/testing.md`
+- Web UI（admin + peer 静态站点）：`docs/architecture/web_ui.md`
+- Auto-peer 公共 API：`docs/architecture/auto_peer.md`
 
 ### 命令
 

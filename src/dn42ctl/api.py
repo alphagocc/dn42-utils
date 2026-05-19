@@ -45,6 +45,15 @@ from dn42ctl.services import (
     submit_proposal,
     submit_report,
 )
+from dn42ctl.services.auto_peer import (
+    AutoPeerError,
+    AutoPeerExpiredError,
+    AutoPeerSessionError,
+    start_challenge,
+    start_lookup,
+    submit_peer,
+    verify_challenge,
+)
 from dn42ctl.validators import (
     validate_asn,
     validate_babel_type,
@@ -153,6 +162,10 @@ _admin_nodes_router = APIRouter(prefix=admin_prefix, dependencies=[Depends(requi
 
 # Node-token endpoints under /api/v1/nodes/{node_id}/...
 _node_router = APIRouter(prefix=node_prefix)
+
+# Public (no-auth) routes for the auto-peer wizard.
+public_prefix = "/api/public"
+_public_router = APIRouter(prefix=public_prefix)
 
 
 # --- Pydantic models ---
@@ -883,8 +896,229 @@ def api_clear_rollback(node_id: str) -> dict:
     return {"node_id": node_id, "pinned": None}
 
 
+# --- Public auto-peer routes (no admin/node bearer for steps 1-3) ---
+
+
+_AUTO_PEER_BEARER = HTTPBearer(auto_error=False)
+
+
+def _require_registry() -> AppConfig:
+    config = _get_config()
+    if not config.dn42_registry_path:
+        raise HTTPException(
+            status_code=503,
+            detail="auto-peer disabled (dn42_registry_path not set)",
+        )
+    return config
+
+
+def _map_auto_peer_error(exc: AutoPeerError) -> HTTPException:
+    if isinstance(exc, AutoPeerSessionError):
+        return HTTPException(status_code=403, detail=str(exc))
+    if isinstance(exc, AutoPeerExpiredError):
+        return HTTPException(status_code=410, detail=str(exc))
+    return HTTPException(status_code=400, detail=str(exc))
+
+
+class AutoPeerLookupRequest(BaseModel):
+    asn: int
+
+    @field_validator("asn")
+    @classmethod
+    def _check_asn(cls, v: int) -> int:
+        return validate_asn(v)
+
+
+class AutoPeerChallengeRequest(BaseModel):
+    asn: int
+    mntner: str
+    auth_index: int
+
+    @field_validator("asn")
+    @classmethod
+    def _check_asn(cls, v: int) -> int:
+        return validate_asn(v)
+
+    @field_validator("mntner")
+    @classmethod
+    def _check_mntner(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("mntner 不能为空")
+        return v
+
+    @field_validator("auth_index")
+    @classmethod
+    def _check_idx(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("auth_index 必须 >= 0")
+        return v
+
+
+class AutoPeerVerifyRequest(BaseModel):
+    challenge_id: str
+    signature: str
+
+    @field_validator("challenge_id")
+    @classmethod
+    def _check_cid(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("challenge_id 不能为空")
+        return v
+
+
+class AutoPeerSubmitRequest(BaseModel):
+    wg_public_key: str
+    endpoint: str = ""
+    peer_lla: str
+    net_backend: str = "networkd"
+    listen_port: int | None = None
+
+    @field_validator("wg_public_key")
+    @classmethod
+    def _check_pubkey(cls, v: str) -> str:
+        return validate_pubkey(v)
+
+    @field_validator("endpoint")
+    @classmethod
+    def _check_endpoint(cls, v: str) -> str:
+        return validate_endpoint(v, allow_empty=True)
+
+    @field_validator("peer_lla")
+    @classmethod
+    def _check_peer_lla(cls, v: str) -> str:
+        return validate_ipv6_address(v, field_name="Peer LLA")
+
+    @field_validator("net_backend")
+    @classmethod
+    def _check_backend(cls, v: str) -> str:
+        return validate_net_backend(v)
+
+    @field_validator("listen_port")
+    @classmethod
+    def _check_port(cls, v: int | None) -> int | None:
+        if v is not None:
+            return validate_listen_port(v, allow_zero=True)
+        return v
+
+
+@_public_router.post("/auto-peer/lookup")
+def api_auto_peer_lookup(body: AutoPeerLookupRequest) -> dict:
+    config = _require_registry()
+    try:
+        result = start_lookup(config=config, asn=body.asn)
+    except AutoPeerError as exc:
+        raise _map_auto_peer_error(exc) from exc
+    except Dn42CtlError as exc:
+        # registry-not-found / parse errors
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "asn": result.asn,
+        "mntners": [
+            {
+                "name": m.name,
+                "auth_options": [
+                    {
+                        "index": opt.index,
+                        "scheme": opt.scheme,
+                        "fingerprint": opt.fingerprint,
+                    }
+                    for opt in m.auth_options
+                ],
+            }
+            for m in result.mntners
+        ],
+    }
+
+
+@_public_router.post("/auto-peer/challenge")
+def api_auto_peer_challenge(body: AutoPeerChallengeRequest) -> dict:
+    config = _require_registry()
+    try:
+        challenge = start_challenge(
+            config=config,
+            asn=body.asn,
+            mntner=body.mntner,
+            auth_index=body.auth_index,
+        )
+    except AutoPeerError as exc:
+        raise _map_auto_peer_error(exc) from exc
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "challenge_id": challenge.challenge_id,
+        "nonce": challenge.nonce_hex,
+        "namespace": challenge.namespace,
+        "scheme": challenge.scheme,
+        "expires_in_seconds": max(0, int(challenge.expires_at - _monotonic_now())),
+    }
+
+
+@_public_router.post("/auto-peer/verify")
+def api_auto_peer_verify(body: AutoPeerVerifyRequest) -> dict:
+    config = _require_registry()
+    try:
+        result = verify_challenge(
+            config=config,
+            challenge_id=body.challenge_id,
+            signature=body.signature,
+        )
+    except AutoPeerError as exc:
+        raise _map_auto_peer_error(exc) from exc
+    return {
+        "peer_session_token": result.peer_session_token,
+        "verified_asn": result.verified_asn,
+        "verified_mntner": result.verified_mntner,
+        "expires_in_seconds": max(0, int(result.expires_at - _monotonic_now())),
+    }
+
+
+@_public_router.post("/auto-peer/submit", status_code=201)
+def api_auto_peer_submit(
+    body: AutoPeerSubmitRequest,
+    cred: Annotated[HTTPAuthorizationCredentials | None, Depends(_AUTO_PEER_BEARER)],
+) -> dict:
+    config = _require_registry()
+    if cred is None or not cred.credentials:
+        raise HTTPException(status_code=401, detail="missing peer-session token")
+    try:
+        result = submit_peer(
+            config=config,
+            db_path=_get_db_path(),
+            session_token=cred.credentials,
+            wg_public_key=body.wg_public_key,
+            endpoint=body.endpoint,
+            peer_lla=body.peer_lla,
+            net_backend=body.net_backend,
+            listen_port=body.listen_port,
+        )
+    except AutoPeerError as exc:
+        raise _map_auto_peer_error(exc) from exc
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "proposal_id": result.proposal.id,
+        "status": result.proposal.status,
+        "node_id": result.our_node_id,
+        "received_at": result.proposal.received_at,
+        "message": (
+            "Your peer request is pending operator approval."
+            if result.proposal.status == "pending"
+            else "Your peer request was processed."
+        ),
+    }
+
+
+def _monotonic_now() -> float:
+    import time
+
+    return time.monotonic()
+
+
 # --- Mount routers ---
 
 app.include_router(_admin_router)
 app.include_router(_admin_nodes_router)
 app.include_router(_node_router)
+app.include_router(_public_router)

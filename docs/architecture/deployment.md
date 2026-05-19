@@ -179,7 +179,31 @@ server {
     # allow fd00::/8;
     # deny all;
 
+    # 静态 UI: 公共 auto-peer 页面挂在根路径
+    root /var/www/dn42ctl/peer;
+    index index.html;
+
+    # 管理后台挂在 /admin/
+    location /admin/ {
+        alias /var/www/dn42ctl/admin/;
+        index index.html;
+        try_files $uri $uri/ /admin/index.html;
+    }
+
+    # 所有 API 走 loopback uvicorn
     location /api/ {
+        proxy_pass         http://[::1]:4242;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Forwarded-For   $remote_addr;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+
+    # 可选: 对 auto-peer 公共端点限流, 避免被刷
+    # 在 http {} 中先声明: limit_req_zone $binary_remote_addr zone=ap:10m rate=10r/m;
+    location /api/public/ {
+        # limit_req zone=ap burst=20 nodelay;
         proxy_pass         http://[::1]:4242;
         proxy_http_version 1.1;
         proxy_set_header   Host              $host;
@@ -189,6 +213,16 @@ server {
     }
 }
 ```
+
+静态资源部署：
+
+```bash
+sudo install -d -m 0755 /var/www/dn42ctl
+sudo cp -r web/peer  /var/www/dn42ctl/peer
+sudo cp -r web/admin /var/www/dn42ctl/admin
+```
+
+详细的页面结构与主题策略见 `docs/architecture/web_ui.md`。
 
 ## 首次部署流程
 

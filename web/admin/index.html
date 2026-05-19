@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en" class="bg-white text-zinc-900 dark:bg-black dark:text-zinc-100">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>dn42ctl — Sign in</title>
+  <script>
+    const saved = localStorage.getItem("theme");
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    if (saved === "dark" || (!saved && prefersDark)) document.documentElement.classList.add("dark");
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: "class" };</script>
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body class="min-h-screen flex items-center justify-center px-4">
+  <main class="w-full max-w-sm">
+    <header class="mb-8 flex items-center justify-between">
+      <h1 class="text-2xl font-semibold tracking-tight">dn42ctl</h1>
+      <button id="theme-toggle" type="button"
+              class="rounded-md border border-zinc-200 dark:border-zinc-800 px-2 py-1 text-xs uppercase tracking-wider hover:bg-zinc-100 dark:hover:bg-zinc-900">
+        Theme
+      </button>
+    </header>
+
+    <section class="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 p-6">
+      <h2 class="text-sm font-medium uppercase tracking-wider text-zinc-500">Admin sign in</h2>
+      <p class="mt-2 text-sm text-zinc-500">Paste the admin token from <code>/etc/dn42ctl/server.env</code>.</p>
+      <form id="login-form" class="mt-5 space-y-4">
+        <label class="block">
+          <span class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Token</span>
+          <input id="token" type="password" autocomplete="off" required
+                 class="block w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-black px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100">
+        </label>
+        <button type="submit"
+                class="w-full rounded-md bg-black dark:bg-white text-white dark:text-black px-3 py-2 text-sm font-medium hover:opacity-90">
+          Sign in
+        </button>
+        <p id="login-error" class="hidden text-xs text-red-600 dark:text-red-400"></p>
+      </form>
+    </section>
+
+    <p class="mt-8 text-xs text-zinc-500 text-center">
+      Static UI · served by nginx · talks to <code>/api/</code>
+    </p>
+  </main>
+  <script src="assets/app.js"></script>
+  <script>dn42ctlAdmin.bootLogin();</script>
+</body>
+</html>

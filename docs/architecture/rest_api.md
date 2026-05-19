@@ -13,14 +13,15 @@ dn42ctl serve [--host ::1] [--port 4242]
 - **dn42ctl 不处理 TLS 证书。** 对外暴露与 HTTPS 终止由 nginx 反代承担——CLI 不接受 `--tls-cert` / `--tls-key`，且对非 loopback `--host` 会打 warning。
 - 部署细节（systemd unit + nginx 反代示例）见 `docs/architecture/deployment.md`。
 
-## 鉴权（双 token 模型）
+## 鉴权（admin / node / peer-session 三类 principal）
 
-所有 API 请求需携带 `Authorization: Bearer <token>` 头。系统按 token 解析出 principal：
+`/api/...` 与 `/api/admin/...` 与 `/api/v1/nodes/...` 走 `Authorization: Bearer <token>` 头；`/api/public/auto-peer/...` 中的前 3 步公开，仅 `submit` 需要一个短期 peer-session bearer。
 
 | 主体 | token 来源 | 可访问 |
 |------|-----------|--------|
 | **admin** | 环境变量 `DN42CTL_API_TOKEN`（部署时随机生成） | `/api/...` 全部既有路由 + `/api/admin/...` |
 | **node** | `dn42ctl node token rotate <id>` 签发；argon2id hash 存 `managed_nodes.api_token_hash`，明文只在签发时返回一次 | 仅 `/api/v1/nodes/{node_id}/...`，且 path 中的 `node_id` 必须等于 token 绑定的 node_id |
+| **peer-session** | `/api/public/auto-peer/verify` 校验通过后签发，TTL 15 分钟、in-memory、绑定到 verified_asn | 仅 `/api/public/auto-peer/submit`，且 `peer_asn` 必须等于 token 绑定的 ASN |
 
 错误码：
 
@@ -78,9 +79,18 @@ desired state JSON schema 详见 `docs/architecture/sync_hub_spoke.md`。
 | `GET` | `/api/admin/nodes/{node_id}/revisions` | `node revisions` | 列出 desired state 历史快照（阶段 5） |
 | `POST` | `/api/admin/nodes/{node_id}/rollback` | `node rollback` | 切换当前 desired state 到指定 revision（阶段 5） |
 
-## 排除的命令
+### 公共路由（无 bearer / peer-session bearer）
 
-`init` 和 `scan` 仅在 CLI 中可用，不暴露为 admin API。原因：
+启用条件：`config.toml` 中设置了 `dn42_registry_path`。未配置时所有 `/api/public/auto-peer/*` 返回 503。详见 `docs/architecture/auto_peer.md`。
+
+| 方法 | 路径 | Bearer | 说明 |
+|------|------|--------|------|
+| `POST` | `/api/public/auto-peer/lookup` | （无） | 输入 ASN，返回该 AS 的 mnt-by 列表及每个 mntner 中受支持的 `auth:` 选项 |
+| `POST` | `/api/public/auto-peer/challenge` | （无） | 选定 mntner + auth_index，返回 `challenge_id` 与 32 字节随机 nonce（hex），TTL 10 分钟、一次性 |
+| `POST` | `/api/public/auto-peer/verify` | （无） | 提交签名；服务端通过 `ssh-keygen -Y verify` 或 `gpg --verify` 校验，成功后返回 `peer_session_token`（TTL 15 分钟，绑定到该 ASN） |
+| `POST` | `/api/public/auto-peer/submit` | peer-session | 提交 WG pubkey/endpoint/peer_lla 等字段，服务端转换为 `peer_add` proposal 写入 self 节点队列 |
+
+peer-session bearer 与 admin / node token 走完全独立的解析路径，作用域仅限 `/api/public/auto-peer/submit`，使用 in-memory TTL store 管理。
 - `init` 涉及交互式配置创建和系统接口初始化。
 - `scan` 涉及扫描本地文件系统并修改 config.toml。
 

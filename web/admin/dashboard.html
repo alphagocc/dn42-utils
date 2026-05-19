@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en" class="bg-white text-zinc-900 dark:bg-black dark:text-zinc-100">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>dn42ctl — Dashboard</title>
+  <script>
+    const saved = localStorage.getItem("theme");
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    if (saved === "dark" || (!saved && prefersDark)) document.documentElement.classList.add("dark");
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: "class" };</script>
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body class="min-h-screen flex flex-col">
+  <header class="sticky top-0 z-10 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-black">
+    <div class="mx-auto max-w-7xl flex items-center justify-between px-4 py-3">
+      <div class="flex items-center gap-6">
+        <h1 class="text-lg font-semibold tracking-tight">dn42ctl</h1>
+        <nav id="tabs" class="flex flex-wrap gap-1 text-sm">
+          <button data-tab="overview"   class="tab-btn px-3 py-1.5 rounded-md">Overview</button>
+          <button data-tab="bgp"        class="tab-btn px-3 py-1.5 rounded-md">BGP</button>
+          <button data-tab="ibgp"       class="tab-btn px-3 py-1.5 rounded-md">iBGP</button>
+          <button data-tab="wg"         class="tab-btn px-3 py-1.5 rounded-md">WG</button>
+          <button data-tab="nodes"      class="tab-btn px-3 py-1.5 rounded-md">Nodes</button>
+          <button data-tab="proposals"  class="tab-btn px-3 py-1.5 rounded-md">Proposals</button>
+          <button data-tab="reports"    class="tab-btn px-3 py-1.5 rounded-md">Reports</button>
+          <button data-tab="revisions"  class="tab-btn px-3 py-1.5 rounded-md">Revisions</button>
+          <button data-tab="genconf"    class="tab-btn px-3 py-1.5 rounded-md">Genconf</button>
+        </nav>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="refresh-btn" type="button"
+                class="rounded-md border border-zinc-200 dark:border-zinc-800 px-3 py-1.5 text-xs uppercase tracking-wider hover:bg-zinc-100 dark:hover:bg-zinc-900">
+          Refresh
+        </button>
+        <button id="theme-toggle" type="button"
+                class="rounded-md border border-zinc-200 dark:border-zinc-800 px-3 py-1.5 text-xs uppercase tracking-wider hover:bg-zinc-100 dark:hover:bg-zinc-900">
+          Theme
+        </button>
+        <button id="logout-btn" type="button"
+                class="rounded-md border border-zinc-200 dark:border-zinc-800 px-3 py-1.5 text-xs uppercase tracking-wider hover:bg-zinc-100 dark:hover:bg-zinc-900">
+          Sign out
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main id="view" class="mx-auto w-full max-w-7xl flex-1 px-4 py-6"></main>
+
+  <div id="toast" class="hidden fixed top-4 right-4 z-50 max-w-sm rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-black px-4 py-3 text-sm shadow-lg"></div>
+
+  <div id="modal-root" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4">
+    <div id="modal-card" class="w-full max-w-lg rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-black p-6"></div>
+  </div>
+
+  <script src="assets/app.js"></script>
+  <script>dn42ctlAdmin.bootDashboard();</script>
+</body>
+</html>
