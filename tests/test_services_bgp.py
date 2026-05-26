@@ -12,7 +12,7 @@ from dn42ctl.services.core import Dn42CtlError
 
 @pytest.fixture
 def _mock_wg(mock_wg_keypair):
-    with patch("dn42ctl.services.bgp.generate_random_lla_cidr", return_value="fe80::abcd:1234/64"):
+    with patch("dn42ctl.services.bgp.generate_random_lla", return_value="fe80::abcd:1234"):
         yield
 
 

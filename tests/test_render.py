@@ -135,13 +135,13 @@ class TestRenderNetworkdNetwork:
     def test_basic(self) -> None:
         result = render_networkd_network(
             ifname="dn42_1234",
-            local_lla_cidr="fe80::abcd:1234/64",
+            local_lla="fe80::abcd:1234",
             peer_lla="fe80::1",
         )
         assert "[Match]" in result
         assert "Name=dn42_1234" in result
         assert "[Address]" in result
-        assert "Address=fe80::abcd:1234/64" in result
+        assert "Address=fe80::abcd:1234/128" in result
         assert "Peer=fe80::1" in result
 
 
@@ -156,7 +156,7 @@ class TestRenderNmconnection:
             peer_public_key="PUBKEY",
             endpoint="example.com:51820",
             allowed_ips=["fe80::/64", "fd00::/8"],
-            local_ipv6_cidr="fe80::abcd:1234/64",
+            local_lla="fe80::abcd:1234",
             peer_lla="fe80::1",
         )
         assert "[connection]" in result
@@ -171,6 +171,7 @@ class TestRenderNmconnection:
         assert "allowed-ips=fe80::/64;fd00::/8;" in result
         assert "[ipv6]" in result
         assert "method=manual" in result
+        assert "address1=fe80::abcd:1234/128" in result
         assert "route1=fe80::1/128" in result
 
     def test_zero_listen_port_omitted(self) -> None:
@@ -183,7 +184,7 @@ class TestRenderNmconnection:
             peer_public_key="PUBKEY",
             endpoint="",
             allowed_ips=["fe80::/64"],
-            local_ipv6_cidr="fe80::abcd:1234/64",
+            local_lla="fe80::abcd:1234",
             peer_lla="fe80::1",
         )
         assert "listen-port" not in result
@@ -198,7 +199,7 @@ class TestRenderNmconnection:
             peer_public_key="PUBKEY",
             endpoint="example.com:51820",
             allowed_ips=["fe80::/64"],
-            local_ipv6_cidr="fe80::abcd:1234/64",
+            local_lla="fe80::abcd:1234",
             peer_lla="fe80::1",
             persistent_keepalive=25,
         )
@@ -214,7 +215,7 @@ class TestRenderNmconnection:
             peer_public_key="PUBKEY",
             endpoint="",
             allowed_ips=["fe80::/64"],
-            local_ipv6_cidr="fe80::abcd:1234/64",
+            local_lla="fe80::abcd:1234",
             peer_lla="fe80::1",
         )
         assert "endpoint=" not in result

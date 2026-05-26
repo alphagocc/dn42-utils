@@ -224,7 +224,7 @@ def _parse_networkd_network(text: str) -> dict[str, object]:
         val = val.strip()
         if section == "Address":
             if key == "Address":
-                out["local_lla"] = val
+                out["local_lla"] = val.split("/", 1)[0]
             elif key == "Peer":
                 out["peer_lla"] = val
     return out
@@ -279,7 +279,7 @@ def _parse_nmconnection(text: str) -> dict[str, object]:
         if addr1:
             addr_part = addr1.split(",", 1)[0].strip()
             if addr_part:
-                out["local_lla"] = addr_part
+                out["local_lla"] = addr_part.split("/", 1)[0]
     return out
 
 

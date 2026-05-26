@@ -21,7 +21,7 @@ from dn42ctl.services.core import (
     write_net_backend_files,
 )
 from dn42ctl.validators import ValidationError, validate_listen_port
-from dn42ctl.wg import generate_random_lla_cidr
+from dn42ctl.wg import generate_random_lla
 
 
 def create_bgp_peer(
@@ -76,7 +76,7 @@ def create_bgp_peer(
 
     private_key, public_key = resolve_wg_keypair(wg_private_key, wg_public_key)
 
-    local_lla_cidr = local_lla or generate_random_lla_cidr()
+    local_lla_addr = local_lla or generate_random_lla()
     allowed_ips = DEFAULT_ALLOWED_IPS
 
     try:
@@ -89,7 +89,7 @@ def create_bgp_peer(
                 wg_public_key=public_key,
                 peer_public_key=peer_public_key,
                 endpoint=endpoint,
-                local_lla=local_lla_cidr,
+                local_lla=local_lla_addr,
                 peer_lla=peer_lla,
                 listen_port=listen_port,
                 allowed_ips=allowed_ips,
@@ -113,7 +113,7 @@ def create_bgp_peer(
             peer_public_key=peer_public_key,
             endpoint=endpoint,
             allowed_ips=allowed_ips,
-            local_lla=local_lla_cidr,
+            local_lla=local_lla_addr,
             peer_lla=peer_lla,
             generated=generated,
         )
@@ -122,7 +122,7 @@ def create_bgp_peer(
         ifname=ifname,
         listen_port=listen_port,
         wg_public_key=public_key,
-        local_lla=local_lla_cidr,
+        local_lla=local_lla_addr,
         generated_files=generated,
     )
 

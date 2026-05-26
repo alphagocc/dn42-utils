@@ -75,7 +75,7 @@ Address=fe80::abcd:1234/64
 Peer=fe80::1
 """
         result = _parse_networkd_network(text)
-        assert result["local_lla"] == "fe80::abcd:1234/64"
+        assert result["local_lla"] == "fe80::abcd:1234"
         assert result["peer_lla"] == "fe80::1"
 
 
@@ -97,7 +97,7 @@ allowed-ips=fe80::/64;fd00::/8;
 
 [ipv6]
 method=manual
-address1=fe80::abcd:1234/64
+address1=fe80::abcd:1234/128
 """
         result = _parse_nmconnection(text)
         assert result["private_key"] == "PRIVKEY"
@@ -105,7 +105,7 @@ address1=fe80::abcd:1234/64
         assert result["peer_public_key"] == "PUBKEY"
         assert result["endpoint"] == "example.com:51820"
         assert result["allowed_ips"] == ["fe80::/64", "fd00::/8"]
-        assert result["local_lla"] == "fe80::abcd:1234/64"
+        assert result["local_lla"] == "fe80::abcd:1234"
 
     def test_legacy_inline_peers_format(self) -> None:
         text = """\

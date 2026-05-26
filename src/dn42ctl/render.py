@@ -91,11 +91,11 @@ def render_networkd_netdev(
     )
 
 
-def render_networkd_network(*, ifname: str, local_lla_cidr: str, peer_lla: str) -> str:
+def render_networkd_network(*, ifname: str, local_lla: str, peer_lla: str) -> str:
     return _render_template(
         "networkd_network.j2",
         ifname=ifname,
-        local_lla_cidr=local_lla_cidr,
+        local_lla=local_lla,
         peer_lla=peer_lla,
     )
 
@@ -131,7 +131,7 @@ def render_nmconnection_wireguard(
     peer_public_key: str,
     endpoint: str,
     allowed_ips: list[str],
-    local_ipv6_cidr: str,
+    local_lla: str,
     peer_lla: str,
     persistent_keepalive: int | None = None,
 ) -> str:
@@ -145,7 +145,7 @@ def render_nmconnection_wireguard(
         peer_public_key=peer_public_key,
         endpoint=endpoint,
         allowed_ips=allowed_ips,
-        local_ipv6_cidr=local_ipv6_cidr,
+        local_lla=local_lla,
         peer_lla=peer_lla,
         persistent_keepalive=persistent_keepalive,
     )

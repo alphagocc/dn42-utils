@@ -47,7 +47,7 @@ def _seed_peer(db_path: Path, asn: int) -> None:
                 wg_public_key=FAKE_PUB,
                 peer_public_key=FAKE_PUB,
                 endpoint="ep:51820",
-                local_lla="fe80::1/64",
+                local_lla="fe80::1",
                 peer_lla="fe80::2",
                 listen_port=20000 + (asn % 10000),
                 allowed_ips=["fe80::/64", "fd00::/8"],

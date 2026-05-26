@@ -20,8 +20,8 @@ from dn42ctl.services.show import (
 @pytest.fixture
 def _mock_wg(mock_wg_keypair):
     with (
-        patch("dn42ctl.services.bgp.generate_random_lla_cidr", return_value="fe80::abcd:1234/64"),
-        patch("dn42ctl.services.ibgp.generate_random_lla_cidr", return_value="fe80::abcd:5678/64"),
+        patch("dn42ctl.services.bgp.generate_random_lla", return_value="fe80::abcd:1234"),
+        patch("dn42ctl.services.ibgp.generate_random_lla", return_value="fe80::abcd:5678"),
     ):
         yield
 

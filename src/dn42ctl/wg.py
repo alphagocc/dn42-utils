@@ -34,5 +34,5 @@ def generate_wg_keypair() -> tuple[str, str]:
     return privkey, pubkey
 
 
-def generate_random_lla_cidr() -> str:
-    return f"fe80::{random.randint(0, 0xFFFF):04x}:{random.randint(0, 0xFFFF):04x}/64"
+def generate_random_lla() -> str:
+    return f"fe80::{random.randint(0, 0xFFFF):04x}:{random.randint(0, 0xFFFF):04x}"

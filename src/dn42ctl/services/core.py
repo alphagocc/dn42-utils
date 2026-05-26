@@ -256,7 +256,7 @@ def write_net_backend_files(
             network_path,
             render_networkd_network(
                 ifname=ifname,
-                local_lla_cidr=local_lla,
+                local_lla=local_lla,
                 peer_lla=peer_lla,
             ),
         )
@@ -274,7 +274,7 @@ def write_net_backend_files(
                 peer_public_key=peer_public_key,
                 endpoint=endpoint,
                 allowed_ips=allowed_ips,
-                local_ipv6_cidr=local_lla,
+                local_lla=local_lla,
                 peer_lla=peer_lla,
             ),
             mode=FILE_MODE_PRIVATE,

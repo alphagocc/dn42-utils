@@ -147,4 +147,13 @@ MIGRATIONS: list[tuple[int, str]] = [
         );
         """.strip(),
     ),
+    (
+        7,
+        """
+        UPDATE bgp_peers SET local_lla = SUBSTR(local_lla, 1, INSTR(local_lla, '/') - 1)
+            WHERE local_lla LIKE '%/%';
+        UPDATE ibgp_peers SET local_lla = SUBSTR(local_lla, 1, INSTR(local_lla, '/') - 1)
+            WHERE local_lla LIKE '%/%';
+        """.strip(),
+    ),
 ]

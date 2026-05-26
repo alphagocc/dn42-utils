@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from dn42ctl.wg import WireGuardError, generate_random_lla_cidr, generate_wg_keypair, pubkey_from_private
+from dn42ctl.wg import WireGuardError, generate_random_lla, generate_wg_keypair, pubkey_from_private
 
 
 class TestPubkeyFromPrivate:
@@ -60,14 +60,14 @@ class TestGenerateWgKeypair:
             generate_wg_keypair()
 
 
-class TestGenerateRandomLlaCidr:
+class TestGenerateRandomLla:
     def test_format(self) -> None:
         for _ in range(20):
-            result = generate_random_lla_cidr()
+            result = generate_random_lla()
             assert result.startswith("fe80::")
-            assert result.endswith("/64")
-            assert re.match(r"fe80::[0-9a-f]{4}:[0-9a-f]{4}/64", result)
+            assert "/" not in result
+            assert re.match(r"fe80::[0-9a-f]{4}:[0-9a-f]{4}$", result)
 
     def test_varies(self) -> None:
-        results = {generate_random_lla_cidr() for _ in range(50)}
+        results = {generate_random_lla() for _ in range(50)}
         assert len(results) > 1

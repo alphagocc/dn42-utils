@@ -53,7 +53,7 @@ from dn42ctl.validators import (
     validate_router_id,
     validate_rxcost,
 )
-from dn42ctl.wg import WireGuardError, generate_random_lla_cidr, generate_wg_keypair
+from dn42ctl.wg import WireGuardError, generate_random_lla, generate_wg_keypair
 
 app = typer.Typer(add_completion=False)
 
@@ -131,7 +131,7 @@ def _prepare_peer_info(
     if peer_public_key is None or endpoint is None or peer_lla is None:
         try:
             prepared_private_key, prepared_public_key = generate_wg_keypair()
-            prepared_local_lla = generate_random_lla_cidr()
+            prepared_local_lla = generate_random_lla()
         except WireGuardError as exc:
             typer.echo(f"错误: {exc}")
             raise typer.Exit(1) from exc

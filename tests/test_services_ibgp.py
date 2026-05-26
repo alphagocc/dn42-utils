@@ -12,7 +12,7 @@ from dn42ctl.services.ibgp import create_ibgp_peer, delete_ibgp_peer, modify_ibg
 
 @pytest.fixture
 def _mock_wg(mock_wg_keypair):
-    with patch("dn42ctl.services.ibgp.generate_random_lla_cidr", return_value="fe80::abcd:5678/64"):
+    with patch("dn42ctl.services.ibgp.generate_random_lla", return_value="fe80::abcd:5678"):
         yield
 
 

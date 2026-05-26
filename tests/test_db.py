@@ -26,13 +26,13 @@ class TestMigrations:
     def test_all_versions_applied(self, mem_db: Database) -> None:
         rows = mem_db._conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
         versions = [row[0] for row in rows]
-        assert versions == [1, 2, 3, 4, 5, 6]
+        assert versions == [1, 2, 3, 4, 5, 6, 7]
 
     def test_migrate_idempotent(self, mem_db: Database) -> None:
         mem_db.migrate()
         mem_db.migrate()
         rows = mem_db._conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
-        assert len(rows) == 6
+        assert len(rows) == 7
 
 
 class TestEnsureNode:

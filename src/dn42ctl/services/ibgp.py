@@ -29,7 +29,7 @@ from dn42ctl.validators import (
     validate_listen_port,
     validate_rxcost,
 )
-from dn42ctl.wg import generate_random_lla_cidr
+from dn42ctl.wg import generate_random_lla
 
 
 def create_ibgp_peer(
@@ -99,14 +99,14 @@ def create_ibgp_peer(
             raise Dn42CtlError(str(exc)) from exc
 
         private_key, public_key = resolve_wg_keypair(wg_private_key, wg_public_key)
-        local_lla_cidr = local_lla or generate_random_lla_cidr()
+        local_lla_addr = local_lla or generate_random_lla()
         allowed_ips = IBGP_ALLOWED_IPS
     else:
         backend = "networkd"
         listen_port = 0
         private_key = ""
         public_key = ""
-        local_lla_cidr = ""
+        local_lla_addr = ""
         allowed_ips = IBGP_ALLOWED_IPS
 
     try:
@@ -119,7 +119,7 @@ def create_ibgp_peer(
                 wg_public_key=public_key,
                 peer_public_key=peer_public_key or "",
                 endpoint=endpoint or "",
-                local_lla=local_lla_cidr,
+                local_lla=local_lla_addr,
                 peer_lla=peer_lla or "",
                 listen_port=listen_port,
                 allowed_ips=allowed_ips,
@@ -155,7 +155,7 @@ def create_ibgp_peer(
                 peer_public_key=peer_public_key or "",
                 endpoint=endpoint or "",
                 allowed_ips=allowed_ips,
-                local_lla=local_lla_cidr,
+                local_lla=local_lla_addr,
                 peer_lla=peer_lla or "",
                 generated=generated,
             )
@@ -167,7 +167,7 @@ def create_ibgp_peer(
         ifname=ifname,
         listen_port=listen_port,
         wg_public_key=public_key,
-        local_lla=local_lla_cidr,
+        local_lla=local_lla_addr,
         generated_files=generated,
     )
 
