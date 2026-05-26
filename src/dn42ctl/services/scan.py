@@ -240,21 +240,39 @@ def _parse_nmconnection(text: str) -> dict[str, object]:
             out["listen_port"] = cfg.getint("wireguard", "listen-port", fallback=None)
         except ValueError:
             pass
-        peers = cfg.get("wireguard", "peers", fallback="")
-        peers = peers.strip()
-        if peers:
-            parts = peers.split()
-            if parts:
-                out["peer_public_key"] = parts[0]
-            for part in parts[1:]:
-                if "=" not in part:
-                    continue
-                k, v = part.split("=", 1)
-                if k == "endpoint":
-                    out["endpoint"] = v
-                elif k == "allowed-ips":
-                    ips = [x.strip() for x in v.split(";") if x.strip()]
+
+        # Canonical format: [wireguard-peer.<PUBLIC_KEY>] section
+        peer_section = None
+        for section in cfg.sections():
+            if section.startswith("wireguard-peer."):
+                peer_section = section
+                break
+        if peer_section is not None:
+            out["peer_public_key"] = peer_section.split(".", 1)[1]
+            ep = cfg.get(peer_section, "endpoint", fallback=None)
+            if ep:
+                out["endpoint"] = ep
+            raw_ips = cfg.get(peer_section, "allowed-ips", fallback=None)
+            if raw_ips:
+                ips = [x.strip() for x in raw_ips.split(";") if x.strip()]
+                if ips:
                     out["allowed_ips"] = ips
+        else:
+            # Backward compat: legacy inline peers= format
+            peers = cfg.get("wireguard", "peers", fallback="").strip()
+            if peers:
+                parts = peers.split()
+                if parts:
+                    out["peer_public_key"] = parts[0]
+                for part in parts[1:]:
+                    if "=" not in part:
+                        continue
+                    k, v = part.split("=", 1)
+                    if k == "endpoint":
+                        out["endpoint"] = v
+                    elif k == "allowed-ips":
+                        ips = [x.strip() for x in v.split(";") if x.strip()]
+                        out["allowed_ips"] = ips
 
     if cfg.has_section("ipv6"):
         addr1 = cfg.get("ipv6", "address1", fallback=None)

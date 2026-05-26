@@ -32,7 +32,24 @@
 - 文件格式：keyfile（`.nmconnection`），`type=wireguard`。
 - 必须设置：
   - `[wireguard] peer-routes=false`
-- `allowed-ips`：多 CIDR 使用 `;` 分隔（NetworkManager wireguard peers 语法）。
+- peer 配置使用独立的 `[wireguard-peer.<PUBLIC_KEY>]` section。
+- `allowed-ips`：多 CIDR 使用 `;` 分隔，末尾带 `;`。
+- `persistent-keepalive`：可选，写入 peer section。
+- `endpoint`：可选，写入 peer section。
+
+示例结构：
+
+```ini
+[wireguard]
+private-key=...
+listen-port=51820
+peer-routes=false
+
+[wireguard-peer.<PUBLIC_KEY>]
+endpoint=<host>:<port>
+allowed-ips=fe80::/64;fd00::/8;
+persistent-keepalive=25
+```
 
 ### 稳定 UUID
 

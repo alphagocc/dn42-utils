@@ -132,6 +132,7 @@ def render_nmconnection_wireguard(
     endpoint: str,
     allowed_ips: list[str],
     local_ipv6_cidr: str,
+    peer_lla: str,
     persistent_keepalive: int | None = None,
 ) -> str:
     return _render_template(
@@ -145,5 +146,6 @@ def render_nmconnection_wireguard(
         endpoint=endpoint,
         allowed_ips=allowed_ips,
         local_ipv6_cidr=local_ipv6_cidr,
+        peer_lla=peer_lla,
         persistent_keepalive=persistent_keepalive,
     )

@@ -157,6 +157,7 @@ class TestRenderNmconnection:
             endpoint="example.com:51820",
             allowed_ips=["fe80::/64", "fd00::/8"],
             local_ipv6_cidr="fe80::abcd:1234/64",
+            peer_lla="fe80::1",
         )
         assert "[connection]" in result
         assert "id=dn42_1234" in result
@@ -165,8 +166,12 @@ class TestRenderNmconnection:
         assert "private-key=PRIVKEY" in result
         assert "listen-port=51820" in result
         assert "peer-routes=false" in result
+        assert "[wireguard-peer.PUBKEY]" in result
+        assert "endpoint=example.com:51820" in result
+        assert "allowed-ips=fe80::/64;fd00::/8;" in result
         assert "[ipv6]" in result
         assert "method=manual" in result
+        assert "route1=fe80::1/128" in result
 
     def test_zero_listen_port_omitted(self) -> None:
         result = render_nmconnection_wireguard(
@@ -179,8 +184,40 @@ class TestRenderNmconnection:
             endpoint="",
             allowed_ips=["fe80::/64"],
             local_ipv6_cidr="fe80::abcd:1234/64",
+            peer_lla="fe80::1",
         )
         assert "listen-port" not in result
+
+    def test_persistent_keepalive(self) -> None:
+        result = render_nmconnection_wireguard(
+            conn_id="dn42_1234",
+            ifname="dn42_1234",
+            conn_uuid="test-uuid",
+            private_key="PRIVKEY",
+            listen_port=51820,
+            peer_public_key="PUBKEY",
+            endpoint="example.com:51820",
+            allowed_ips=["fe80::/64"],
+            local_ipv6_cidr="fe80::abcd:1234/64",
+            peer_lla="fe80::1",
+            persistent_keepalive=25,
+        )
+        assert "persistent-keepalive=25" in result
+
+    def test_no_endpoint_omitted(self) -> None:
+        result = render_nmconnection_wireguard(
+            conn_id="dn42_1234",
+            ifname="dn42_1234",
+            conn_uuid="test-uuid",
+            private_key="PRIVKEY",
+            listen_port=51820,
+            peer_public_key="PUBKEY",
+            endpoint="",
+            allowed_ips=["fe80::/64"],
+            local_ipv6_cidr="fe80::abcd:1234/64",
+            peer_lla="fe80::1",
+        )
+        assert "endpoint=" not in result
 
 
 class TestNmUuidFor:

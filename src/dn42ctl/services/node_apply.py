@@ -168,6 +168,7 @@ def _render_bgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths, node_id: 
                     endpoint=peer.get("endpoint") or "",
                     allowed_ips=peer["allowed_ips"],
                     local_ipv6_cidr=peer["local_lla"],
+                    peer_lla=peer["peer_lla"],
                 ),
                 FILE_MODE_PRIVATE,
             )
@@ -229,6 +230,7 @@ def _render_ibgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths, node_id:
                     endpoint=peer.get("endpoint") or "",
                     allowed_ips=peer["allowed_ips"],
                     local_ipv6_cidr=peer["local_lla"],
+                    peer_lla=peer.get("peer_lla") or "",
                 ),
                 FILE_MODE_PRIVATE,
             )

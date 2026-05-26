@@ -9,7 +9,12 @@ autoconnect=true
 private-key={{ private_key }}
 {% if listen_port > 0 %}listen-port={{ listen_port }}
 {% endif %}peer-routes=false
-peers={{ peer_public_key }}{% if endpoint %} endpoint={{ endpoint }}{% endif %} allowed-ips={{ allowed_ips | join(';') }};{% if persistent_keepalive is not none %} persistent-keepalive={{ persistent_keepalive }}{% endif %}
+
+[wireguard-peer.{{ peer_public_key }}]
+{% if endpoint %}endpoint={{ endpoint }}
+{% endif %}allowed-ips={{ allowed_ips | join(';') }};
+{% if persistent_keepalive is not none %}persistent-keepalive={{ persistent_keepalive }}
+{% endif %}
 
 [ipv4]
 method=disabled
@@ -17,3 +22,4 @@ method=disabled
 [ipv6]
 method=manual
 address1={{ local_ipv6_cidr }}
+route1={{ peer_lla }}/128

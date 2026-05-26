@@ -275,6 +275,7 @@ def write_net_backend_files(
                 endpoint=endpoint,
                 allowed_ips=allowed_ips,
                 local_ipv6_cidr=local_lla,
+                peer_lla=peer_lla,
             ),
             mode=FILE_MODE_PRIVATE,
         )
