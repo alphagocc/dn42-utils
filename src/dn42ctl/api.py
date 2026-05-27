@@ -603,7 +603,6 @@ def api_genconf(body: GenconfRequest) -> dict:
         "bird_conf_path": str(res.bird_conf_path),
         "bird_babel_conf_path": str(res.bird_babel_conf_path),
         "bird_roa_v6_conf_path": str(res.bird_roa_v6_conf_path),
-        "systemd_roa_timer_enabled": res.systemd_roa_timer_enabled,
         "dummy": asdict(res.dummy) if res.dummy else None,
         "warnings": res.warnings,
     }

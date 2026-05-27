@@ -25,6 +25,15 @@ from .reports import get_report, list_reports, submit_report
 from .revisions import clear_rollback, get_pinned, list_revisions, rollback_to
 from .scan import discover_bird_paths, scan_local_configs
 from .show import show_bgp_peers, show_ibgp_peers, show_wg_tunnels
+from .system import (
+    SystemInstallResult,
+    install_firewalld_conf,
+    install_nftables_conf,
+    install_roa_service,
+    uninstall_firewalld_conf,
+    uninstall_nftables_conf,
+    uninstall_roa_service,
+)
 
 __all__ = [
     "DesiredState",
@@ -32,6 +41,7 @@ __all__ = [
     "DummyResult",
     "NodeStatus",
     "RotatedToken",
+    "SystemInstallResult",
     "accept_proposal",
     "add_node",
     "build_desired_state",
@@ -51,6 +61,9 @@ __all__ = [
     "get_report",
     "import_report",
     "init_node",
+    "install_firewalld_conf",
+    "install_nftables_conf",
+    "install_roa_service",
     "list_nodes",
     "list_proposals",
     "list_reports",
@@ -71,4 +84,7 @@ __all__ = [
     "show_wg_tunnels",
     "submit_proposal",
     "submit_report",
+    "uninstall_firewalld_conf",
+    "uninstall_nftables_conf",
+    "uninstall_roa_service",
 ]

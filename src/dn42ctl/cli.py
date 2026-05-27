@@ -382,7 +382,6 @@ def cmd_init(
         typer.echo(f"Bird: {gen_res.bird_conf_path}")
         typer.echo(f"Babel: {gen_res.bird_babel_conf_path}")
         typer.echo(f"ROA v6: {gen_res.bird_roa_v6_conf_path}")
-        typer.echo("ROA systemd timer: " + ("enabled" if gen_res.systemd_roa_timer_enabled else "skipped"))
 
         if gen_res.warnings:
             typer.echo("\n警告:")
@@ -416,7 +415,6 @@ def cmd_genconf(ctx: typer.Context) -> None:
     typer.echo(f"Bird: {res.bird_conf_path}")
     typer.echo(f"Babel: {res.bird_babel_conf_path}")
     typer.echo(f"ROA v6: {res.bird_roa_v6_conf_path}")
-    typer.echo("ROA systemd timer: " + ("enabled" if res.systemd_roa_timer_enabled else "skipped"))
     _print_dummy_result(res.dummy)
 
     if res.warnings:
@@ -1832,3 +1830,91 @@ def cmd_node_rollback_clear(
         typer.echo(f"错误: {exc}", err=True)
         raise typer.Exit(1) from exc
     typer.echo(f"已清除 pin: node={node_id} (恢复到最新)")
+
+
+# --- system install / uninstall ---
+
+system_app = typer.Typer(help="系统组件安装/卸载 (firewalld, nftables, ROA timer)")
+
+_SYSTEM_COMPONENTS = ["firewalld-conf", "nftables-conf", "roa-service"]
+
+
+def _print_system_result(result: object) -> None:
+    from dn42ctl.services.system import SystemInstallResult
+
+    if not isinstance(result, SystemInstallResult):
+        return
+    for f in result.changed_files:
+        typer.echo(f"  变更: {f}")
+    for w in result.warnings:
+        typer.echo(f"  警告: {w}")
+
+
+@system_app.command("install")
+def cmd_system_install(
+    ctx: typer.Context,
+    component: str = typer.Argument(..., help=f"组件名: {' | '.join(_SYSTEM_COMPONENTS)}"),
+) -> None:
+    from dn42ctl.services import (
+        install_firewalld_conf,
+        install_nftables_conf,
+        install_roa_service,
+    )
+
+    appctx: AppContext = ctx.obj
+
+    if component not in _SYSTEM_COMPONENTS:
+        typer.echo(f"错误: 未知组件 '{component}'，可选: {', '.join(_SYSTEM_COMPONENTS)}")
+        raise typer.Exit(2)
+
+    try:
+        if component == "firewalld-conf":
+            result = install_firewalld_conf()
+        elif component == "nftables-conf":
+            result = install_nftables_conf()
+        elif component == "roa-service":
+            config = _require_config_or_exit(appctx)
+            result = install_roa_service(config=config)
+        else:
+            raise typer.Exit(2)
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}")
+        raise typer.Exit(1) from exc
+
+    typer.echo(f"{component} 安装完成")
+    _print_system_result(result)
+
+
+@system_app.command("uninstall")
+def cmd_system_uninstall(
+    ctx: typer.Context,
+    component: str = typer.Argument(..., help=f"组件名: {' | '.join(_SYSTEM_COMPONENTS)}"),
+) -> None:
+    from dn42ctl.services import (
+        uninstall_firewalld_conf,
+        uninstall_nftables_conf,
+        uninstall_roa_service,
+    )
+
+    if component not in _SYSTEM_COMPONENTS:
+        typer.echo(f"错误: 未知组件 '{component}'，可选: {', '.join(_SYSTEM_COMPONENTS)}")
+        raise typer.Exit(2)
+
+    try:
+        if component == "firewalld-conf":
+            result = uninstall_firewalld_conf()
+        elif component == "nftables-conf":
+            result = uninstall_nftables_conf()
+        elif component == "roa-service":
+            result = uninstall_roa_service()
+        else:
+            raise typer.Exit(2)
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}")
+        raise typer.Exit(1) from exc
+
+    typer.echo(f"{component} 卸载完成")
+    _print_system_result(result)
+
+
+app.add_typer(system_app, name="system")

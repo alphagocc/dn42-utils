@@ -152,7 +152,6 @@ class GenConfResult:
     bird_conf_path: Path
     bird_babel_conf_path: Path
     bird_roa_v6_conf_path: Path
-    systemd_roa_timer_enabled: bool
     dummy: DummyResult | None
     warnings: list[str]
 

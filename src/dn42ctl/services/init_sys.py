@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import shutil
-import subprocess
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 from dn42ctl.config import AppConfig, save_config
-from dn42ctl.render import render_bird_main_conf, render_systemd_roa_service, render_systemd_roa_timer
+from dn42ctl.render import render_bird_main_conf
 from dn42ctl.services.core import (
     Dn42CtlError,
     GenConfResult,
@@ -134,50 +132,12 @@ def genconf(
             placeholder = f"# dn42ctl: ROA v6 placeholder\n# 下载失败，请稍后手动获取: {DN42_ROA_V6_URL}\n"
             write_text(bird_roa_v6_conf_path, placeholder)
 
-    systemd_enabled = False
-    if sys.platform.startswith("linux") and shutil.which("systemctl"):
-        unit_dir = Path("/etc/systemd/system")
-        service_path = unit_dir / "dn42-roa-v6.service"
-        timer_path = unit_dir / "dn42-roa-v6.timer"
-        roa_target = bird_roa_v6_conf_path
-        roa_parent = roa_target.parent
-
-        if shutil.which("curl") is None:
-            warnings.append("未找到 curl：systemd ROA 定时更新可能失败")
-
-        service_text = render_systemd_roa_service(
-            roa_parent=roa_parent,
-            roa_target=roa_target,
-            roa_url=DN42_ROA_V6_URL,
-        )
-        timer_text = render_systemd_roa_timer()
-
-        try:
-            write_text(service_path, service_text)
-            write_text(timer_path, timer_text)
-            subprocess.check_output(["systemctl", "daemon-reload"], text=True)
-            subprocess.check_output(["systemctl", "enable", "--now", "dn42-roa-v6.timer"], text=True)
-            # Trigger once so the ROA file is available immediately.
-            subprocess.check_output(["systemctl", "start", "dn42-roa-v6.service"], text=True)
-            systemd_enabled = True
-        except PermissionError as exc:
-            raise Dn42CtlError("权限不足: 无法安装/启用 systemd 定时器。") from exc
-        except FileNotFoundError as exc:
-            # systemctl disappeared between which() and now; just warn.
-            warnings.append(f"systemctl 不可用，跳过 ROA 定时器: {exc}")
-        except subprocess.CalledProcessError as exc:
-            out = exc.output.strip() if isinstance(exc.output, str) else ""
-            warnings.append(f"systemd ROA 定时器启用失败: exit={exc.returncode} {out}")
-    else:
-        warnings.append("当前系统不支持 systemd：已跳过 ROA 定时器配置")
-
     return GenConfResult(
         config=config,
         db_path=db_path,
         bird_conf_path=bird_conf_path,
         bird_babel_conf_path=bird_babel_conf_path,
         bird_roa_v6_conf_path=bird_roa_v6_conf_path,
-        systemd_roa_timer_enabled=systemd_enabled,
         dummy=dummy,
         warnings=warnings,
     )
