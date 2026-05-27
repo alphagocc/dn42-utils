@@ -116,5 +116,18 @@ def validate_ownnetset_v6(value: str) -> str:
     return value
 
 
+def validate_allowed_ips(value: str) -> list[str]:
+    items = [s.strip() for s in value.split(",")]
+    items = [s for s in items if s]
+    result: list[str] = []
+    for item in items:
+        try:
+            net = ipaddress.IPv6Network(item, strict=False)
+        except ValueError as exc:
+            raise ValidationError(f"不是合法的 IPv6 CIDR: {item!r}") from exc
+        result.append(str(net))
+    return result
+
+
 def validate_router_id(value: str) -> str:
     return validate_ipv4_address(value, field_name="Router ID")

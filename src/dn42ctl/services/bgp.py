@@ -39,6 +39,7 @@ def create_bgp_peer(
     local_lla: str | None = None,
     node_id: str | None = None,
     render_files: bool = True,
+    allowed_ips: list[str] | None = None,
 ) -> PeerResult:
     """Create a BGP peer.
 
@@ -77,7 +78,7 @@ def create_bgp_peer(
     private_key, public_key = resolve_wg_keypair(wg_private_key, wg_public_key)
 
     local_lla_addr = local_lla or generate_random_lla()
-    allowed_ips = DEFAULT_ALLOWED_IPS
+    effective_allowed_ips = allowed_ips if allowed_ips is not None else DEFAULT_ALLOWED_IPS
 
     try:
         db.insert_bgp_peer(
@@ -92,7 +93,7 @@ def create_bgp_peer(
                 local_lla=local_lla_addr,
                 peer_lla=peer_lla,
                 listen_port=listen_port,
-                allowed_ips=allowed_ips,
+                allowed_ips=effective_allowed_ips,
                 net_backend=backend,
             )
         )
@@ -112,7 +113,7 @@ def create_bgp_peer(
             listen_port=listen_port,
             peer_public_key=peer_public_key,
             endpoint=endpoint,
-            allowed_ips=allowed_ips,
+            allowed_ips=effective_allowed_ips,
             local_lla=local_lla_addr,
             peer_lla=peer_lla,
             generated=generated,
@@ -139,6 +140,7 @@ def modify_bgp_peer(
     listen_port: int | None = None,
     node_id: str | None = None,
     render_files: bool = True,
+    allowed_ips: list[str] | None = None,
 ) -> PeerResult:
     backend = normalize_net_backend(net_backend)
 
@@ -171,7 +173,7 @@ def modify_bgp_peer(
         if new_listen_port in used_ports:
             raise Dn42CtlError(f"ListenPort 已被占用: {new_listen_port}")
     local_lla = str(row["local_lla"])
-    allowed_ips = parse_allowed_ips_json(row["allowed_ips_json"])
+    effective_allowed_ips = allowed_ips if allowed_ips is not None else parse_allowed_ips_json(row["allowed_ips_json"])
 
     try:
         db.update_bgp_peer(
@@ -181,7 +183,7 @@ def modify_bgp_peer(
             endpoint=endpoint,
             peer_lla=peer_lla,
             listen_port=new_listen_port,
-            allowed_ips=allowed_ips,
+            allowed_ips=effective_allowed_ips,
             net_backend=backend,
         )
     except DatabaseError as exc:
@@ -199,7 +201,7 @@ def modify_bgp_peer(
             listen_port=new_listen_port,
             peer_public_key=peer_public_key,
             endpoint=endpoint,
-            allowed_ips=allowed_ips,
+            allowed_ips=effective_allowed_ips,
             local_lla=local_lla,
             peer_lla=peer_lla,
             generated=generated,

@@ -55,6 +55,7 @@ from dn42ctl.services.auto_peer import (
     verify_challenge,
 )
 from dn42ctl.validators import (
+    validate_allowed_ips,
     validate_asn,
     validate_babel_type,
     validate_endpoint,
@@ -178,6 +179,7 @@ class BgpPeerCreateRequest(BaseModel):
     peer_lla: str
     net_backend: str = "networkd"
     listen_port: int | None = None
+    allowed_ips: list[str] | None = None
 
     @field_validator("peer_asn")
     @classmethod
@@ -211,6 +213,13 @@ class BgpPeerCreateRequest(BaseModel):
             return validate_listen_port(v, allow_zero=True)
         return v
 
+    @field_validator("allowed_ips")
+    @classmethod
+    def _check_allowed_ips(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            validate_allowed_ips(",".join(v))
+        return v
+
 
 class BgpPeerModifyRequest(BaseModel):
     peer_public_key: str
@@ -218,6 +227,7 @@ class BgpPeerModifyRequest(BaseModel):
     peer_lla: str
     net_backend: str = "networkd"
     listen_port: int | None = None
+    allowed_ips: list[str] | None = None
 
     @field_validator("peer_public_key")
     @classmethod
@@ -246,6 +256,13 @@ class BgpPeerModifyRequest(BaseModel):
             return validate_listen_port(v, allow_zero=True)
         return v
 
+    @field_validator("allowed_ips")
+    @classmethod
+    def _check_allowed_ips(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            validate_allowed_ips(",".join(v))
+        return v
+
 
 class IbgpPeerCreateRequest(BaseModel):
     name: str
@@ -258,6 +275,7 @@ class IbgpPeerCreateRequest(BaseModel):
     babel_rxcost: int = 0
     babel_type: str = "tunnel"
     listen_port: int | None = None
+    allowed_ips: list[str] | None = None
 
     @field_validator("peer_ip")
     @classmethod
@@ -309,6 +327,13 @@ class IbgpPeerCreateRequest(BaseModel):
             return validate_listen_port(v, allow_zero=True)
         return v
 
+    @field_validator("allowed_ips")
+    @classmethod
+    def _check_allowed_ips(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            validate_allowed_ips(",".join(v))
+        return v
+
 
 class IbgpPeerModifyRequest(BaseModel):
     peer_public_key: str
@@ -319,6 +344,7 @@ class IbgpPeerModifyRequest(BaseModel):
     babel_rxcost: int = 120
     babel_type: str = "tunnel"
     listen_port: int | None = None
+    allowed_ips: list[str] | None = None
 
     @field_validator("peer_public_key")
     @classmethod
@@ -364,6 +390,13 @@ class IbgpPeerModifyRequest(BaseModel):
             return validate_listen_port(v, allow_zero=True)
         return v
 
+    @field_validator("allowed_ips")
+    @classmethod
+    def _check_allowed_ips(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            validate_allowed_ips(",".join(v))
+        return v
+
 
 class GenconfRequest(BaseModel):
     overwrite_bird_conf: bool = True
@@ -394,6 +427,7 @@ def api_create_bgp(body: BgpPeerCreateRequest) -> dict:
             peer_lla=body.peer_lla,
             net_backend=body.net_backend,
             listen_port=body.listen_port,
+            allowed_ips=body.allowed_ips,
         )
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -418,6 +452,7 @@ def api_modify_bgp(asn: int, body: BgpPeerModifyRequest) -> dict:
             peer_lla=body.peer_lla,
             net_backend=body.net_backend,
             listen_port=body.listen_port,
+            allowed_ips=body.allowed_ips,
         )
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -467,6 +502,7 @@ def api_create_ibgp(body: IbgpPeerCreateRequest) -> dict:
             babel_rxcost=body.babel_rxcost,
             babel_type=body.babel_type,
             listen_port=body.listen_port,
+            allowed_ips=body.allowed_ips,
         )
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -494,6 +530,7 @@ def api_modify_ibgp(name: str, body: IbgpPeerModifyRequest) -> dict:
             babel_rxcost=body.babel_rxcost,
             babel_type=body.babel_type,
             listen_port=body.listen_port,
+            allowed_ips=body.allowed_ips,
         )
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -38,11 +38,12 @@ from dn42ctl.services import (
     show_ibgp_peers,
     show_wg_tunnels,
 )
-from dn42ctl.services.core import BgpPeerView, IbgpPeerView, WgTunnelView, sanitize_name
+from dn42ctl.services.core import BgpPeerView, IbgpPeerView, WgTunnelView, parse_allowed_ips_json, sanitize_name
 from dn42ctl.validators import (
     ValidationError as _ValidationError,
 )
 from dn42ctl.validators import (
+    validate_allowed_ips,
     validate_asn,
     validate_babel_type,
     validate_endpoint,
@@ -508,6 +509,11 @@ def cmd_bgp_peer(
         "--listen-port",
         help="本端 ListenPort (0 表示不设置；留空则按 ASN 规则推导)",
     ),
+    allowed_ips_str: str | None = typer.Option(
+        None,
+        "--allowed-ips",
+        help="WireGuard AllowedIPs (逗号分隔的 IPv6 CIDR，如 fd00::/8,fe80::/64；留空则使用默认值)",
+    ),
 ) -> None:
     if ctx.invoked_subcommand is not None:
         return
@@ -519,6 +525,26 @@ def cmd_bgp_peer(
         peer_asn = typer.prompt("Peer ASN", type=int)
     if net_backend is None:
         net_backend = typer.prompt("网络后端", default="networkd")
+
+    (
+        prepared_private_key,
+        prepared_public_key,
+        prepared_local_lla,
+        peer_public_key,
+        endpoint,
+        peer_lla,
+    ) = _prepare_peer_info(peer_public_key, endpoint, peer_lla, allow_empty_endpoint=True)
+
+    assert peer_asn is not None
+    assert net_backend is not None
+
+    parsed_allowed_ips: list[str] | None = None
+    if allowed_ips_str is not None:
+        try:
+            parsed_allowed_ips = _cli_validate(validate_allowed_ips, allowed_ips_str)
+        except typer.BadParameter as exc:
+            typer.echo(f"输入错误: {exc}")
+            raise typer.Exit(2) from exc
 
     (
         prepared_private_key,
@@ -557,6 +583,7 @@ def cmd_bgp_peer(
             wg_private_key=prepared_private_key,
             wg_public_key=prepared_public_key,
             local_lla=prepared_local_lla,
+            allowed_ips=parsed_allowed_ips,
         )
     except Dn42CtlError as exc:
         typer.echo(f"错误: {exc}")
@@ -584,6 +611,11 @@ def cmd_bgp_peer_modify(
         "--listen-port",
         help="本端 ListenPort (0 表示不设置；留空则保持不变)",
     ),
+    allowed_ips_str: str | None = typer.Option(
+        None,
+        "--allowed-ips",
+        help="WireGuard AllowedIPs (逗号分隔的 IPv6 CIDR；留空则保持不变)",
+    ),
 ) -> None:
     appctx: AppContext = ctx.obj
     config = _require_config_or_exit(appctx)
@@ -603,16 +635,22 @@ def cmd_bgp_peer_modify(
     if net_backend is None:
         net_backend = typer.prompt("网络后端", default=str(row["net_backend"] or "networkd"))
 
+    current_allowed_ips = parse_allowed_ips_json(row["allowed_ips_json"])
+    if allowed_ips_str is None:
+        allowed_ips_str = typer.prompt("AllowedIPs (逗号分隔)", default=",".join(current_allowed_ips))
+
     assert peer_public_key is not None
     assert endpoint is not None
     assert peer_lla is not None
     assert net_backend is not None
 
+    parsed_allowed_ips: list[str] | None = None
     try:
         peer_public_key = _cli_validate(validate_pubkey, peer_public_key)
         endpoint = _cli_validate(validate_endpoint, endpoint, allow_empty=True)
         if peer_lla:
             peer_lla = _cli_validate(validate_ipv6_address, peer_lla, field_name="Peer LLA")
+        parsed_allowed_ips = _cli_validate(validate_allowed_ips, allowed_ips_str)
     except typer.BadParameter as exc:
         typer.echo(f"\u8f93\u5165\u9519\u8bef: {exc}")
         raise typer.Exit(2) from exc
@@ -631,6 +669,7 @@ def cmd_bgp_peer_modify(
             peer_lla=peer_lla,
             net_backend=net_backend,
             listen_port=listen_port,
+            allowed_ips=parsed_allowed_ips,
         )
     except Dn42CtlError as exc:
         typer.echo(f"错误: {exc}")
@@ -693,6 +732,11 @@ def cmd_ibgp_peer(
         "--listen-port",
         help="本端 ListenPort (0 表示不设置；留空则自动选择未占用端口)",
     ),
+    allowed_ips_str: str | None = typer.Option(
+        None,
+        "--allowed-ips",
+        help="WireGuard AllowedIPs (逗号分隔的 IPv6 CIDR；留空则使用默认值)",
+    ),
 ) -> None:
     if ctx.invoked_subcommand is not None:
         return
@@ -714,6 +758,14 @@ def cmd_ibgp_peer(
         typer.echo(f"输入错误: {exc}")
         raise typer.Exit(2) from exc
 
+    parsed_allowed_ips: list[str] | None = None
+    if allowed_ips_str is not None:
+        try:
+            parsed_allowed_ips = _cli_validate(validate_allowed_ips, allowed_ips_str)
+        except typer.BadParameter as exc:
+            typer.echo(f"输入错误: {exc}")
+            raise typer.Exit(2) from exc
+
     if no_wg:
         assert peer_ip is not None
         try:
@@ -723,6 +775,7 @@ def cmd_ibgp_peer(
                 name=name,
                 peer_ip=peer_ip,
                 has_wg=False,
+                allowed_ips=parsed_allowed_ips,
             )
         except Dn42CtlError as exc:
             typer.echo(f"错误: {exc}")
@@ -787,6 +840,7 @@ def cmd_ibgp_peer(
             wg_private_key=prepared_private_key,
             wg_public_key=prepared_public_key,
             local_lla=prepared_local_lla,
+            allowed_ips=parsed_allowed_ips,
         )
     except Dn42CtlError as exc:
         typer.echo(f"错误: {exc}")
@@ -816,6 +870,11 @@ def cmd_ibgp_peer_modify(
         None,
         "--listen-port",
         help="本端 ListenPort (0 表示不设置；留空则保持不变)",
+    ),
+    allowed_ips_str: str | None = typer.Option(
+        None,
+        "--allowed-ips",
+        help="WireGuard AllowedIPs (逗号分隔的 IPv6 CIDR；留空则保持不变)",
     ),
 ) -> None:
     appctx: AppContext = ctx.obj
@@ -852,6 +911,10 @@ def cmd_ibgp_peer_modify(
     if babel_type is None:
         babel_type = typer.prompt("Babel type (wired/wireless/tunnel)", default=str(row["babel_type"] or "tunnel"))
 
+    current_allowed_ips = parse_allowed_ips_json(row["allowed_ips_json"])
+    if allowed_ips_str is None:
+        allowed_ips_str = typer.prompt("AllowedIPs (逗号分隔)", default=",".join(current_allowed_ips))
+
     assert peer_public_key is not None
     assert endpoint is not None
     assert peer_lla is not None
@@ -860,6 +923,7 @@ def cmd_ibgp_peer_modify(
     assert babel_rxcost is not None
     assert babel_type is not None
 
+    parsed_allowed_ips: list[str] | None = None
     try:
         peer_public_key = _cli_validate(validate_pubkey, peer_public_key)
         endpoint = _cli_validate(validate_endpoint, endpoint, allow_empty=True)
@@ -869,6 +933,7 @@ def cmd_ibgp_peer_modify(
             peer_ip = _cli_validate(validate_ipv6_address, peer_ip, field_name="对端网内 IPv6")
         babel_rxcost = _cli_validate(validate_rxcost, babel_rxcost)
         babel_type = _cli_validate(validate_babel_type, babel_type)
+        parsed_allowed_ips = _cli_validate(validate_allowed_ips, allowed_ips_str)
     except typer.BadParameter as exc:
         typer.echo(f"输入错误: {exc}")
         raise typer.Exit(2) from exc
@@ -893,6 +958,7 @@ def cmd_ibgp_peer_modify(
             babel_rxcost=babel_rxcost,
             babel_type=babel_type,
             listen_port=listen_port,
+            allowed_ips=parsed_allowed_ips,
         )
     except Dn42CtlError as exc:
         typer.echo(f"错误: {exc}")

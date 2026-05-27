@@ -4,6 +4,7 @@ import pytest
 
 from dn42ctl.validators import (
     ValidationError,
+    validate_allowed_ips,
     validate_asn,
     validate_babel_type,
     validate_endpoint,
@@ -215,3 +216,38 @@ class TestValidateRouterId:
     def test_invalid(self) -> None:
         with pytest.raises(ValidationError):
             validate_router_id("not-an-ip")
+
+
+class TestValidateAllowedIps:
+    def test_single_cidr(self) -> None:
+        assert validate_allowed_ips("fd00::/8") == ["fd00::/8"]
+
+    def test_multiple_cidrs(self) -> None:
+        result = validate_allowed_ips("fd00::/8,fe80::/64,ff02::/16")
+        assert result == ["fd00::/8", "fe80::/64", "ff02::/16"]
+
+    def test_whitespace_handling(self) -> None:
+        result = validate_allowed_ips("  fd00::/8 , fe80::/64  ")
+        assert result == ["fd00::/8", "fe80::/64"]
+
+    def test_empty_string_returns_empty_list(self) -> None:
+        assert validate_allowed_ips("") == []
+
+    def test_normalizes_to_network_address(self) -> None:
+        result = validate_allowed_ips("fe80::1/64")
+        assert result == ["fe80::/64"]
+
+    def test_all_traffic(self) -> None:
+        assert validate_allowed_ips("::/0") == ["::/0"]
+
+    def test_invalid_cidr_raises(self) -> None:
+        with pytest.raises(ValidationError, match="不是合法的 IPv6 CIDR"):
+            validate_allowed_ips("not-a-cidr")
+
+    def test_invalid_mixed_raises(self) -> None:
+        with pytest.raises(ValidationError, match="不是合法的 IPv6 CIDR"):
+            validate_allowed_ips("fd00::/8,invalid")
+
+    def test_ipv4_cidr_raises(self) -> None:
+        with pytest.raises(ValidationError, match="不是合法的 IPv6 CIDR"):
+            validate_allowed_ips("10.0.0.0/8")

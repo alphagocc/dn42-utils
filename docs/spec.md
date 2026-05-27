@@ -64,7 +64,7 @@
 - iBGP peer 使用**网内 IP**（`peer_ip`）作为 Bird neighbor 地址，而非 link-local 地址（LLA）。这是因为 iBGP 内网有 babel 路由协议，无需依赖 LLA 互联。
 - iBGP peer 支持**无 WireGuard 模式**（`--no-wg`）：仅生成 Bird peer conf，不创建 WG 隧道、不修改 babel.conf。适用于对端已通过其他方式（如物理网络、已有隧道）可达的场景。
 - iBGP peer 的 `endpoint` 为可选：对端可能在防火墙后，无需填写。
-- iBGP WireGuard 隧道的 `AllowedIPs` 固定为 `::/0`：iBGP 对端均为可信任的自有机器，需要放行全部流量以支持 babel 路由协议等互联需求。BGP（eBGP）peer 仍使用受限的 `AllowedIPs`（`fe80::/64, fd00::/8`）。
+- iBGP WireGuard 隧道的 `AllowedIPs` 默认为 `fe80::/64, fd00::/8, ff02::/16`：iBGP 对端均为可信任的自有机器，默认放行 link-local、DN42 和组播流量。BGP（eBGP）peer 默认使用 `fe80::/64, fd00::/8`。两者均可通过 `--allowed-ips` 自定义覆盖。
 
 ## dn42-dummy 接口
 
