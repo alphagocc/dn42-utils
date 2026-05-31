@@ -1906,3 +1906,74 @@ def cmd_system_uninstall(
 
 
 app.add_typer(system_app, name="system")
+
+
+# --- web deploy ---
+
+web_app = typer.Typer(help="Web UI 构建与部署")
+
+
+def _find_web_dir() -> Path:
+    """Locate the web/ directory relative to the package root."""
+    pkg_root = Path(__file__).resolve().parent.parent.parent
+    web_dir = pkg_root / "web"
+    if not (web_dir / "package.json").exists():
+        typer.echo(f"错误: 找不到 web 目录 ({web_dir})")
+        raise typer.Exit(1)
+    return web_dir
+
+
+@web_app.command("deploy")
+def cmd_web_deploy(
+    dest: Path = typer.Argument(..., help="部署目标目录 (如 /var/www/dn42ctl)"),
+    skip_build: bool = typer.Option(False, "--skip-build", help="跳过构建，直接复制已有 dist/"),
+) -> None:
+    """构建 web UI 并复制到指定目录。"""
+    import shutil
+    import subprocess
+
+    web_dir = _find_web_dir()
+    dist_dir = web_dir / "dist"
+
+    if not skip_build:
+        pnpm = shutil.which("pnpm")
+        if pnpm is None:
+            typer.echo("错误: 未找到 pnpm，请先安装 (npm install -g pnpm)")
+            raise typer.Exit(1)
+
+        typer.echo("正在构建 web UI...")
+        try:
+            subprocess.run(  # noqa: S603
+                [pnpm, "install", "--frozen-lockfile"],
+                cwd=str(web_dir),
+                check=True,
+            )
+            subprocess.run(  # noqa: S603
+                [pnpm, "build"],
+                cwd=str(web_dir),
+                check=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            typer.echo(f"错误: 构建失败 (exit {exc.returncode})")
+            raise typer.Exit(1) from exc
+
+    if not dist_dir.exists():
+        typer.echo(f"错误: dist/ 不存在 ({dist_dir})，请先运行构建")
+        raise typer.Exit(1)
+
+    dest.mkdir(parents=True, exist_ok=True)
+
+    for name in ("admin", "peer", "assets"):
+        src = dist_dir / name
+        if not src.exists():
+            continue
+        target = dest / name
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(src, target)
+        typer.echo(f"  {src} -> {target}")
+
+    typer.echo(f"部署完成: {dest}")
+
+
+app.add_typer(web_app, name="web")

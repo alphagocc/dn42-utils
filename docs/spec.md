@@ -96,7 +96,7 @@
 - 部署（systemd + nginx）：`docs/architecture/deployment.md`
 - 输入校验：`docs/architecture/validation.md`
 - 测试基础设施：`docs/architecture/testing.md`
-- Web UI（admin + peer 静态站点）：`docs/architecture/web_ui.md`
+- Web UI（admin + peer — React + Vite）：`docs/architecture/web_ui.md`
 - Auto-peer 公共 API：`docs/architecture/auto_peer.md`
 
 ## 已废弃/删除的功能
@@ -119,3 +119,4 @@
 - scan：`docs/commands/scan.md`
 - node (admin + 节点同步)：`docs/commands/node.md`
 - system (系统组件安装/卸载)：`docs/commands/system.md`
+- web deploy (Web UI 构建与部署)：`docs/commands/web.md`
