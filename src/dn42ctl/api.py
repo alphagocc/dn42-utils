@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import secrets as _secrets
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -44,6 +44,7 @@ from dn42ctl.services.auto_peer import (
     submit_peer,
     verify_challenge,
 )
+from dn42ctl.services.show import show_bgp_peers, show_ibgp_peers, show_wg_tunnels
 from dn42ctl.validators import (
     validate_asn,
     validate_endpoint,
@@ -696,8 +697,31 @@ def _monotonic_now() -> float:
     return time.monotonic()
 
 
+# Show endpoints under /api/show/ (mirrors CLI `dn42ctl show`).
+_show_router = APIRouter(prefix="/api/show", dependencies=[Depends(require_admin)])
+
+
+@_show_router.get("/all")
+def api_show_all(live: bool = Query(False)) -> dict:
+    config = _get_config()
+    db_path = _get_db_path()
+    try:
+        wg = show_wg_tunnels(config=config, db_path=db_path, include_live=live)
+        bgp = show_bgp_peers(config=config, db_path=db_path, include_live=live)
+        ibgp = show_ibgp_peers(config=config, db_path=db_path, include_live=live)
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "node_id": config.node_id,
+        "wg": [asdict(x) for x in wg],
+        "bgp": [asdict(x) for x in bgp],
+        "ibgp": [asdict(x) for x in ibgp],
+    }
+
+
 # --- Mount routers ---
 
 app.include_router(_admin_nodes_router)
 app.include_router(_node_router)
 app.include_router(_public_router)
+app.include_router(_show_router)
