@@ -99,6 +99,16 @@
 - Web UI（admin + peer 静态站点）：`docs/architecture/web_ui.md`
 - Auto-peer 公共 API：`docs/architecture/auto_peer.md`
 
+## 已废弃/删除的功能
+
+以下功能已在 2026-05-31 的清理中移除：
+
+- **旧版 API 路由** (`/api/bgp/peers`, `/api/ibgp/peers`, `/api/wg/tunnels`, `/api/show/all`, `/api/genconf`)：已被 `/api/admin/` 和 `/api/v1/nodes/` 端点取代。
+- **旧版 NetworkManager inline peers 格式**：scan 命令不再解析 `peers=` inline 格式，仅支持 `[wireguard-peer.<PUBLIC_KEY>]` section 格式。
+- **增量数据库迁移 (v1-v7)**：合并为单个建表语句。已有数据库不受影响（schema_migrations 跳过已应用版本）。
+- **payload 字段兼容默认值**：节点间 API 的 `has_wg`、`babel_rxcost`、`babel_type` 字段不再提供缺失时的默认值，所有节点需运行统一版本。
+- **create_peer.py** (独立脚本)：功能已被 `dn42ctl bgp peer add` 完全替代。
+
 ### 命令
 
 - init：`docs/commands/init.md`

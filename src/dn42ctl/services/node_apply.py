@@ -187,7 +187,7 @@ def _render_ibgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths, node_id:
             FILE_MODE_PRIVATE,
         )
     )
-    if not peer.get("has_wg", True):
+    if not peer["has_wg"]:
         return out
     backend = peer["net_backend"]
     if backend == "networkd":
@@ -241,13 +241,13 @@ def _render_ibgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths, node_id:
 def _render_babel(payload: dict[str, Any], paths: ResolvedPaths) -> tuple[Path, str, int]:
     interfaces: list[tuple[str, int, str]] = []
     for peer in payload.get("ibgp_peers", []):
-        if not peer.get("has_wg", True):
+        if not peer["has_wg"]:
             continue
         interfaces.append(
             (
                 str(peer["ifname"]),
-                int(peer.get("babel_rxcost", 120)),
-                str(peer.get("babel_type") or "tunnel"),
+                int(peer["babel_rxcost"]),
+                str(peer["babel_type"]),
             )
         )
     return paths.babel_conf_path, render_babel_conf(interfaces=interfaces), FILE_MODE_PRIVATE

@@ -82,6 +82,8 @@ def _ibgp_add_payload(name: str = "alpha") -> dict:
             "name": name,
             "peer_ip": VALID_PEER_IP,
             "has_wg": False,
+            "babel_rxcost": 120,
+            "babel_type": "tunnel",
         },
     }
 

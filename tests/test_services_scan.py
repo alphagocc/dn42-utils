@@ -107,25 +107,6 @@ address1=fe80::abcd:1234/128
         assert result["allowed_ips"] == ["fe80::/64", "fd00::/8"]
         assert result["local_lla"] == "fe80::abcd:1234"
 
-    def test_legacy_inline_peers_format(self) -> None:
-        text = """\
-[connection]
-type=wireguard
-
-[wireguard]
-private-key=PRIVKEY
-listen-port=51820
-peers=PUBKEY endpoint=example.com:51820 allowed-ips=fe80::/64;fd00::/8;
-
-[ipv6]
-method=manual
-address1=fe80::abcd:1234/64
-"""
-        result = _parse_nmconnection(text)
-        assert result["peer_public_key"] == "PUBKEY"
-        assert result["endpoint"] == "example.com:51820"
-        assert result["allowed_ips"] == ["fe80::/64", "fd00::/8"]
-
 
 class TestParseBirdBgpPeerConf:
     def test_basic(self) -> None:

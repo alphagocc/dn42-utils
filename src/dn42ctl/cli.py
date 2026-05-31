@@ -524,18 +524,6 @@ def cmd_bgp_peer(
     if net_backend is None:
         net_backend = typer.prompt("网络后端", default="networkd")
 
-    (
-        prepared_private_key,
-        prepared_public_key,
-        prepared_local_lla,
-        peer_public_key,
-        endpoint,
-        peer_lla,
-    ) = _prepare_peer_info(peer_public_key, endpoint, peer_lla, allow_empty_endpoint=True)
-
-    assert peer_asn is not None
-    assert net_backend is not None
-
     parsed_allowed_ips: list[str] | None = None
     if allowed_ips_str is not None:
         try:

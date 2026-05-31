@@ -51,37 +51,17 @@ MIGRATIONS: list[tuple[int, str]] = [
             listen_port INTEGER NOT NULL,
             allowed_ips_json TEXT NOT NULL,
             net_backend TEXT NOT NULL,
+            babel_rxcost INTEGER NOT NULL DEFAULT 120,
+            peer_ip TEXT,
+            has_wg INTEGER NOT NULL DEFAULT 1,
+            babel_type TEXT NOT NULL DEFAULT 'tunnel',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             UNIQUE(node_id, name),
             UNIQUE(node_id, ifname),
             FOREIGN KEY(node_id) REFERENCES nodes(node_id) ON DELETE CASCADE
         );
-        """.strip(),
-    ),
-    (
-        2,
-        """
-        ALTER TABLE ibgp_peers
-        ADD COLUMN babel_rxcost INTEGER NOT NULL DEFAULT 120;
-        """.strip(),
-    ),
-    (
-        3,
-        """
-        ALTER TABLE ibgp_peers ADD COLUMN peer_ip TEXT;
-        ALTER TABLE ibgp_peers ADD COLUMN has_wg INTEGER NOT NULL DEFAULT 1;
-        """.strip(),
-    ),
-    (
-        4,
-        """
-        ALTER TABLE ibgp_peers ADD COLUMN babel_type TEXT NOT NULL DEFAULT 'tunnel';
-        """.strip(),
-    ),
-    (
-        5,
-        """
+
         CREATE TABLE IF NOT EXISTS managed_nodes (
             node_id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
@@ -134,26 +114,13 @@ MIGRATIONS: list[tuple[int, str]] = [
         );
         CREATE INDEX IF NOT EXISTS idx_config_revisions_node_time
             ON config_revisions(node_id, generated_at);
-        """.strip(),
-    ),
-    (
-        6,
-        """
+
         CREATE TABLE IF NOT EXISTS node_desired_pin (
             node_id TEXT PRIMARY KEY,
             revision TEXT NOT NULL,
             pinned_at TEXT NOT NULL,
             FOREIGN KEY(node_id) REFERENCES nodes(node_id) ON DELETE CASCADE
         );
-        """.strip(),
-    ),
-    (
-        7,
-        """
-        UPDATE bgp_peers SET local_lla = SUBSTR(local_lla, 1, INSTR(local_lla, '/') - 1)
-            WHERE local_lla LIKE '%/%';
-        UPDATE ibgp_peers SET local_lla = SUBSTR(local_lla, 1, INSTR(local_lla, '/') - 1)
-            WHERE local_lla LIKE '%/%';
         """.strip(),
     ),
 ]

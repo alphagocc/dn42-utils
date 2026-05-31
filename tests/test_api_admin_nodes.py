@@ -48,27 +48,26 @@ def _rotate_token(client: TestClient, node_id: str) -> str:
 
 
 class TestPrincipalResolution:
-    def test_legacy_route_admin_ok(self, admin_client: TestClient) -> None:
-        resp = admin_client.get("/api/bgp/peers?live=false", headers=ADMIN_H)
+    def test_admin_route_admin_ok(self, admin_client: TestClient) -> None:
+        resp = admin_client.get("/api/admin/nodes", headers=ADMIN_H)
         assert resp.status_code == 200
 
-    def test_legacy_route_no_token(self, admin_client: TestClient) -> None:
-        resp = admin_client.get("/api/bgp/peers?live=false")
+    def test_admin_route_no_token(self, admin_client: TestClient) -> None:
+        resp = admin_client.get("/api/admin/nodes")
         assert resp.status_code == 401
 
-    def test_legacy_route_unknown_token(self, admin_client: TestClient) -> None:
+    def test_admin_route_unknown_token(self, admin_client: TestClient) -> None:
         resp = admin_client.get(
-            "/api/bgp/peers?live=false",
+            "/api/admin/nodes",
             headers={"Authorization": "Bearer nope"},
         )
         assert resp.status_code == 401
 
-    def test_legacy_route_node_token_forbidden(self, admin_client: TestClient) -> None:
-        # Even a valid node token cannot hit legacy admin-only routes.
+    def test_admin_route_node_token_forbidden(self, admin_client: TestClient) -> None:
         _add_node(admin_client, NODE_A, "alpha")
         token = _rotate_token(admin_client, NODE_A)
         resp = admin_client.get(
-            "/api/bgp/peers?live=false",
+            "/api/admin/nodes",
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 403
@@ -116,14 +115,10 @@ class TestRotateToken:
     def test_token_round_trip(self, admin_client: TestClient) -> None:
         _add_node(admin_client, NODE_A, "alpha")
         token = _rotate_token(admin_client, NODE_A)
-        # After rotation, has_token=true.
         node = admin_client.get(f"/api/admin/nodes/{NODE_A}", headers=ADMIN_H).json()
         assert node["has_token"] is True
-        # The node token currently has no allowed endpoints in stage 1
-        # (node routes land in stage 2), but it should at least authenticate
-        # against principal resolution -> legacy route should return 403, not 401.
         resp = admin_client.get(
-            "/api/bgp/peers?live=false",
+            "/api/admin/nodes",
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 403

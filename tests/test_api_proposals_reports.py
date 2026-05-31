@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from dn42ctl.api import app, configure
 from dn42ctl.config import AppConfig
+from dn42ctl.db import Database
 
 ADMIN_TOKEN = "admin-secret"
 ADMIN_H = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
@@ -166,7 +167,9 @@ class TestProposalIsolation:
         assert a_list[0]["payload"]["n"] == 1
         assert b_list[0]["payload"]["n"] == 2
 
-    def test_unauthoritative_changes_not_in_bgp_table(self, client: TestClient, sample_config: AppConfig) -> None:
+    def test_unauthoritative_changes_not_in_bgp_table(
+        self, client: TestClient, sample_config: AppConfig, db_path: Path
+    ) -> None:
         """Proposals MUST NOT touch business tables."""
         token = _register(client, NODE_A)
         client.post(
@@ -178,6 +181,9 @@ class TestProposalIsolation:
             },
             headers={"Authorization": f"Bearer {token}"},
         )
-        resp = client.get("/api/bgp/peers?live=false", headers=ADMIN_H)
-        assert resp.status_code == 200
-        assert resp.json() == []
+        db = Database.open(db_path)
+        try:
+            peers = db.list_bgp_peers(sample_config.node_id)
+        finally:
+            db.close()
+        assert peers == []
