@@ -36,7 +36,7 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-dn42ctl = ["templates/*"]
+dn42ctl = ["templates/*", "_build_commit.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

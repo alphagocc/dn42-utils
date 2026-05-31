@@ -1465,9 +1465,9 @@ def cmd_node_once(
     """pull -> apply -> report (apply_result)"""
     appctx: AppContext = ctx.obj
     from dn42ctl.node_config import NodeConfigError, load_node_config
-    from dn42ctl.services.node_push import post_report
     from dn42ctl.services.node_agent import pull
     from dn42ctl.services.node_apply import apply, apply_summary
+    from dn42ctl.services.node_push import post_report
 
     path = _resolve_node_config_path(appctx, node_config_path)
     try:
@@ -2039,6 +2039,20 @@ def cmd_deploy_daemon(
     dest.mkdir(parents=True, exist_ok=True)
     tool_dir.mkdir(parents=True, exist_ok=True)
 
+    commit_file = pkg_root / "src" / "dn42ctl" / "_build_commit.txt"
+    tmp_commit = Path("/tmp/dn42ctl_build_commit.txt")  # noqa: S108
+    try:
+        commit_hash = subprocess.check_output(  # noqa: S603
+            ["git", "rev-parse", "HEAD"],  # noqa: S607
+            cwd=pkg_root,
+            text=True,
+        ).strip()
+        tmp_commit.write_text(commit_hash, encoding="utf-8")
+        shutil.copy2(tmp_commit, commit_file)
+        typer.echo(f"注入 commit: {commit_hash[:12]}")
+    except (subprocess.CalledProcessError, OSError) as exc:
+        typer.echo(f"警告: 无法获取 git commit ({exc})")
+
     env = {
         **__import__("os").environ,
         "UV_TOOL_BIN_DIR": str(dest),
@@ -2055,6 +2069,9 @@ def cmd_deploy_daemon(
     except subprocess.CalledProcessError as exc:
         typer.echo(f"错误: 安装失败 (exit {exc.returncode})")
         raise typer.Exit(1) from exc
+    finally:
+        commit_file.unlink(missing_ok=True)
+        tmp_commit.unlink(missing_ok=True)
 
     _restorecon(dest / "dn42ctl")
     typer.echo(f"已安装: {dest / 'dn42ctl'}")

@@ -719,6 +719,14 @@ def api_show_all(live: bool = Query(False)) -> dict:
     }
 
 
+@app.get("/api/version")
+def api_version() -> dict:
+    from dn42ctl import __version__
+    from dn42ctl._version_info import get_commit
+
+    return {"version": __version__, "commit": get_commit()}
+
+
 # --- Mount routers ---
 
 app.include_router(_admin_nodes_router)
