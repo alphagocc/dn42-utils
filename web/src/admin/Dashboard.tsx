@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useState } from "react";
+import { useCallback, useState } from "react";
 import { ThemeToggle } from "../shared/components/ThemeToggle";
 import { Overview } from "./tabs/Overview";
 import { Bgp } from "./tabs/Bgp";
@@ -39,7 +39,7 @@ export function Dashboard({ onLogout }: Props) {
 
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
-  const tabComponents: Record<TabName, ReactNode> = {
+  const tabComponents: Record<TabName, React.ReactNode> = {
     overview: <Overview key={refreshKey} />,
     bgp: <Bgp key={refreshKey} />,
     ibgp: <Ibgp key={refreshKey} />,

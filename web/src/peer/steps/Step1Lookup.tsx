@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from "react";
+import { useState } from "react";
 import { AUTOPEER_API } from "../../shared/api";
 import type { Mntner } from "../App";
 
@@ -10,7 +10,7 @@ interface Props {
 export function Step1Lookup({ asn, onResult }: Props) {
   const [error, setError] = useState("");
 
-  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const value = Number(new FormData(e.currentTarget).get("asn"));
     try {

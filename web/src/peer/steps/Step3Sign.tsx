@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from "react";
+import { useState } from "react";
 import { AUTOPEER_API } from "../../shared/api";
 import type { Challenge } from "../App";
 
@@ -13,7 +13,7 @@ export function Step3Sign({ asn: _asn, challenge, onResult, onBack }: Props) {
   const [error, setError] = useState("");
   const isSSH = challenge.scheme === "ssh";
 
-  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const sig = new FormData(e.currentTarget).get("signature") as string;
     try {

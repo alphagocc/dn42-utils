@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from "react";
+import { useState } from "react";
 import { api } from "../../shared/api";
 import { useToast } from "../../shared/components/Toast";
 
@@ -6,7 +6,7 @@ export function Genconf() {
   const [output, setOutput] = useState<string | null>(null);
   const toast = useToast();
 
-  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fd = Object.fromEntries(new FormData(e.currentTarget));
     try {

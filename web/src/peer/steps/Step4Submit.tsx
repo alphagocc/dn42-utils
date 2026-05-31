@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from "react";
+import { useState } from "react";
 import { AUTOPEER_API } from "../../shared/api";
 import type { Challenge, SubmitResult } from "../App";
 
@@ -12,7 +12,7 @@ interface Props {
 export function Step4Submit({ asn, challenge, session, onResult }: Props) {
   const [error, setError] = useState("");
 
-  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fd = Object.fromEntries(new FormData(e.currentTarget));
     const body: Record<string, unknown> = {

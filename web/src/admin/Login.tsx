@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from "react";
+import { useState } from "react";
 import { api } from "../shared/api";
 import { ThemeToggle } from "../shared/components/ThemeToggle";
 
@@ -9,7 +9,7 @@ interface Props {
 export function Login({ onLogin }: Props) {
   const [error, setError] = useState("");
 
-  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const t = new FormData(e.currentTarget).get("token") as string;
     if (!t.trim()) return;

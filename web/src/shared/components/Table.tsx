@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import type React from "react";
 
 function esc(v: unknown): string {
   if (v === null || v === undefined) return "—";
@@ -14,7 +14,7 @@ export interface Column<T> {
 interface TableProps<T> {
   columns: Column<T>[];
   rows: T[];
-  actions?: (row: T) => ReactNode;
+  actions?: (row: T) => React.ReactNode;
 }
 
 export function Table<T>({ columns, rows, actions }: TableProps<T>) {

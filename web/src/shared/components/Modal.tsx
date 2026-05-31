@@ -1,9 +1,9 @@
-import { type FormEvent, type ReactNode, useEffect } from "react";
+import { useEffect } from "react";
 import { createPortal } from "react-dom";
 
 interface ModalProps {
   onClose: () => void;
-  children: ReactNode;
+  children: React.ReactNode;
 }
 
 export function Modal({ onClose, children }: ModalProps) {
@@ -47,7 +47,7 @@ interface FormModalProps {
 }
 
 export function FormModal({ title, fields, onSubmit, onClose }: FormModalProps) {
-  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(e.currentTarget));
     await onSubmit(data as Record<string, string>);
