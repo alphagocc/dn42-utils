@@ -153,7 +153,7 @@ pnpm preview
 cd web && VITE_API_BASE=https://api.dn42.example.com pnpm build
 
 # 复制到 nginx 目录
-sudo dn42ctl web deploy /var/www/dn42ctl
+sudo dn42ctl deploy web /var/www/dn42ctl
 ```
 
 详见 `docs/architecture/deployment.md`。

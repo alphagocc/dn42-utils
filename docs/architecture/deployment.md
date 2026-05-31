@@ -177,7 +177,7 @@ WantedBy=timers.target
 cd web && VITE_API_BASE=https://api.dn42.example.com pnpm build
 
 # 部署静态文件
-sudo dn42ctl web deploy /var/www/dn42ctl
+sudo dn42ctl deploy web /var/www/dn42ctl
 ```
 
 FastAPI 启动：

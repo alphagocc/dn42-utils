@@ -1925,23 +1925,37 @@ def cmd_system_uninstall(
 app.add_typer(system_app, name="system")
 
 
-# --- web deploy ---
+# --- deploy ---
 
-web_app = typer.Typer(help="Web UI 构建与部署")
+deploy_app = typer.Typer(help="部署 Web UI / daemon 到系统目录")
+
+
+def _find_pkg_root() -> Path:
+    return Path(__file__).resolve().parent.parent.parent
 
 
 def _find_web_dir() -> Path:
-    """Locate the web/ directory relative to the package root."""
-    pkg_root = Path(__file__).resolve().parent.parent.parent
-    web_dir = pkg_root / "web"
+    web_dir = _find_pkg_root() / "web"
     if not (web_dir / "package.json").exists():
         typer.echo(f"错误: 找不到 web 目录 ({web_dir})")
         raise typer.Exit(1)
     return web_dir
 
 
-@web_app.command("deploy")
-def cmd_web_deploy(
+def _restorecon(path: Path) -> None:
+    import shutil
+    import subprocess
+
+    restorecon = shutil.which("restorecon")
+    if restorecon is not None:
+        subprocess.run(  # noqa: S603
+            [restorecon, "-Rv", str(path)],
+            check=False,
+        )
+
+
+@deploy_app.command("web")
+def cmd_deploy_web(
     dest: Path = typer.Argument(..., help="部署目标目录 (如 /var/www/dn42ctl)"),
     skip_build: bool = typer.Option(False, "--skip-build", help="跳过构建，直接复制已有 dist/"),
 ) -> None:
@@ -1990,14 +2004,47 @@ def cmd_web_deploy(
         shutil.copytree(src, target)
         typer.echo(f"  {src} -> {target}")
 
-    restorecon = shutil.which("restorecon")
-    if restorecon is not None:
-        subprocess.run(  # noqa: S603
-            [restorecon, "-Rv", str(dest)],
-            check=False,
-        )
-
+    _restorecon(dest)
     typer.echo(f"部署完成: {dest}")
 
 
-app.add_typer(web_app, name="web")
+@deploy_app.command("daemon")
+def cmd_deploy_daemon(
+    dest: Path = typer.Option(
+        Path("/usr/local/bin/dn42ctl"),
+        "--dest",
+        help="安装目标路径 (默认 /usr/local/bin/dn42ctl)",
+    ),
+) -> None:
+    """安装 dn42ctl 可执行入口到系统路径，供 systemd 调用。"""
+    import shutil
+    import stat
+    import subprocess
+    import sys
+
+    venv_bin = Path(sys.executable).parent / "dn42ctl"
+    if not venv_bin.exists():
+        typer.echo(f"错误: 找不到当前环境的 dn42ctl ({venv_bin})")
+        raise typer.Exit(1)
+
+    pkg_root = _find_pkg_root()
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    wrapper = f"#!/bin/sh\nexec {shutil.which('uv') or 'uv'} run --project {pkg_root} dn42ctl \"$@\"\n"
+    dest.write_text(wrapper)
+    dest.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+
+    _restorecon(dest)
+    typer.echo(f"已安装: {dest}")
+
+    uv_path = shutil.which("uv")
+    if uv_path:
+        typer.echo("预热 uv 缓存...")
+        subprocess.run(  # noqa: S603
+            [uv_path, "sync", "--project", str(pkg_root)],
+            check=False,
+        )
+
+
+app.add_typer(deploy_app, name="deploy")

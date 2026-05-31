@@ -118,4 +118,4 @@
 - scan：`docs/commands/scan.md`
 - node (admin + 节点同步)：`docs/commands/node.md`
 - system (系统组件安装/卸载)：`docs/commands/system.md`
-- web deploy (Web UI 构建与部署)：`docs/commands/web.md`
+- deploy (web / daemon 部署)：`docs/commands/web.md`
