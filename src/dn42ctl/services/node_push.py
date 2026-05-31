@@ -10,8 +10,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
-
 from dn42ctl.node_client import NodeClient, NodeClientError
 from dn42ctl.node_config import NodeConfig
 from dn42ctl.services.core import Dn42CtlError
@@ -56,6 +54,8 @@ def _post_json(
     base = node_config.server.rstrip("/")
     url = f"{base}/api/v1/nodes/{node_config.node_id}{suffix}"
     headers = {"Authorization": f"Bearer {node_config.token}"}
+    import httpx
+
     try:
         resp = httpx.post(url, headers=headers, json=body, timeout=10.0)
     except httpx.HTTPError as exc:
