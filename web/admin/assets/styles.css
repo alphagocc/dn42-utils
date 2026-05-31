@@ -1,6 +1,0 @@
-/* Minimal overrides — Tailwind handles most styling via utility classes. */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
-html { font-family: 'Inter', system-ui, sans-serif; }
-pre, code { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.85em; }
-.tab-btn.active { background: black; color: white; }
-html.dark .tab-btn.active { background: white; color: black; }

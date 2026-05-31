@@ -1,7 +1,0 @@
-/* Minimal overrides for the peer wizard */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
-html { font-family: 'Inter', system-ui, sans-serif; }
-pre, code { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.85em; }
-.step-dot.active { background: black; color: white; }
-html.dark .step-dot.active { background: white; color: black; }
-.step-dot { transition: background 0.2s, color 0.2s; }

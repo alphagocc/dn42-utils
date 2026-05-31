@@ -15,6 +15,9 @@ build/
 .smoke/
 *.sqlite3
 
+# Node
+node_modules/
+
 # Editors
 .vscode/
 
