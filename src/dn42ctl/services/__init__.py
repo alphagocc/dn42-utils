@@ -17,7 +17,6 @@ from .node_admin import (
     rotate_token,
     set_policy,
 )
-from .node_push import build_peer_add_payload, post_proposal, post_report
 from .proposal_decisions import accept_proposal, reject_proposal
 from .proposals import get_proposal, list_proposals, submit_proposal
 from .report_import import import_report
@@ -45,7 +44,6 @@ __all__ = [
     "accept_proposal",
     "add_node",
     "build_desired_state",
-    "build_peer_add_payload",
     "clear_rollback",
     "create_bgp_peer",
     "create_ibgp_peer",
@@ -70,8 +68,6 @@ __all__ = [
     "list_revisions",
     "modify_bgp_peer",
     "modify_ibgp_peer",
-    "post_proposal",
-    "post_report",
     "reject_proposal",
     "remove_node",
     "require_managed_node_exists",

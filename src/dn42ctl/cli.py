@@ -1465,7 +1465,7 @@ def cmd_node_once(
     """pull -> apply -> report (apply_result)"""
     appctx: AppContext = ctx.obj
     from dn42ctl.node_config import NodeConfigError, load_node_config
-    from dn42ctl.services import post_report
+    from dn42ctl.services.node_push import post_report
     from dn42ctl.services.node_agent import pull
     from dn42ctl.services.node_apply import apply, apply_summary
 
@@ -1591,7 +1591,7 @@ def cmd_node_push(
     """
     appctx: AppContext = ctx.obj
     from dn42ctl.node_config import NodeConfigError, load_node_config
-    from dn42ctl.services import post_proposal
+    from dn42ctl.services.node_push import post_proposal
 
     path = _resolve_node_config_path(appctx, node_config_path)
     try:
@@ -1631,7 +1631,7 @@ def cmd_node_report(
 ) -> None:
     appctx: AppContext = ctx.obj
     from dn42ctl.node_config import NodeConfigError, load_node_config
-    from dn42ctl.services import post_report
+    from dn42ctl.services.node_push import post_report
 
     path = _resolve_node_config_path(appctx, node_config_path)
     try:
