@@ -52,6 +52,10 @@ Notes:
 - **Never add broad per-directory ruff ignores** (e.g. `"tests/**" = ["S603"]`) for security checks. Use per-file ignores in `pyproject.toml` (e.g. `"tests/test_foo.py" = ["S603"]`).
 - Existing per-file ignores in `pyproject.toml` are intentional — don't remove them, but don't expand their scope.
 
+## Commit messages
+
+- Use the [Conventional Commits](https://www.conventionalcommits.org/) specification.
+
 ## Validation (quick)
 
 ```bash
