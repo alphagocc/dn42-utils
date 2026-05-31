@@ -8,7 +8,6 @@ dn42ctl 不内置任何 HTML 渲染；UI 是一个 Vite 多页应用，构建后
 - **供应链安全**：pnpm `minimumReleaseAge: 1440`（24 小时隔离期）；`onlyBuiltDependencies` 白名单限制 postinstall 脚本。
 - **现代化 + 黑白配色**：仅使用 `zinc/neutral` 灰阶 + 纯黑/纯白，强调留白与排版。
 - **亮色 / 暗色**：基于 Tailwind `dark:` 变体，由 `<html class="dark">` 切换，状态写 `localStorage.theme`，默认跟随 `prefers-color-scheme`。
-- **同源部署**：由 nginx 把 `/`、`/admin/`、`/api/*` 都挂在同一个 vhost；CORS 不需要。
 - **可独立分发**：`web/` 不依赖 dn42ctl 的任何 Python 模块，可单独打包。
 
 ## 目录布局
@@ -150,13 +149,14 @@ pnpm preview
 ## 部署
 
 ```bash
-# 构建后复制到 nginx 目录
-cp -r web/dist/admin/ /var/www/dn42ctl/admin/
-cp -r web/dist/peer/  /var/www/dn42ctl/peer/
-cp -r web/dist/assets/ /var/www/dn42ctl/assets/
+# 构建 (跨域部署时需指定 API 地址)
+cd web && VITE_API_BASE=https://api.dn42.example.com pnpm build
+
+# 复制到 nginx 目录
+sudo dn42ctl web deploy /var/www/dn42ctl
 ```
 
-详见 `docs/architecture/deployment.md` 的 nginx 段。
+详见 `docs/architecture/deployment.md`。
 
 ## 已知限制
 

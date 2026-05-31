@@ -115,7 +115,6 @@
 - genconf：`docs/commands/genconf.md`
 - bgp peer (add/modify/del)：`docs/commands/bgp_peer.md`
 - ibgp peer (add/modify/del)：`docs/commands/ibgp_peer.md`
-- show / peer del：`docs/commands/show_and_del.md`
 - scan：`docs/commands/scan.md`
 - node (admin + 节点同步)：`docs/commands/node.md`
 - system (系统组件安装/卸载)：`docs/commands/system.md`

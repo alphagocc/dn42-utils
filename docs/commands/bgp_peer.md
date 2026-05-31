@@ -20,7 +20,7 @@
 - `--asn`：正整数。
 - `--pubkey`：WireGuard 公钥，base64 格式（40~44 字符）。
 - `--endpoint`：`host:port` 或 `[IPv6]:port` 格式，端口 1-65535。可为空。
-- `--peer-lla`：合法的 IPv6 地址（允许带 `/prefix`）。
+- `--peer-lla`：合法的 IPv6 地址。
 - `--net`：`networkd` 或 `nm`（也接受 `networkmanager`）。
 - `--listen-port`：0 或 1-65535。
 
@@ -34,7 +34,7 @@
 ### WireGuard
 
 - 本端密钥：必须调用系统命令生成：`wg genkey` 与 `wg pubkey`。
-- 本端 LLA：随机生成 `fe80::xxxx:xxxx/64`。
+- 本端 LLA：随机生成 `fe80::xxxx:xxxx`。
 - AllowedIPs：默认写入 `fe80::/64` 与 `fd00::/8`，可通过 `--allowed-ips` 自定义覆盖。同时必须满足”禁止修改路由表”约束（见网络后端文档）。
 
 ### 输出
