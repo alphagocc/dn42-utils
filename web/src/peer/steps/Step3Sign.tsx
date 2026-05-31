@@ -1,7 +1,6 @@
 import { type FormEvent, useState } from "react";
+import { AUTOPEER_API } from "../../shared/api";
 import type { Challenge } from "../App";
-
-const API = "/api/public/auto-peer";
 
 interface Props {
   asn: number;
@@ -18,7 +17,7 @@ export function Step3Sign({ asn: _asn, challenge, onResult, onBack }: Props) {
     e.preventDefault();
     const sig = new FormData(e.currentTarget).get("signature") as string;
     try {
-      const res = await fetch(`${API}/verify`, {
+      const res = await fetch(`${AUTOPEER_API}/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ challenge_id: challenge.challenge_id, signature: sig }),

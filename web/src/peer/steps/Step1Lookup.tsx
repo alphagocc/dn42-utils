@@ -1,7 +1,6 @@
 import { type FormEvent, useState } from "react";
+import { AUTOPEER_API } from "../../shared/api";
 import type { Mntner } from "../App";
-
-const API = "/api/public/auto-peer";
 
 interface Props {
   asn: number;
@@ -15,7 +14,7 @@ export function Step1Lookup({ asn, onResult }: Props) {
     e.preventDefault();
     const value = Number(new FormData(e.currentTarget).get("asn"));
     try {
-      const res = await fetch(`${API}/lookup`, {
+      const res = await fetch(`${AUTOPEER_API}/lookup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ asn: value }),

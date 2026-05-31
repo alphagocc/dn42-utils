@@ -1124,6 +1124,12 @@ def cmd_serve(
     host: str = typer.Option("::1", "--host", help="绑定地址 (默认 ::1, IPv6 loopback)"),
     port: int = typer.Option(4242, "--port", help="监听端口 (默认 4242)"),
     token: str = typer.Option(..., "--token", envvar="DN42CTL_API_TOKEN", help="Admin Bearer Token (必须提供)"),
+    cors_origin: str = typer.Option(
+        "",
+        "--cors-origin",
+        envvar="DN42CTL_CORS_ORIGINS",
+        help="允许的 CORS origin (逗号分隔，如 https://admin.example.com,https://peer.example.com)",
+    ),
     no_self_register: bool = typer.Option(
         False, "--no-self-register", help="跳过 self node 自动注册 (测试 / 不希望中心机自管时使用)"
     ),
@@ -1135,6 +1141,17 @@ def cmd_serve(
     from dn42ctl.api import configure
 
     configure(config=config, db_path=appctx.db_path, token=token)
+
+    origins = [o.strip() for o in cors_origin.split(",") if o.strip()] if cors_origin else []
+    if origins:
+        from fastapi.middleware.cors import CORSMiddleware
+
+        api_app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+            allow_headers=["Authorization", "Content-Type"],
+        )
 
     if host not in ("::1", "127.0.0.1", "localhost"):
         typer.echo(

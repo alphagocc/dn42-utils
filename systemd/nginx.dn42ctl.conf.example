@@ -1,23 +1,89 @@
 # 放到 /etc/nginx/conf.d/dn42ctl.conf
-# 仅对外暴露给远程节点 / 管理员; self 节点不经过这里 (走 http://[::1]:4242)
+#
+# 三个子域名部署:
+#   api.dn42.example.com   -> FastAPI (loopback uvicorn)
+#   admin.dn42.example.com -> 管理后台静态文件
+#   peer.dn42.example.com  -> Auto-peer 向导静态文件
+#
+# 前端构建时需设置 VITE_API_BASE:
+#   VITE_API_BASE=https://api.dn42.example.com pnpm build
+#
+# FastAPI 启动时需设置 CORS:
+#   DN42CTL_CORS_ORIGINS=https://admin.dn42.example.com,https://peer.dn42.example.com
+
+# --- API ---
 server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
-    server_name center.example;
+    server_name api.dn42.example.com;
 
-    ssl_certificate     /etc/letsencrypt/live/center.example/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/center.example/privkey.pem;
+    ssl_certificate     /etc/letsencrypt/live/dn42.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/dn42.example.com/privkey.pem;
 
     # 可选: 限制到 dn42 / wireguard 内网
     # allow fd00::/8;
     # deny all;
 
-    location /api/ {
+    location / {
         proxy_pass         http://[::1]:4242;
         proxy_http_version 1.1;
         proxy_set_header   Host              $host;
         proxy_set_header   X-Forwarded-For   $remote_addr;
         proxy_set_header   X-Forwarded-Proto $scheme;
         proxy_read_timeout 60s;
+    }
+
+    # 可选: 对 auto-peer 公共端点限流
+    # 在 http {} 中先声明: limit_req_zone $binary_remote_addr zone=ap:10m rate=10r/m;
+    # location /api/public/ {
+    #     limit_req zone=ap burst=20 nodelay;
+    #     proxy_pass         http://[::1]:4242;
+    #     proxy_http_version 1.1;
+    #     proxy_set_header   Host              $host;
+    #     proxy_set_header   X-Forwarded-For   $remote_addr;
+    #     proxy_set_header   X-Forwarded-Proto $scheme;
+    #     proxy_read_timeout 60s;
+    # }
+}
+
+# --- Admin 后台 ---
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name admin.dn42.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/dn42.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/dn42.example.com/privkey.pem;
+
+    root /var/www/dn42ctl;
+
+    location / {
+        try_files $uri /admin/index.html;
+    }
+
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+}
+
+# --- Peer Auto-peer 向导 ---
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name peer.dn42.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/dn42.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/dn42.example.com/privkey.pem;
+
+    root /var/www/dn42ctl;
+
+    location / {
+        try_files $uri /peer/index.html;
+    }
+
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
     }
 }

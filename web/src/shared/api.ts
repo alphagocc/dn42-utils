@@ -1,3 +1,7 @@
+export const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
+
+export const AUTOPEER_API = `${API_BASE}/api/public/auto-peer`;
+
 export function getToken(): string {
   return sessionStorage.getItem("dn42ctl_admin_token") || "";
 }
@@ -14,13 +18,11 @@ export async function api<T = unknown>(
   };
   if (t) headers["Authorization"] = `Bearer ${t}`;
 
-  const res = await fetch(path, { ...opts, headers });
+  const res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
 
   if (res.status === 401) {
     sessionStorage.removeItem("dn42ctl_admin_token");
-    location.href = location.pathname.includes("/peer/")
-      ? location.href
-      : "/admin/";
+    location.href = "/";
     throw new Error("unauthorized");
   }
 

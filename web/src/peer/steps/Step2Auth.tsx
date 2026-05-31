@@ -1,7 +1,6 @@
 import { useState } from "react";
+import { AUTOPEER_API } from "../../shared/api";
 import type { Challenge, Mntner } from "../App";
-
-const API = "/api/public/auto-peer";
 
 interface Props {
   asn: number;
@@ -15,7 +14,7 @@ export function Step2Auth({ asn, mntners, onResult, onBack }: Props) {
 
   const pickAuth = async (mntner: string, index: number) => {
     try {
-      const res = await fetch(`${API}/challenge`, {
+      const res = await fetch(`${AUTOPEER_API}/challenge`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ asn, mntner, auth_index: index }),

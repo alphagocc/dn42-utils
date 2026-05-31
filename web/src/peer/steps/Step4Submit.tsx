@@ -1,7 +1,6 @@
 import { type FormEvent, useState } from "react";
+import { AUTOPEER_API } from "../../shared/api";
 import type { Challenge, SubmitResult } from "../App";
-
-const API = "/api/public/auto-peer";
 
 interface Props {
   asn: number;
@@ -25,7 +24,7 @@ export function Step4Submit({ asn, challenge, session, onResult }: Props) {
     if (fd.listen_port) body.listen_port = Number(fd.listen_port);
 
     try {
-      const res = await fetch(`${API}/submit`, {
+      const res = await fetch(`${AUTOPEER_API}/submit`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

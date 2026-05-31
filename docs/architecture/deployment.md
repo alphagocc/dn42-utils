@@ -103,6 +103,7 @@ WantedBy=multi-user.target
 
 ```ini
 DN42CTL_API_TOKEN=<admin token,部署时生成,文件 0600 owner=dn42ctl>
+DN42CTL_CORS_ORIGINS=https://admin.dn42.example.com,https://peer.dn42.example.com
 ```
 
 ## `dn42ctl-node-once.service`
@@ -162,65 +163,31 @@ WantedBy=timers.target
 
 ## nginx 反代示例
 
-`systemd/nginx.dn42ctl.conf.example`：
+采用三子域名部署（`api.` / `admin.` / `peer.`）。详见 `systemd/nginx.dn42ctl.conf.example`。
 
-```nginx
-# /etc/nginx/conf.d/dn42ctl.conf
-# 仅对外暴露给远程节点 / 管理员; self 节点不经过这里
-server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
-    server_name center.example;
+核心要点：
 
-    ssl_certificate     /etc/letsencrypt/live/center.example/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/center.example/privkey.pem;
-
-    # 可选:限制到 dn42 / wireguard 内网
-    # allow fd00::/8;
-    # deny all;
-
-    # 静态 UI: 公共 auto-peer 页面挂在根路径
-    root /var/www/dn42ctl/peer;
-    index index.html;
-
-    # 管理后台挂在 /admin/
-    location /admin/ {
-        alias /var/www/dn42ctl/admin/;
-        index index.html;
-        try_files $uri $uri/ /admin/index.html;
-    }
-
-    # 所有 API 走 loopback uvicorn
-    location /api/ {
-        proxy_pass         http://[::1]:4242;
-        proxy_http_version 1.1;
-        proxy_set_header   Host              $host;
-        proxy_set_header   X-Forwarded-For   $remote_addr;
-        proxy_set_header   X-Forwarded-Proto $scheme;
-        proxy_read_timeout 60s;
-    }
-
-    # 可选: 对 auto-peer 公共端点限流, 避免被刷
-    # 在 http {} 中先声明: limit_req_zone $binary_remote_addr zone=ap:10m rate=10r/m;
-    location /api/public/ {
-        # limit_req zone=ap burst=20 nodelay;
-        proxy_pass         http://[::1]:4242;
-        proxy_http_version 1.1;
-        proxy_set_header   Host              $host;
-        proxy_set_header   X-Forwarded-For   $remote_addr;
-        proxy_set_header   X-Forwarded-Proto $scheme;
-        proxy_read_timeout 60s;
-    }
-}
-```
-
-静态资源部署：
+- **API 子域名**：反代到 `[::1]:4242`（uvicorn），无静态文件。
+- **admin / peer 子域名**：各自 `try_files $uri /{admin,peer}/index.html`，`root /var/www/dn42ctl`。
+- **CORS**：前端跨域访问 API 子域名，需要在 `dn42ctl serve` 启动时指定 `--cors-origin`。
+- **构建时**：需设置 `VITE_API_BASE` 环境变量指向 API 子域名。
 
 ```bash
-sudo install -d -m 0755 /var/www/dn42ctl
-sudo cp -r web/peer  /var/www/dn42ctl/peer
-sudo cp -r web/admin /var/www/dn42ctl/admin
+# 构建 (指定 API 地址)
+cd web && VITE_API_BASE=https://api.dn42.example.com pnpm build
+
+# 部署静态文件
+sudo dn42ctl web deploy /var/www/dn42ctl
 ```
+
+FastAPI 启动：
+
+```bash
+dn42ctl serve \
+  --cors-origin https://admin.dn42.example.com,https://peer.dn42.example.com
+```
+
+也可通过环境变量 `DN42CTL_CORS_ORIGINS` 设置（写在 `server.env` 中，逗号分隔）。
 
 详细的页面结构与主题策略见 `docs/architecture/web_ui.md`。
 

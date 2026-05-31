@@ -15,7 +15,10 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": "http://[::1]:4242",
+      "/api": {
+        target: "http://[::1]:4242",
+        changeOrigin: true,
+      },
     },
   },
 });
