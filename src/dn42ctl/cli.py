@@ -1990,6 +1990,13 @@ def cmd_web_deploy(
         shutil.copytree(src, target)
         typer.echo(f"  {src} -> {target}")
 
+    restorecon = shutil.which("restorecon")
+    if restorecon is not None:
+        subprocess.run(  # noqa: S603
+            [restorecon, "-Rv", str(dest)],
+            check=False,
+        )
+
     typer.echo(f"部署完成: {dest}")
 
 
