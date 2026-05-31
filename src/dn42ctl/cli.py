@@ -2011,40 +2011,53 @@ def cmd_deploy_web(
 @deploy_app.command("daemon")
 def cmd_deploy_daemon(
     dest: Path = typer.Option(
-        Path("/usr/local/bin/dn42ctl"),
+        Path("/usr/local/bin"),
         "--dest",
-        help="安装目标路径 (默认 /usr/local/bin/dn42ctl)",
+        help="可执行文件安装目录 (默认 /usr/local/bin)",
+    ),
+    tool_dir: Path = typer.Option(
+        Path("/opt/dn42ctl"),
+        "--tool-dir",
+        help="uv tool venv 安装目录 (默认 /opt/dn42ctl，需要 systemd 可读)",
     ),
 ) -> None:
-    """安装 dn42ctl 可执行入口到系统路径，供 systemd 调用。"""
-    import shutil
-    import stat
-    import subprocess
-    import sys
+    """安装 dn42ctl 到系统路径，供 systemd 调用。
 
-    venv_bin = Path(sys.executable).parent / "dn42ctl"
-    if not venv_bin.exists():
-        typer.echo(f"错误: 找不到当前环境的 dn42ctl ({venv_bin})")
-        raise typer.Exit(1)
+    venv 放在 --tool-dir 而非 ~/.local/share/uv/tools/，
+    避免 systemd ProtectHome=true 导致无法启动。
+    """
+    import shutil
+    import subprocess
 
     pkg_root = _find_pkg_root()
 
-    dest.parent.mkdir(parents=True, exist_ok=True)
+    uv = shutil.which("uv")
+    if uv is None:
+        typer.echo("错误: 未找到 uv")
+        raise typer.Exit(1)
 
-    wrapper = f"#!/bin/sh\nexec {shutil.which('uv') or 'uv'} run --project {pkg_root} dn42ctl \"$@\"\n"
-    dest.write_text(wrapper)
-    dest.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+    dest.mkdir(parents=True, exist_ok=True)
+    tool_dir.mkdir(parents=True, exist_ok=True)
 
-    _restorecon(dest)
-    typer.echo(f"已安装: {dest}")
+    env = {
+        **__import__("os").environ,
+        "UV_TOOL_BIN_DIR": str(dest),
+        "UV_TOOL_DIR": str(tool_dir),
+    }
 
-    uv_path = shutil.which("uv")
-    if uv_path:
-        typer.echo("预热 uv 缓存...")
+    typer.echo(f"正在安装 dn42ctl 到 {dest} (venv: {tool_dir}) ...")
+    try:
         subprocess.run(  # noqa: S603
-            [uv_path, "sync", "--project", str(pkg_root)],
-            check=False,
+            [uv, "tool", "install", "--force", str(pkg_root)],
+            env=env,
+            check=True,
         )
+    except subprocess.CalledProcessError as exc:
+        typer.echo(f"错误: 安装失败 (exit {exc.returncode})")
+        raise typer.Exit(1) from exc
+
+    _restorecon(dest / "dn42ctl")
+    typer.echo(f"已安装: {dest / 'dn42ctl'}")
 
 
 app.add_typer(deploy_app, name="deploy")

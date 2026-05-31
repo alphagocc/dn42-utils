@@ -24,18 +24,19 @@ sudo dn42ctl deploy web /var/www/dn42ctl
 
 ## deploy daemon
 
-安装 dn42ctl 可执行入口到系统路径，供 systemd service 调用。
+通过 `uv tool install` 安装独立的 dn42ctl 到系统路径，供 systemd service 调用。
 
 ```bash
-dn42ctl deploy daemon
-dn42ctl deploy daemon --dest /usr/local/bin/dn42ctl
+sudo dn42ctl deploy daemon
+sudo dn42ctl deploy daemon --dest /usr/local/bin --tool-dir /opt/dn42ctl
 ```
 
 | 参数 | 说明 |
 |------|------|
-| `--dest` | 安装路径 (默认 `/usr/local/bin/dn42ctl`) |
+| `--dest` | 可执行文件安装目录 (默认 `/usr/local/bin`) |
+| `--tool-dir` | uv tool venv 目录 (默认 `/opt/dn42ctl`) |
 
-行为：生成 wrapper 脚本（通过 `uv run --project` 调用）→ 设置权限 0755 → `restorecon`（如有）→ 预热 `uv sync`。
+venv 放在 `--tool-dir` 而非 `~/.local/share/uv/tools/`，避免 systemd `ProtectHome=true` 导致无法启动。
 
 ```bash
 sudo dn42ctl deploy daemon
