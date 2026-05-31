@@ -13,149 +13,37 @@ unit 模板与 nginx 反代示例位于项目根 `systemd/` 目录。
 
 ```
 systemd/
-├── dn42ctl-server.service          # 中心主机:dn42ctl serve 常驻
-├── dn42ctl-node-once.service       # 任何节点:跑一次 dn42ctl node once
-├── dn42ctl-node-once.timer         # 任何节点:周期触发上面那个 service
-└── nginx.dn42ctl.conf.example      # nginx 反代到 [::1]:4242 的示例片段
+├── dn42ctl-server.service          # 中心主机: dn42ctl serve 常驻
+├── dn42ctl-node-once.service       # 任何节点: 跑一次 dn42ctl node once
+├── dn42ctl-node-once.timer         # 任何节点: 周期触发上面那个 service
+├── nginx.dn42ctl.conf.example      # nginx 三子域名反代示例
+└── server.env.example              # server.env 模板
 ```
 
 ## 设计原则
 
 - **server 不碰系统配置**：`dn42ctl serve` 只读写权威 SQLite 与 self 的 `node.toml`。`/etc/bird` / `/etc/systemd/network` 等渲染目标由 `dn42ctl-node-once.service` 处理。两者职责彻底分离，让 server unit 能用最严的 sandbox。
 - **server 只监听 loopback**：TLS / 对外暴露完全交给 nginx。dn42ctl 不接受 `--tls-cert` / `--tls-key`。
-- **self 节点不走 nginx**：`node.toml` 中 `server = "http://[::1]:4242"`，直连 uvicorn，不消耗 nginx 连接也不需要再过一次 TLS。
+- **self 节点不走 nginx**：`node.toml` 中 `server = "http://[::1]:4242"`，直连 uvicorn。
 - **node-once 是 oneshot**：失败由 timer 下一轮重试，不在 service 里 `Restart`。
 
-## `dn42ctl-server.service`
+## systemd unit 说明
 
-```ini
-[Unit]
-Description=dn42ctl API server (hub)
-Documentation=https://github.com/.../dn42-utils
-After=network-online.target
-Wants=network-online.target
+详细内容见 `systemd/` 目录下的文件，这里只记录关键设计决策。
 
-[Service]
-Type=exec
-User=dn42ctl
-Group=dn42ctl
-EnvironmentFile=/etc/dn42ctl/server.env
-ExecStart=/usr/local/bin/dn42ctl serve --host ::1 --port 4242
-Restart=on-failure
-RestartSec=3s
+### dn42ctl-server.service
 
-# ---- 文件系统 ----
-ReadWritePaths=/var/lib/dn42ctl /etc/dn42ctl
-ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-PrivateDevices=true
-UMask=0077
+- 以专用用户 `dn42ctl` 运行（非 root）。
+- `EnvironmentFile=/etc/dn42ctl/server.env` 注入 `DN42CTL_API_TOKEN` 和 `DN42CTL_CORS_ORIGINS`。
+- 严格 sandbox：`ProtectSystem=strict`、清空 `CapabilityBoundingSet`、`IPAddressAllow=localhost` + `IPAddressDeny=any`（强制仅 loopback 通信）。
+- 调试时先 `journalctl -u dn42ctl-server` 查报错，再有针对性地放宽 sandbox 指令。
 
-# ---- 内核接口 ----
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectKernelLogs=true
-ProtectControlGroups=true
-ProtectClock=true
-ProtectHostname=true
-ProtectProc=invisible
+### dn42ctl-node-once.service
 
-# ---- 进程能力 ----
-CapabilityBoundingSet=
-AmbientCapabilities=
-NoNewPrivileges=true
-RestrictRealtime=true
-RestrictNamespaces=true
-RestrictSUIDSGID=true
-LockPersonality=true
-MemoryDenyWriteExecute=true
-SystemCallArchitectures=native
-SystemCallFilter=@system-service
-SystemCallFilter=~@privileged @resources @mount @debug @cpu-emulation @obsolete @raw-io @reboot @swap
+- 必须以 root 运行（需写 `/etc/bird` 等，调用 `wg` / `ip` / `nmcli`），sandbox 比 server 宽松。
+- 仍开启 `ProtectSystem=strict` + 收窄 `ReadWritePaths`。
 
-# ---- 网络 ----
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-IPAddressAllow=localhost
-IPAddressDeny=any
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### sandbox 指令解释
-
-| 指令 | 目的 |
-|------|------|
-| `User=dn42ctl` | 非 root 运行，需在系统中预先 `useradd -r -s /usr/sbin/nologin dn42ctl` |
-| `ReadWritePaths` | 仅这两个目录可写：权威 SQLite + self node.toml + self_node_id 文件 |
-| `ProtectSystem=strict` | `/usr` `/boot` `/etc` 等只读（`/etc/dn42ctl` 被 `ReadWritePaths` 重新打开） |
-| `CapabilityBoundingSet=` | 清空所有 capability：纯 userspace HTTP server，不需要 |
-| `MemoryDenyWriteExecute` | 阻止 JIT-style RCE |
-| `SystemCallFilter` | 只放 `@system-service` 集合，砍掉 mount / debug / raw I/O 等 |
-| `IPAddressAllow=localhost` + `IPAddressDeny=any` | 强制只能与 loopback 通信，节点流量先经 nginx，nginx 再 proxy 到 loopback |
-| `ProtectProc=invisible` | 进程看不到其他 PID，缩小 `/proc` 攻击面 |
-| `RestrictAddressFamilies` | 只留 UNIX + IPv4 + IPv6 socket family |
-
-> 调试时如某条指令阻断了合法行为，先 `systemctl status` + `journalctl -u dn42ctl-server` 查报错，再有针对性地放宽（而不是直接砍掉一长串）。
-
-### server.env
-
-```ini
-DN42CTL_API_TOKEN=<admin token,部署时生成,文件 0600 owner=dn42ctl>
-DN42CTL_CORS_ORIGINS=https://admin.dn42.example.com,https://peer.dn42.example.com
-```
-
-## `dn42ctl-node-once.service`
-
-```ini
-[Unit]
-Description=dn42ctl node sync (pull/apply/report)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/dn42ctl node once
-
-# ---- 文件系统 ----
-ReadWritePaths=/etc/bird /etc/systemd/network /etc/NetworkManager/system-connections /var/lib/dn42ctl /etc/dn42ctl
-ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-
-# ---- 进程能力 ----
-NoNewPrivileges=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-LockPersonality=true
-```
-
-### sandbox 取舍
-
-node-once 必须以 root 跑（需写 `/etc/bird` 等，并调用 `wg` / `ip` / `nmcli`），因此 sandbox 比 server 宽松：
-
-- 不能 `CapabilityBoundingSet=`（`ip link add` 需要 `CAP_NET_ADMIN`）。
-- 不能 `RestrictAddressFamilies`（`nmcli` D-Bus 走 `AF_NETLINK`）。
-- 不能 `MemoryDenyWriteExecute`（部分 Python C-ext 不兼容）。
-
-但仍开启 `ProtectSystem=strict` + 收窄 `ReadWritePaths`：即便代码出 bug 也不能写到清单之外的路径。
-
-## `dn42ctl-node-once.timer`
-
-```ini
-[Unit]
-Description=Run dn42ctl node once periodically
-
-[Timer]
-OnBootSec=2min
-OnUnitActiveSec=10min
-RandomizedDelaySec=30s
-Unit=dn42ctl-node-once.service
-
-[Install]
-WantedBy=timers.target
-```
+### dn42ctl-node-once.timer
 
 - `OnBootSec=2min`：开机后等网络起来再跑。
 - `OnUnitActiveSec=10min`：上一次结束后 10 分钟再触发。
@@ -169,58 +57,45 @@ WantedBy=timers.target
 
 - **API 子域名**：反代到 `[::1]:4242`（uvicorn），无静态文件。
 - **admin / peer 子域名**：各自 `try_files $uri /{admin,peer}/index.html`，`root /var/www/dn42ctl`。
-- **CORS**：前端跨域访问 API 子域名，需要在 `dn42ctl serve` 启动时指定 `--cors-origin`。
+- **CORS**：前端跨域访问 API 子域名，需要在 `server.env` 中设置 `DN42CTL_CORS_ORIGINS`。
 - **构建时**：需设置 `VITE_API_BASE` 环境变量指向 API 子域名。
-
-```bash
-# 构建 (指定 API 地址)
-cd web && VITE_API_BASE=https://api.dn42.example.com pnpm build
-
-# 部署静态文件
-sudo dn42ctl deploy web /var/www/dn42ctl
-```
-
-FastAPI 启动：
-
-```bash
-dn42ctl serve \
-  --cors-origin https://admin.dn42.example.com,https://peer.dn42.example.com
-```
-
-也可通过环境变量 `DN42CTL_CORS_ORIGINS` 设置（写在 `server.env` 中，逗号分隔）。
-
-详细的页面结构与主题策略见 `docs/architecture/web_ui.md`。
 
 ## 首次部署流程
 
 ### 中心主机
 
 ```bash
-# 系统用户
+# 1. 系统用户与目录
 sudo useradd -r -s /usr/sbin/nologin dn42ctl
 sudo install -d -m 0750 -o dn42ctl -g dn42ctl /var/lib/dn42ctl /etc/dn42ctl
 
-# admin token
+# 2. 安装 dn42ctl 到 /usr/local/bin
+sudo dn42ctl deploy daemon
+
+# 3. server.env (admin token + CORS origins)
 sudo install -m 0600 -o dn42ctl -g dn42ctl /dev/stdin /etc/dn42ctl/server.env <<EOF
 DN42CTL_API_TOKEN=$(openssl rand -hex 32)
+DN42CTL_CORS_ORIGINS=https://admin.dn42.example.com,https://peer.dn42.example.com
 EOF
 
-# server unit
+# 4. dn42ctl init (初始化配置与数据库)
+sudo -u dn42ctl dn42ctl init
+
+# 5. systemd units
 sudo cp systemd/dn42ctl-server.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now dn42ctl-server.service
-
-# 启动后 /etc/dn42ctl/node.toml 已经自动生成,含 self node_id + token
-
-# nginx 反代
-sudo cp systemd/nginx.dn42ctl.conf.example /etc/nginx/conf.d/dn42ctl.conf
-# 改 server_name / 证书路径
-sudo nginx -t && sudo systemctl reload nginx
-
-# self 节点的定时同步
 sudo cp systemd/dn42ctl-node-once.{service,timer} /etc/systemd/system/
 sudo systemctl daemon-reload
+sudo systemctl enable --now dn42ctl-server.service
 sudo systemctl enable --now dn42ctl-node-once.timer
+
+# 6. Web UI 构建与部署
+cd web && VITE_API_BASE=https://api.dn42.example.com pnpm build && cd ..
+sudo dn42ctl deploy web /var/www/dn42ctl
+
+# 7. nginx
+sudo cp systemd/nginx.dn42ctl.conf.example /etc/nginx/conf.d/dn42ctl.conf
+# 编辑 server_name / 证书路径
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
 ### 远程被管节点
@@ -231,9 +106,9 @@ dn42ctl node add <new-node-id> --name <hostname>
 dn42ctl node token rotate <new-node-id>     # 记下明文 token
 
 # 节点主机:
-dn42ctl node init --server https://center.example --node-id <id> --token <token>
+sudo dn42ctl deploy daemon
+dn42ctl node init --server https://api.dn42.example.com --node-id <id> --token <token>
 
-# unit
 sudo cp systemd/dn42ctl-node-once.{service,timer} /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now dn42ctl-node-once.timer
