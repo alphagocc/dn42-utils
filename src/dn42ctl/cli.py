@@ -2074,7 +2074,7 @@ def cmd_deploy_daemon(
     typer.echo(f"正在安装 dn42ctl 到 {dest} (venv: {tool_dir}) ...")
     try:
         subprocess.run(  # noqa: S603
-            [uv, "tool", "install", "--force", str(pkg_root)],
+            [uv, "tool", "install", "--force", "--reinstall", str(pkg_root)],
             env=env,
             check=True,
         )
