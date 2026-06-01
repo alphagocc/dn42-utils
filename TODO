@@ -2,13 +2,8 @@
 
 <task>
 
-- [x] 很多网页还在用的旧的 api 路径，如何修改？
-  - 已将旧路径（/api/bgp/peers, /api/ibgp/peers, /api/wg/tunnels, /api/genconf）迁移到 /api/admin/ 前缀下。
-  - 后端在 admin router 下实现了对应的 CRUD 端点。
-  - 前端所有 API 路径收敛到 api.ts 中的 API_PATHS 常量集中管理。
-- [x] 在网页底端添加 commit hash。
-  - 创建了 VersionFooter 共享组件，运行时从 /api/version 获取版本和 commit hash。
-  - admin Dashboard 和 peer App 页面底部均已添加。
+- [x] deploy web 添加一个参数指定 VITE_API_BASE
+- [x] 正确 token 调用 https://api-dn42.eof.moe/api/admin/bgp/peers?live=false 显示 404。构造 test 然后修复问题。
 
 </task>
 

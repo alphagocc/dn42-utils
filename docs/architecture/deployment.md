@@ -89,8 +89,7 @@ sudo systemctl enable --now dn42ctl-server.service
 sudo systemctl enable --now dn42ctl-node-once.timer
 
 # 6. Web UI 构建与部署
-cd web && VITE_API_BASE=https://api.dn42.example.com pnpm build && cd ..
-sudo dn42ctl deploy web /var/www/dn42ctl
+sudo dn42ctl deploy web --api-base https://api.dn42.example.com /var/www/dn42ctl
 
 # 7. nginx
 sudo cp systemd/nginx.dn42ctl.conf.example /etc/nginx/conf.d/dn42ctl.conf

@@ -8,18 +8,20 @@
 
 ```bash
 dn42ctl deploy web <dest>
+dn42ctl deploy web --api-base https://api.dn42.example.com <dest>
 dn42ctl deploy web --skip-build <dest>
 ```
 
 | 参数 | 说明 |
 |------|------|
 | `dest` | 部署目标目录 (如 `/var/www/dn42ctl`) |
+| `--api-base` | 设置 `VITE_API_BASE` 环境变量，指定前端 API 基址 (仅构建时生效) |
 | `--skip-build` | 跳过构建，直接复制已有 `dist/` |
 
 行为：构建 → 复制 `dist/{admin,peer,assets}` → `restorecon`（如有）。
 
 ```bash
-sudo dn42ctl deploy web /var/www/dn42ctl
+sudo dn42ctl deploy web --api-base https://api.dn42.example.com /var/www/dn42ctl
 ```
 
 ## deploy daemon

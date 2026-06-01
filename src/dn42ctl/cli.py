@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import uuid
 from dataclasses import asdict, replace
@@ -1958,6 +1959,11 @@ def _restorecon(path: Path) -> None:
 def cmd_deploy_web(
     dest: Path = typer.Argument(..., help="部署目标目录 (如 /var/www/dn42ctl)"),
     skip_build: bool = typer.Option(False, "--skip-build", help="跳过构建，直接复制已有 dist/"),
+    api_base: str = typer.Option(
+        "",
+        "--api-base",
+        help="设置 VITE_API_BASE 环境变量 (如 https://api.dn42.example.com)，仅在构建时生效",
+    ),
 ) -> None:
     """构建 web UI 并复制到指定目录。"""
     import shutil
@@ -1972,6 +1978,11 @@ def cmd_deploy_web(
             typer.echo("错误: 未找到 pnpm，请先安装 (npm install -g pnpm)")
             raise typer.Exit(1)
 
+        build_env = {**os.environ}
+        if api_base:
+            build_env["VITE_API_BASE"] = api_base
+            typer.echo(f"VITE_API_BASE={api_base}")
+
         typer.echo("正在构建 web UI...")
         try:
             subprocess.run(  # noqa: S603
@@ -1982,6 +1993,7 @@ def cmd_deploy_web(
             subprocess.run(  # noqa: S603
                 [pnpm, "build"],
                 cwd=str(web_dir),
+                env=build_env,
                 check=True,
             )
         except subprocess.CalledProcessError as exc:
