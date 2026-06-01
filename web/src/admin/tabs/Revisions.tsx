@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api } from "../../shared/api";
+import { api, API_PATHS } from "../../shared/api";
 import { Table, type Column } from "../../shared/components/Table";
 import { useToast } from "../../shared/components/Toast";
 
@@ -33,7 +33,7 @@ export function Revisions() {
   const toast = useToast();
 
   useEffect(() => {
-    api<Node[]>("/api/admin/nodes").then((ns) => {
+    api<Node[]>(API_PATHS.nodes).then((ns) => {
       setNodes(ns);
       if (ns.length) setNodeId(ns[0].node_id);
     }).catch((e) => setError(e.message));
@@ -42,7 +42,7 @@ export function Revisions() {
   const loadRevisions = useCallback(async (nid: string) => {
     if (!nid) return;
     try {
-      setData(await api<RevisionData>(`/api/admin/nodes/${nid}/revisions?limit=50`));
+      setData(await api<RevisionData>(`${API_PATHS.revisions(nid)}?limit=50`));
       setError("");
     } catch (e) {
       setError((e as Error).message);
@@ -55,13 +55,13 @@ export function Revisions() {
   if (!nodes.length) return <p className="text-zinc-500 text-sm">No nodes registered.</p>;
 
   const pin = async (rev: string) => {
-    await api(`/api/admin/nodes/${nodeId}/rollback`, { method: "POST", body: JSON.stringify({ revision: rev }) });
+    await api(API_PATHS.rollback(nodeId), { method: "POST", body: JSON.stringify({ revision: rev }) });
     toast("Pinned");
     loadRevisions(nodeId);
   };
 
   const unpin = async () => {
-    await api(`/api/admin/nodes/${nodeId}/rollback`, { method: "DELETE" });
+    await api(API_PATHS.rollback(nodeId), { method: "DELETE" });
     toast("Unpinned");
     loadRevisions(nodeId);
   };

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../../shared/api";
+import { api, API_PATHS } from "../../shared/api";
 import { Table, type Column } from "../../shared/components/Table";
 
 interface WgTunnel {
@@ -26,7 +26,7 @@ export function Wg() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api<WgTunnel[]>("/api/wg/tunnels?live=false")
+    api<WgTunnel[]>(`${API_PATHS.wgTunnels}?live=false`)
       .then(setRows)
       .catch((e) => setError(e.message));
   }, []);

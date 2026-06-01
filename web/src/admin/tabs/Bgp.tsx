@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api } from "../../shared/api";
+import { api, API_PATHS } from "../../shared/api";
 import { Table, type Column } from "../../shared/components/Table";
 import { FormModal, type FieldDef } from "../../shared/components/Modal";
 import { ConfirmModal } from "../../shared/components/Modal";
@@ -33,7 +33,7 @@ export function Bgp() {
 
   const load = useCallback(async () => {
     try {
-      setRows(await api<BgpPeer[]>("/api/bgp/peers?live=false"));
+      setRows(await api<BgpPeer[]>(`${API_PATHS.bgpPeers}?live=false`));
       setError("");
     } catch (e) {
       setError((e as Error).message);
@@ -105,7 +105,7 @@ export function Bgp() {
               net_backend: d.net_backend,
             };
             if (d.listen_port) body.listen_port = Number(d.listen_port);
-            await api("/api/bgp/peers", { method: "POST", body: JSON.stringify(body) });
+            await api(API_PATHS.bgpPeers, { method: "POST", body: JSON.stringify(body) });
             toast("BGP peer created");
             setModal(null);
             load();
@@ -126,7 +126,7 @@ export function Bgp() {
               net_backend: d.net_backend,
             };
             if (d.listen_port) body.listen_port = Number(d.listen_port);
-            await api(`/api/bgp/peers/${selected.peer_asn}`, { method: "PUT", body: JSON.stringify(body) });
+            await api(`${API_PATHS.bgpPeers}/${selected.peer_asn}`, { method: "PUT", body: JSON.stringify(body) });
             toast("BGP peer updated");
             setModal(null);
             load();
@@ -139,7 +139,7 @@ export function Bgp() {
           message={`Delete BGP peer AS${selected.peer_asn}?`}
           onClose={() => setModal(null)}
           onConfirm={async () => {
-            await api(`/api/bgp/peers/${selected.peer_asn}`, { method: "DELETE" });
+            await api(`${API_PATHS.bgpPeers}/${selected.peer_asn}`, { method: "DELETE" });
             toast("Deleted");
             setModal(null);
             load();

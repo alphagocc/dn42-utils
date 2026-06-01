@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api } from "../../shared/api";
+import { api, API_PATHS } from "../../shared/api";
 import { Table, type Column } from "../../shared/components/Table";
 import { FormModal, ConfirmModal } from "../../shared/components/Modal";
 import { Modal } from "../../shared/components/Modal";
@@ -33,7 +33,7 @@ export function Nodes() {
 
   const load = useCallback(async () => {
     try {
-      setRows(await api<Node[]>("/api/admin/nodes"));
+      setRows(await api<Node[]>(API_PATHS.nodes));
       setError("");
     } catch (e) {
       setError((e as Error).message);
@@ -83,7 +83,7 @@ export function Nodes() {
           ]}
           onClose={() => setModal(null)}
           onSubmit={async (d) => {
-            await api("/api/admin/nodes", { method: "POST", body: JSON.stringify(d) });
+            await api(API_PATHS.nodes, { method: "POST", body: JSON.stringify(d) });
             toast("Node added");
             setModal(null);
             load();
@@ -96,7 +96,7 @@ export function Nodes() {
           message={`Rotate token for ${selected.node_id.slice(0, 8)}...? The old token will be invalidated.`}
           onClose={() => setModal(null)}
           onConfirm={async () => {
-            const res = await api<{ token: string }>(`/api/admin/nodes/${selected.node_id}/token`, { method: "POST" });
+            const res = await api<{ token: string }>(API_PATHS.nodeToken(selected.node_id), { method: "POST" });
             setNewToken(res.token);
             setModal("token");
           }}
@@ -125,7 +125,7 @@ export function Nodes() {
           message={`Delete node ${selected.node_id.slice(0, 8)}...?${selected.is_self ? " This is the SELF node — force=true will be used." : ""}`}
           onClose={() => setModal(null)}
           onConfirm={async () => {
-            const url = `/api/admin/nodes/${selected.node_id}${selected.is_self ? "?force=true" : ""}`;
+            const url = `${API_PATHS.nodeDelete(selected.node_id)}${selected.is_self ? "?force=true" : ""}`;
             await api(url, { method: "DELETE" });
             toast("Node deleted");
             setModal(null);

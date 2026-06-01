@@ -2,13 +2,13 @@
 
 <task>
 
-- 重构 web 页面
-- 使用 pnpm，配置 minimumReleaseAge: 1440
-- 使用 React+Vite
-- 单页应用，尽量减少 javascript
-- 尽量少依赖库，避免供应链攻击
-- 保持黑白配色
-- 支持亮色暗色切换
+- [x] 很多网页还在用的旧的 api 路径，如何修改？
+  - 已将旧路径（/api/bgp/peers, /api/ibgp/peers, /api/wg/tunnels, /api/genconf）迁移到 /api/admin/ 前缀下。
+  - 后端在 admin router 下实现了对应的 CRUD 端点。
+  - 前端所有 API 路径收敛到 api.ts 中的 API_PATHS 常量集中管理。
+- [x] 在网页底端添加 commit hash。
+  - 创建了 VersionFooter 共享组件，运行时从 /api/version 获取版本和 commit hash。
+  - admin Dashboard 和 peer App 页面底部均已添加。
 
 </task>
 

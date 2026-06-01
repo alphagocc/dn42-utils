@@ -18,6 +18,11 @@ from dn42ctl.services import (
     add_node,
     build_desired_state,
     clear_rollback,
+    create_bgp_peer,
+    create_ibgp_peer,
+    delete_bgp_peer,
+    delete_ibgp_peer,
+    genconf,
     get_node,
     get_node_status,
     get_pinned,
@@ -26,6 +31,8 @@ from dn42ctl.services import (
     list_proposals,
     list_reports,
     list_revisions,
+    modify_bgp_peer,
+    modify_ibgp_peer,
     reject_proposal,
     remove_node,
     require_managed_node_exists,
@@ -47,11 +54,13 @@ from dn42ctl.services.auto_peer import (
 from dn42ctl.services.show import show_bgp_peers, show_ibgp_peers, show_wg_tunnels
 from dn42ctl.validators import (
     validate_asn,
+    validate_babel_type,
     validate_endpoint,
     validate_ipv6_address,
     validate_listen_port,
     validate_net_backend,
     validate_pubkey,
+    validate_rxcost,
 )
 
 _bearer = HTTPBearer(auto_error=False)
@@ -475,6 +484,345 @@ def api_clear_rollback(node_id: str) -> dict:
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"node_id": node_id, "pinned": None}
+
+
+# --- Admin: BGP peer CRUD ---
+
+
+class BgpPeerModifyRequest(BaseModel):
+    peer_public_key: str
+    endpoint: str = ""
+    peer_lla: str
+    net_backend: str = "networkd"
+    listen_port: int | None = None
+    allowed_ips: list[str] | None = None
+
+    @field_validator("peer_public_key")
+    @classmethod
+    def _check_pubkey(cls, v: str) -> str:
+        return validate_pubkey(v)
+
+    @field_validator("endpoint")
+    @classmethod
+    def _check_endpoint(cls, v: str) -> str:
+        return validate_endpoint(v, allow_empty=True)
+
+    @field_validator("peer_lla")
+    @classmethod
+    def _check_peer_lla(cls, v: str) -> str:
+        return validate_ipv6_address(v, field_name="Peer LLA")
+
+    @field_validator("net_backend")
+    @classmethod
+    def _check_backend(cls, v: str) -> str:
+        return validate_net_backend(v)
+
+    @field_validator("listen_port")
+    @classmethod
+    def _check_port(cls, v: int | None) -> int | None:
+        if v is not None:
+            return validate_listen_port(v, allow_zero=True)
+        return v
+
+
+class BgpPeerCreateRequest(BgpPeerModifyRequest):
+    peer_asn: int
+
+    @field_validator("peer_asn")
+    @classmethod
+    def _check_asn(cls, v: int) -> int:
+        return validate_asn(v)
+
+
+@_admin_nodes_router.get("/bgp/peers")
+def api_list_bgp_peers(live: bool = Query(False)) -> list[dict]:
+    config = _get_config()
+    db_path = _get_db_path()
+    try:
+        peers = show_bgp_peers(config=config, db_path=db_path, include_live=live)
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return [asdict(p) for p in peers]
+
+
+@_admin_nodes_router.post("/bgp/peers", status_code=201)
+def api_create_bgp_peer(body: BgpPeerCreateRequest) -> dict:
+    config = _get_config()
+    db_path = _get_db_path()
+    try:
+        result = create_bgp_peer(
+            config=config,
+            db_path=db_path,
+            peer_asn=body.peer_asn,
+            peer_public_key=body.peer_public_key,
+            endpoint=body.endpoint,
+            peer_lla=body.peer_lla,
+            net_backend=body.net_backend,
+            listen_port=body.listen_port,
+            render_files=False,
+            allowed_ips=body.allowed_ips,
+        )
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return asdict(result)
+
+
+@_admin_nodes_router.put("/bgp/peers/{peer_asn}")
+def api_modify_bgp_peer(peer_asn: int, body: BgpPeerModifyRequest) -> dict:
+    config = _get_config()
+    db_path = _get_db_path()
+    try:
+        result = modify_bgp_peer(
+            config=config,
+            db_path=db_path,
+            peer_asn=peer_asn,
+            peer_public_key=body.peer_public_key,
+            endpoint=body.endpoint,
+            peer_lla=body.peer_lla,
+            net_backend=body.net_backend,
+            listen_port=body.listen_port,
+            render_files=False,
+            allowed_ips=body.allowed_ips,
+        )
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return asdict(result)
+
+
+@_admin_nodes_router.delete("/bgp/peers/{peer_asn}")
+def api_delete_bgp_peer(peer_asn: int) -> dict:
+    config = _get_config()
+    db_path = _get_db_path()
+    try:
+        result = delete_bgp_peer(
+            config=config,
+            db_path=db_path,
+            peer_asn=peer_asn,
+            render_files=False,
+        )
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return asdict(result)
+
+
+# --- Admin: iBGP peer CRUD ---
+
+
+class _IbgpPeerValidators(BaseModel):
+    """Shared fields + validators for iBGP create/modify request models."""
+
+    peer_ip: str
+    babel_rxcost: int = 0
+    babel_type: str = "tunnel"
+    listen_port: int | None = None
+    allowed_ips: list[str] | None = None
+
+    @field_validator("peer_ip")
+    @classmethod
+    def _check_peer_ip(cls, v: str) -> str:
+        return validate_ipv6_address(v, field_name="Peer IP")
+
+    @field_validator("babel_rxcost")
+    @classmethod
+    def _check_rxcost(cls, v: int) -> int:
+        return validate_rxcost(v)
+
+    @field_validator("babel_type")
+    @classmethod
+    def _check_babel_type(cls, v: str) -> str:
+        return validate_babel_type(v)
+
+    @field_validator("listen_port")
+    @classmethod
+    def _check_port(cls, v: int | None) -> int | None:
+        if v is not None:
+            return validate_listen_port(v, allow_zero=True)
+        return v
+
+
+class IbgpPeerCreateRequest(_IbgpPeerValidators):
+    name: str
+    has_wg: bool = True
+    peer_public_key: str | None = None
+    endpoint: str | None = None
+    peer_lla: str | None = None
+    net_backend: str | None = None
+
+    @field_validator("peer_public_key")
+    @classmethod
+    def _check_pubkey(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_pubkey(v)
+        return v
+
+    @field_validator("endpoint")
+    @classmethod
+    def _check_endpoint(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_endpoint(v, allow_empty=True)
+        return v
+
+    @field_validator("peer_lla")
+    @classmethod
+    def _check_peer_lla(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_ipv6_address(v, field_name="Peer LLA")
+        return v
+
+    @field_validator("net_backend")
+    @classmethod
+    def _check_backend(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_net_backend(v)
+        return v
+
+
+class IbgpPeerModifyRequest(_IbgpPeerValidators):
+    peer_public_key: str
+    endpoint: str = ""
+    peer_lla: str
+    net_backend: str = "networkd"
+
+    @field_validator("peer_public_key")
+    @classmethod
+    def _check_pubkey(cls, v: str) -> str:
+        return validate_pubkey(v)
+
+    @field_validator("endpoint")
+    @classmethod
+    def _check_endpoint(cls, v: str) -> str:
+        return validate_endpoint(v, allow_empty=True)
+
+    @field_validator("peer_lla")
+    @classmethod
+    def _check_peer_lla(cls, v: str) -> str:
+        return validate_ipv6_address(v, field_name="Peer LLA")
+
+    @field_validator("net_backend")
+    @classmethod
+    def _check_backend(cls, v: str) -> str:
+        return validate_net_backend(v)
+
+
+@_admin_nodes_router.get("/ibgp/peers")
+def api_list_ibgp_peers(live: bool = Query(False)) -> list[dict]:
+    config = _get_config()
+    db_path = _get_db_path()
+    try:
+        peers = show_ibgp_peers(config=config, db_path=db_path, include_live=live)
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return [asdict(p) for p in peers]
+
+
+@_admin_nodes_router.post("/ibgp/peers", status_code=201)
+def api_create_ibgp_peer(body: IbgpPeerCreateRequest) -> dict:
+    config = _get_config()
+    db_path = _get_db_path()
+    try:
+        result = create_ibgp_peer(
+            config=config,
+            db_path=db_path,
+            name=body.name,
+            peer_ip=body.peer_ip,
+            has_wg=body.has_wg,
+            peer_public_key=body.peer_public_key,
+            endpoint=body.endpoint,
+            peer_lla=body.peer_lla,
+            net_backend=body.net_backend,
+            babel_rxcost=body.babel_rxcost,
+            babel_type=body.babel_type,
+            listen_port=body.listen_port,
+            render_files=False,
+            allowed_ips=body.allowed_ips,
+        )
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return asdict(result)
+
+
+@_admin_nodes_router.put("/ibgp/peers/{name}")
+def api_modify_ibgp_peer(name: str, body: IbgpPeerModifyRequest) -> dict:
+    config = _get_config()
+    db_path = _get_db_path()
+    try:
+        result = modify_ibgp_peer(
+            config=config,
+            db_path=db_path,
+            name=name,
+            peer_public_key=body.peer_public_key,
+            endpoint=body.endpoint,
+            peer_lla=body.peer_lla,
+            net_backend=body.net_backend,
+            peer_ip=body.peer_ip,
+            babel_rxcost=body.babel_rxcost,
+            babel_type=body.babel_type,
+            listen_port=body.listen_port,
+            render_files=False,
+            allowed_ips=body.allowed_ips,
+        )
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return asdict(result)
+
+
+@_admin_nodes_router.delete("/ibgp/peers/{name}")
+def api_delete_ibgp_peer(name: str) -> dict:
+    config = _get_config()
+    db_path = _get_db_path()
+    try:
+        result = delete_ibgp_peer(
+            config=config,
+            db_path=db_path,
+            name=name,
+            render_files=False,
+        )
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return asdict(result)
+
+
+# --- Admin: WireGuard tunnels (read-only) ---
+
+
+@_admin_nodes_router.get("/wg/tunnels")
+def api_list_wg_tunnels(live: bool = Query(False)) -> list[dict]:
+    config = _get_config()
+    db_path = _get_db_path()
+    try:
+        tunnels = show_wg_tunnels(config=config, db_path=db_path, include_live=live)
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return [asdict(t) for t in tunnels]
+
+
+# --- Admin: genconf ---
+
+
+class GenconfRequest(BaseModel):
+    overwrite_bird_conf: bool = False
+    overwrite_babel_conf: bool = False
+
+
+@_admin_nodes_router.post("/genconf")
+def api_genconf(body: GenconfRequest) -> dict:
+    config = _get_config()
+    db_path = _get_db_path()
+    try:
+        result = genconf(
+            config=config,
+            db_path=db_path,
+            overwrite_bird_conf=body.overwrite_bird_conf,
+            overwrite_babel_conf=body.overwrite_babel_conf,
+        )
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "bird_conf_path": str(result.bird_conf_path),
+        "bird_babel_conf_path": str(result.bird_babel_conf_path),
+        "bird_roa_v6_conf_path": str(result.bird_roa_v6_conf_path),
+        "warnings": result.warnings,
+    }
 
 
 # --- Public auto-peer routes (no admin/node bearer for steps 1-3) ---

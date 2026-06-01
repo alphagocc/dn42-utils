@@ -99,14 +99,14 @@ HTML `<head>` 内尽早执行的内联脚本（防 FOUC）：
 | Tab | 数据来源 (admin API) | 操作 |
 |-----|---------------------|------|
 | Overview | `GET /api/show/all?live=false` | 只读卡片：node_id + 三类 peer 数量 |
-| BGP peers | `GET /api/bgp/peers?live=false` | + Add / row Edit / row Delete |
-| iBGP peers | `GET /api/ibgp/peers?live=false` | + Add / row Edit / row Delete |
-| WG tunnels | `GET /api/wg/tunnels?live=false` | 只读 |
+| BGP peers | `GET /api/admin/bgp/peers?live=false` | + Add / row Edit / row Delete |
+| iBGP peers | `GET /api/admin/ibgp/peers?live=false` | + Add / row Edit / row Delete |
+| WG tunnels | `GET /api/admin/wg/tunnels?live=false` | 只读 |
 | Nodes | `GET /api/admin/nodes` | + Add / Rotate token (一次性明文) / Delete |
 | Proposals | `GET /api/admin/nodes/{id}/proposals` (按 node 切换) | Accept / Reject (带 reason) |
 | Reports | `GET /api/admin/nodes/{id}/reports` | Import |
 | Revisions | `GET /api/admin/nodes/{id}/revisions` | Pin (rollback) / Unpin |
-| Genconf | `POST /api/genconf` | 触发按钮 + 显示返回的 warnings/paths |
+| Genconf | `POST /api/admin/genconf` | 触发按钮 + 显示返回的 warnings/paths |
 
 Tab 切换使用 React `useState`，刷新按钮递增 `refreshKey` 强制组件重新挂载重新请求。
 

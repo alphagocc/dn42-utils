@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api } from "../../shared/api";
+import { api, API_PATHS } from "../../shared/api";
 import { useToast } from "../../shared/components/Toast";
 
 export function Genconf() {
@@ -10,7 +10,7 @@ export function Genconf() {
     e.preventDefault();
     const fd = Object.fromEntries(new FormData(e.currentTarget));
     try {
-      const res = await api("/api/genconf", {
+      const res = await api(API_PATHS.genconf, {
         method: "POST",
         body: JSON.stringify({
           overwrite_bird_conf: !!fd.overwrite_bird_conf,

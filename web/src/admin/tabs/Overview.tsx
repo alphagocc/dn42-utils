@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../../shared/api";
+import { api, API_PATHS } from "../../shared/api";
 
 interface OverviewData {
   node_id: string;
@@ -13,7 +13,7 @@ export function Overview() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api<OverviewData>("/api/show/all?live=false")
+    api<OverviewData>(`${API_PATHS.showAll}?live=false`)
       .then(setData)
       .catch((e) => setError(e.message));
   }, []);

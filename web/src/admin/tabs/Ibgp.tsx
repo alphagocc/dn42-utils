@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api } from "../../shared/api";
+import { api, API_PATHS } from "../../shared/api";
 import { Table, type Column } from "../../shared/components/Table";
 import { FormModal, ConfirmModal, type FieldDef } from "../../shared/components/Modal";
 import { useToast } from "../../shared/components/Toast";
@@ -37,7 +37,7 @@ export function Ibgp() {
 
   const load = useCallback(async () => {
     try {
-      setRows(await api<IbgpPeer[]>("/api/ibgp/peers?live=false"));
+      setRows(await api<IbgpPeer[]>(`${API_PATHS.ibgpPeers}?live=false`));
       setError("");
     } catch (e) {
       setError((e as Error).message);
@@ -120,7 +120,7 @@ export function Ibgp() {
             if (d.endpoint) body.endpoint = d.endpoint;
             if (d.peer_lla) body.peer_lla = d.peer_lla;
             if (d.listen_port) body.listen_port = Number(d.listen_port);
-            await api("/api/ibgp/peers", { method: "POST", body: JSON.stringify(body) });
+            await api(API_PATHS.ibgpPeers, { method: "POST", body: JSON.stringify(body) });
             toast("iBGP peer created");
             setModal(null);
             load();
@@ -144,7 +144,7 @@ export function Ibgp() {
               babel_type: d.babel_type,
             };
             if (d.listen_port) body.listen_port = Number(d.listen_port);
-            await api(`/api/ibgp/peers/${selected.name}`, { method: "PUT", body: JSON.stringify(body) });
+            await api(`${API_PATHS.ibgpPeers}/${selected.name}`, { method: "PUT", body: JSON.stringify(body) });
             toast("iBGP peer updated");
             setModal(null);
             load();
@@ -157,7 +157,7 @@ export function Ibgp() {
           message={`Delete iBGP peer ${selected.name}?`}
           onClose={() => setModal(null)}
           onConfirm={async () => {
-            await api(`/api/ibgp/peers/${selected.name}`, { method: "DELETE" });
+            await api(`${API_PATHS.ibgpPeers}/${selected.name}`, { method: "DELETE" });
             toast("Deleted");
             setModal(null);
             load();

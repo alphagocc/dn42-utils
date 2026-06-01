@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ThemeToggle } from "../shared/components/ThemeToggle";
+import { VersionFooter } from "../shared/components/VersionFooter";
 import { Step1Lookup } from "./steps/Step1Lookup";
 import { Step2Auth } from "./steps/Step2Auth";
 import { Step3Sign } from "./steps/Step3Sign";
@@ -114,8 +115,9 @@ export function App() {
         )}
       </main>
 
-      <footer className="mt-12 text-xs text-zinc-500 text-center">
-        Peering requests are submitted as proposals and require operator approval.
+      <footer className="mt-12 text-xs text-zinc-500 text-center space-y-1">
+        <p>Peering requests are submitted as proposals and require operator approval.</p>
+        <VersionFooter />
       </footer>
     </div>
   );

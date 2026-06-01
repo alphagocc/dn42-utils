@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api } from "../../shared/api";
+import { api, API_PATHS } from "../../shared/api";
 import { Table, type Column } from "../../shared/components/Table";
 import { FormModal } from "../../shared/components/Modal";
 import { useToast } from "../../shared/components/Toast";
@@ -36,7 +36,7 @@ export function Proposals() {
   const toast = useToast();
 
   useEffect(() => {
-    api<Node[]>("/api/admin/nodes").then((ns) => {
+    api<Node[]>(API_PATHS.nodes).then((ns) => {
       setNodes(ns);
       if (ns.length) setNodeId(ns[0].node_id);
     }).catch((e) => setError(e.message));
@@ -45,7 +45,7 @@ export function Proposals() {
   const loadProposals = useCallback(async (nid: string) => {
     if (!nid) return;
     try {
-      setRows(await api<Proposal[]>(`/api/admin/nodes/${nid}/proposals?limit=100`));
+      setRows(await api<Proposal[]>(`${API_PATHS.proposals(nid)}?limit=100`));
       setError("");
     } catch (e) {
       setError((e as Error).message);
@@ -58,7 +58,7 @@ export function Proposals() {
   if (!nodes.length) return <p className="text-zinc-500 text-sm">No nodes registered.</p>;
 
   const accept = async (id: number) => {
-    await api(`/api/admin/proposals/${id}/accept`, { method: "POST" });
+    await api(API_PATHS.proposalAccept(id), { method: "POST" });
     toast("Accepted");
     loadProposals(nodeId);
   };
@@ -95,7 +95,7 @@ export function Proposals() {
           fields={[{ name: "reason", label: "Reason", required: true }]}
           onClose={() => setRejectId(null)}
           onSubmit={async (d) => {
-            await api(`/api/admin/proposals/${rejectId}/reject`, { method: "POST", body: JSON.stringify(d) });
+            await api(API_PATHS.proposalReject(rejectId), { method: "POST", body: JSON.stringify(d) });
             toast("Rejected");
             setRejectId(null);
             loadProposals(nodeId);

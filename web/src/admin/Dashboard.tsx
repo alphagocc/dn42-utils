@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { ThemeToggle } from "../shared/components/ThemeToggle";
+import { VersionFooter } from "../shared/components/VersionFooter";
 import { Overview } from "./tabs/Overview";
 import { Bgp } from "./tabs/Bgp";
 import { Ibgp } from "./tabs/Ibgp";
@@ -93,6 +94,9 @@ export function Dashboard({ onLogout }: Props) {
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">
         {tabComponents[activeTab]}
       </main>
+      <footer className="mx-auto w-full max-w-7xl px-4 py-3 text-right">
+        <VersionFooter />
+      </footer>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api } from "../shared/api";
+import { api, API_PATHS } from "../shared/api";
 import { ThemeToggle } from "../shared/components/ThemeToggle";
 
 interface Props {
@@ -14,7 +14,7 @@ export function Login({ onLogin }: Props) {
     const t = new FormData(e.currentTarget).get("token") as string;
     if (!t.trim()) return;
     try {
-      await api("/api/show/all?live=false", {}, t.trim());
+      await api(`${API_PATHS.showAll}?live=false`, {}, t.trim());
       sessionStorage.setItem("dn42ctl_admin_token", t.trim());
       onLogin(t.trim());
     } catch {
