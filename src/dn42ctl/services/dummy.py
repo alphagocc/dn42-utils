@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from dn42ctl.constants import FILE_MODE_NETDEV
-from dn42ctl.fs import chmod_best_effort
+from dn42ctl.fs import chmod_best_effort, chown_best_effort
 from dn42ctl.render import render_dummy_netdev, render_dummy_network
 
 DUMMY_IFNAME = "dn42-dummy"
@@ -63,6 +63,7 @@ def _ensure_networkd(own_ipv6: str, networkd_dir: str) -> DummyResult:
     try:
         netdev_path.write_text(netdev_content)
         chmod_best_effort(netdev_path, FILE_MODE_NETDEV)
+        chown_best_effort(netdev_path, 0, "systemd-network")
         network_path.write_text(network_content)
         chmod_best_effort(network_path, FILE_MODE_NETDEV)
     except OSError as exc:
