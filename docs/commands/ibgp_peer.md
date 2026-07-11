@@ -7,7 +7,7 @@
 ### 输入
 
 - 必填：`--name`、`--peer-ip`（对端网内 IPv6 地址）。
-- WG 相关（`--no-wg` 未设置时必填）：`--pubkey`、`--peer-lla`、`--net`、`--rxcost`。
+- WG 相关（`--no-wg` 未设置时必填）：`--pubkey`、`--peer-lla`、`--rxcost`。
 - 可选：
   - `--endpoint`：对端 Endpoint（IP:Port）。可为空，适用于对端在防火墙后的场景。
   - `--type`：Babel interface type，取值 `wired`/`wireless`/`tunnel`，默认 `tunnel`。高丢包链路建议使用 `wireless`。
@@ -23,7 +23,6 @@
 - `--pubkey`：WireGuard 公钥，base64 格式（40~44 字符）。
 - `--endpoint`：`host:port` 或 `[IPv6]:port` 格式，端口 1-65535。可为空。
 - `--peer-lla`：合法的 IPv6 地址（允许带 `/prefix`）。
-- `--net`：`networkd` 或 `nm`（也接受 `networkmanager`）。
 - `--rxcost`：0-65535。
 - `--type`：`wired` / `wireless` / `tunnel`（大小写不敏感）。
 - `--listen-port`：0 或 1-65535。
@@ -42,14 +41,14 @@
 ### 输出
 
 - Bird iBGP peer conf：始终写入 `bird_peers_dir/ibgp_<name>.conf`。使用 `--peer-ip`（网内 IP）作为 neighbor 地址。
-- 有 WG 时：写入 networkd 或 NetworkManager 的 WireGuard 配置文件，**重生成** `babel.conf`。
+- 有 WG 时：写入 networkd 的 WireGuard 配置文件，**重生成** `babel.conf`。
 - 无 WG 时：仅写入 Bird peer conf，不写网络配置文件，不修改 babel.conf。`--no-wg` peer 不会出现在 `babel.conf` 的 interface 列表中。
 
 ---
 
 ## `dn42ctl ibgp peer modify`
 
-用途：修改已存在 iBGP peer 的 WG 相关参数（pubkey/endpoint/peer_lla/peer_ip/net_backend/rxcost/listen_port/type），并重生成配置文件。
+用途：修改已存在 iBGP peer 的 WG 相关参数（pubkey/endpoint/peer_lla/peer_ip/rxcost/listen_port/type），并重生成配置文件。
 
 ### 输入
 
@@ -75,5 +74,5 @@
 
 - 删除前必须二次确认（交互 prompt）。
 - 删除数据库记录。
-- 有 WG 时：删除生成文件（Bird peer conf + networkd/NM 文件），并重生成 `babel.conf`。
+- 有 WG 时：删除生成文件（Bird peer conf + networkd 文件），并重生成 `babel.conf`。
 - 无 WG 时：仅删除 Bird peer conf。

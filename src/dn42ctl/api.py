@@ -59,7 +59,6 @@ from dn42ctl.validators import (
     validate_endpoint,
     validate_ipv6_address,
     validate_listen_port,
-    validate_net_backend,
     validate_pubkey,
     validate_rxcost,
 )
@@ -494,7 +493,6 @@ class BgpPeerModifyRequest(BaseModel):
     peer_public_key: str
     endpoint: str = ""
     peer_lla: str
-    net_backend: str = "networkd"
     listen_port: int | None = None
     allowed_ips: list[str] | None = None
 
@@ -512,11 +510,6 @@ class BgpPeerModifyRequest(BaseModel):
     @classmethod
     def _check_peer_lla(cls, v: str) -> str:
         return validate_ipv6_address(v, field_name="Peer LLA")
-
-    @field_validator("net_backend")
-    @classmethod
-    def _check_backend(cls, v: str) -> str:
-        return validate_net_backend(v)
 
     @field_validator("listen_port")
     @classmethod
@@ -565,7 +558,7 @@ def api_create_bgp_peer(body: BgpPeerCreateRequest) -> dict:
             peer_public_key=body.peer_public_key,
             endpoint=body.endpoint,
             peer_lla=body.peer_lla,
-            net_backend=body.net_backend,
+            net_backend="networkd",
             listen_port=body.listen_port,
             render_files=False,
             allowed_ips=body.allowed_ips,
@@ -587,7 +580,7 @@ def api_modify_bgp_peer(peer_asn: int, body: BgpPeerModifyRequest) -> dict:
             peer_public_key=body.peer_public_key,
             endpoint=body.endpoint,
             peer_lla=body.peer_lla,
-            net_backend=body.net_backend,
+            net_backend="networkd",
             listen_port=body.listen_port,
             render_files=False,
             allowed_ips=body.allowed_ips,
@@ -661,7 +654,6 @@ class IbgpPeerCreateRequest(_IbgpPeerValidators):
     peer_public_key: str | None = None
     endpoint: str | None = None
     peer_lla: str | None = None
-    net_backend: str | None = None
 
     @field_validator("peer_public_key")
     @classmethod
@@ -684,19 +676,11 @@ class IbgpPeerCreateRequest(_IbgpPeerValidators):
             return validate_ipv6_address(v, field_name="Peer LLA")
         return v
 
-    @field_validator("net_backend")
-    @classmethod
-    def _check_backend(cls, v: str | None) -> str | None:
-        if v is not None:
-            return validate_net_backend(v)
-        return v
-
 
 class IbgpPeerModifyRequest(_IbgpPeerValidators):
     peer_public_key: str
     endpoint: str = ""
     peer_lla: str
-    net_backend: str = "networkd"
 
     @field_validator("peer_public_key")
     @classmethod
@@ -712,11 +696,6 @@ class IbgpPeerModifyRequest(_IbgpPeerValidators):
     @classmethod
     def _check_peer_lla(cls, v: str) -> str:
         return validate_ipv6_address(v, field_name="Peer LLA")
-
-    @field_validator("net_backend")
-    @classmethod
-    def _check_backend(cls, v: str) -> str:
-        return validate_net_backend(v)
 
 
 @_admin_nodes_router.get("/ibgp/peers")
@@ -744,7 +723,7 @@ def api_create_ibgp_peer(body: IbgpPeerCreateRequest) -> dict:
             peer_public_key=body.peer_public_key,
             endpoint=body.endpoint,
             peer_lla=body.peer_lla,
-            net_backend=body.net_backend,
+            net_backend="networkd",
             babel_rxcost=body.babel_rxcost,
             babel_type=body.babel_type,
             listen_port=body.listen_port,
@@ -768,7 +747,7 @@ def api_modify_ibgp_peer(name: str, body: IbgpPeerModifyRequest) -> dict:
             peer_public_key=body.peer_public_key,
             endpoint=body.endpoint,
             peer_lla=body.peer_lla,
-            net_backend=body.net_backend,
+            net_backend="networkd",
             peer_ip=body.peer_ip,
             babel_rxcost=body.babel_rxcost,
             babel_type=body.babel_type,
@@ -916,7 +895,6 @@ class AutoPeerSubmitRequest(BaseModel):
     wg_public_key: str
     endpoint: str = ""
     peer_lla: str
-    net_backend: str = "networkd"
     listen_port: int | None = None
 
     @field_validator("wg_public_key")
@@ -933,11 +911,6 @@ class AutoPeerSubmitRequest(BaseModel):
     @classmethod
     def _check_peer_lla(cls, v: str) -> str:
         return validate_ipv6_address(v, field_name="Peer LLA")
-
-    @field_validator("net_backend")
-    @classmethod
-    def _check_backend(cls, v: str) -> str:
-        return validate_net_backend(v)
 
     @field_validator("listen_port")
     @classmethod
@@ -1034,7 +1007,7 @@ def api_auto_peer_submit(
             wg_public_key=body.wg_public_key,
             endpoint=body.endpoint,
             peer_lla=body.peer_lla,
-            net_backend=body.net_backend,
+            net_backend="networkd",
             listen_port=body.listen_port,
         )
     except AutoPeerError as exc:

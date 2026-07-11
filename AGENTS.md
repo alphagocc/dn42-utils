@@ -38,7 +38,7 @@ Notes:
   - Details and rationale are documented in the spec: [`docs/spec.md`](docs/spec.md).
 - Templates are rendered with **Jinja2 `StrictUndefined`**; missing context variables should be treated as bugs.
 - SQLite can store WireGuard private keys; keep permissions restrictive (the code attempts `chmod 0600`).
-- The tool targets **Linux** paths and backends (`systemd-networkd` and `NetworkManager`). Avoid introducing Windows-specific assumptions.
+- The tool targets **Linux** paths and backends (`systemd-networkd` for peer WireGuard; `NetworkManager` only for `dummy_backend`). Avoid introducing Windows-specific assumptions.
 - If you use Pylance/pyright strict checking, avoid importing underscore-prefixed (private) helpers across modules (can trigger `reportPrivateUsage`).
 
 ## How to extend safely

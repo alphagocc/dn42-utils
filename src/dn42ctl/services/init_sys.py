@@ -143,12 +143,17 @@ def genconf(
 
     if regenerate_peers:
         has_networkd_peers = False
+        nm_dir = Path(config.nm_system_connections_dir)
 
         for row in db.list_bgp_peers(node_id):
             ifname = row["ifname"]
             peer_lla = row["peer_lla"]
             peer_asn = row["peer_asn"]
             backend = row["net_backend"] or "networkd"
+
+            # Remove legacy NM profile if it exists
+            legacy_nm = nm_dir / f"{ifname}.nmconnection"
+            legacy_nm.unlink(missing_ok=True)
 
             write_bird_bgp_peer(
                 config=config,
@@ -194,6 +199,10 @@ def genconf(
                 warnings.append(f"iBGP peer {peer_name!r}: peer_ip 为空，跳过 Bird conf 生成")
 
             if has_wg:
+                # Remove legacy NM profile if it exists
+                legacy_nm = nm_dir / f"{ifname}.nmconnection"
+                legacy_nm.unlink(missing_ok=True)
+
                 write_net_backend_files(
                     config=config,
                     node_id=node_id,

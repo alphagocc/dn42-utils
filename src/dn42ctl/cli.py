@@ -514,7 +514,6 @@ def cmd_bgp_peer(
     peer_public_key: str | None = typer.Option(None, "--pubkey", help="Peer WireGuard 公钥"),
     endpoint: str | None = typer.Option(None, "--endpoint", help="Peer Endpoint (IP:Port，可留空)"),
     peer_lla: str | None = typer.Option(None, "--peer-lla", help="Peer LLA (IPv6)"),
-    net_backend: str | None = typer.Option(None, "--net", help="networkd 或 nm (NetworkManager)"),
     listen_port: int | None = typer.Option(
         None,
         "--listen-port",
@@ -534,8 +533,6 @@ def cmd_bgp_peer(
 
     if peer_asn is None:
         peer_asn = typer.prompt("Peer ASN", type=int)
-    if net_backend is None:
-        net_backend = typer.prompt("网络后端", default="networkd")
 
     parsed_allowed_ips: list[str] | None = None
     if allowed_ips_str is not None:
@@ -555,7 +552,6 @@ def cmd_bgp_peer(
     ) = _prepare_peer_info(peer_public_key, endpoint, peer_lla, allow_empty_endpoint=True)
 
     assert peer_asn is not None
-    assert net_backend is not None
 
     try:
         peer_public_key = _cli_validate(validate_pubkey, peer_public_key)
@@ -577,7 +573,7 @@ def cmd_bgp_peer(
             peer_public_key=peer_public_key,
             endpoint=endpoint,
             peer_lla=peer_lla,
-            net_backend=net_backend,
+            net_backend="networkd",
             listen_port=listen_port,
             wg_private_key=prepared_private_key,
             wg_public_key=prepared_public_key,
@@ -604,7 +600,6 @@ def cmd_bgp_peer_modify(
     peer_public_key: str | None = typer.Option(None, "--pubkey", help="Peer WireGuard 公钥"),
     endpoint: str | None = typer.Option(None, "--endpoint", help="Peer Endpoint (IP:Port)"),
     peer_lla: str | None = typer.Option(None, "--peer-lla", help="Peer LLA (IPv6)"),
-    net_backend: str | None = typer.Option(None, "--net", help="networkd 或 nm"),
     listen_port: int | None = typer.Option(
         None,
         "--listen-port",
@@ -631,8 +626,6 @@ def cmd_bgp_peer_modify(
         endpoint = typer.prompt("Peer Endpoint", default=str(row["endpoint"] or ""))
     if peer_lla is None:
         peer_lla = typer.prompt("Peer LLA", default=str(row["peer_lla"] or ""))
-    if net_backend is None:
-        net_backend = typer.prompt("网络后端", default=str(row["net_backend"] or "networkd"))
 
     current_allowed_ips = parse_allowed_ips_json(row["allowed_ips_json"])
     if allowed_ips_str is None:
@@ -641,7 +634,6 @@ def cmd_bgp_peer_modify(
     assert peer_public_key is not None
     assert endpoint is not None
     assert peer_lla is not None
-    assert net_backend is not None
 
     parsed_allowed_ips: list[str] | None = None
     try:
@@ -666,7 +658,7 @@ def cmd_bgp_peer_modify(
             peer_public_key=peer_public_key,
             endpoint=endpoint,
             peer_lla=peer_lla,
-            net_backend=net_backend,
+            net_backend="networkd",
             listen_port=listen_port,
             allowed_ips=parsed_allowed_ips,
         )
@@ -721,7 +713,6 @@ def cmd_ibgp_peer(
     peer_public_key: str | None = typer.Option(None, "--pubkey", help="Peer WireGuard 公钥"),
     endpoint: str | None = typer.Option(None, "--endpoint", help="Peer Endpoint (IP:Port，可留空)"),
     peer_lla: str | None = typer.Option(None, "--peer-lla", help="Peer LLA (IPv6)"),
-    net_backend: str | None = typer.Option(None, "--net", help="networkd 或 nm"),
     babel_rxcost: int | None = typer.Option(None, "--rxcost", help="Babel rxcost (0-65535)"),
     babel_type: str | None = typer.Option(
         None, "--type", help="Babel interface type (wired/wireless/tunnel，默认 tunnel)"
@@ -785,8 +776,6 @@ def cmd_ibgp_peer(
             typer.echo(f"写入: {p}")
         return
 
-    if net_backend is None:
-        net_backend = typer.prompt("网络后端", default="networkd")
     if babel_rxcost is None:
         babel_rxcost = typer.prompt("Babel rxcost", type=int)
     if babel_type is None:
@@ -801,7 +790,6 @@ def cmd_ibgp_peer(
         peer_lla,
     ) = _prepare_peer_info(peer_public_key, endpoint, peer_lla, allow_empty_endpoint=True)
 
-    assert net_backend is not None
     assert babel_rxcost is not None
     assert babel_type is not None
 
@@ -832,7 +820,7 @@ def cmd_ibgp_peer(
             peer_public_key=peer_public_key,
             endpoint=endpoint,
             peer_lla=peer_lla,
-            net_backend=net_backend,
+            net_backend="networkd",
             babel_rxcost=babel_rxcost,
             babel_type=babel_type,
             listen_port=listen_port,
@@ -862,7 +850,6 @@ def cmd_ibgp_peer_modify(
     endpoint: str | None = typer.Option(None, "--endpoint", help="Peer Endpoint (IP:Port)"),
     peer_lla: str | None = typer.Option(None, "--peer-lla", help="Peer LLA (IPv6)"),
     peer_ip: str | None = typer.Option(None, "--peer-ip", help="对端网内 IPv6 地址"),
-    net_backend: str | None = typer.Option(None, "--net", help="networkd 或 nm"),
     babel_rxcost: int | None = typer.Option(None, "--rxcost", help="Babel rxcost (0-65535)"),
     babel_type: str | None = typer.Option(None, "--type", help="Babel interface type (wired/wireless/tunnel)"),
     listen_port: int | None = typer.Option(
@@ -903,8 +890,6 @@ def cmd_ibgp_peer_modify(
         peer_lla = typer.prompt("Peer LLA", default=str(row["peer_lla"] or ""))
     if peer_ip is None:
         peer_ip = typer.prompt("对端网内 IPv6", default=str(row["peer_ip"] or ""))
-    if net_backend is None:
-        net_backend = typer.prompt("网络后端", default=str(row["net_backend"] or "networkd"))
     if babel_rxcost is None:
         babel_rxcost = typer.prompt("Babel rxcost", type=int, default=int(row["babel_rxcost"]))
     if babel_type is None:
@@ -918,7 +903,6 @@ def cmd_ibgp_peer_modify(
     assert endpoint is not None
     assert peer_lla is not None
     assert peer_ip is not None
-    assert net_backend is not None
     assert babel_rxcost is not None
     assert babel_type is not None
 
@@ -953,7 +937,7 @@ def cmd_ibgp_peer_modify(
             endpoint=endpoint,
             peer_lla=peer_lla,
             peer_ip=peer_ip,
-            net_backend=net_backend,
+            net_backend="networkd",
             babel_rxcost=babel_rxcost,
             babel_type=babel_type,
             listen_port=listen_port,

@@ -8,7 +8,7 @@
 
 - 可复现环境：使用 `uv` 锁定依赖与运行环境。
 - CLI 功能：支持 `init`、`genconf`、`bgp peer [add|modify|del]`、`ibgp peer [add|modify|del]`、`show`、`scan`。
-- 网络后端：同时支持 `systemd-networkd` 与 `NetworkManager`。
+- 网络后端：peer WireGuard 配置仅支持 `systemd-networkd`；`dummy_backend` 仍支持 `networkd` 与 `nm`。
 - 强制约束：WireGuard 的 AllowedIPs **必须写入**，但**禁止自动修改路由表**。
 - 数据落库：所有状态写入 SQLite，便于多端/多节点集中管理；以 `node_id` 区分节点。
 - 多节点中心化同步：hub-spoke 架构，详见 `docs/architecture/sync_hub_spoke.md`。
@@ -40,7 +40,7 @@
   - babel：`/etc/bird/babel.conf`
   - ROA v6 include：`/etc/bird/roa_dn42_v6.conf`
 - systemd-networkd：`/etc/systemd/network/`
-- NetworkManager：`/etc/NetworkManager/system-connections/`
+- NetworkManager（仅 dummy_backend 使用）：`/etc/NetworkManager/system-connections/`
 
 当权限不足时，程序应提示：以 root 运行或通过参数覆盖到可写路径。
 
@@ -48,8 +48,8 @@
 
 - 禁止自动改路由表：
   - networkd：`RouteTable=off`
-  - NetworkManager：`peer-routes=false`
-- `scan` 仅支持 `systemd-networkd` 与 `NetworkManager`（不支持 wg-quick `/etc/wireguard` 扫描）。
+  - NetworkManager（仅 dummy_backend）：`peer-routes=false`
+- `scan` 仅支持 `systemd-networkd`（不支持 wg-quick `/etc/wireguard` 或 NetworkManager 扫描）。
 - 渲染引擎使用 Jinja2；验收以“语义一致”为准（允许空白差异）。
 
 ## Babel rxcost 设计
@@ -106,6 +106,7 @@
 - **增量数据库迁移 (v1-v7)**：合并为单个建表语句（single consolidated migration）。
 - **payload 字段兼容默认值**：节点间 API 的 `has_wg`、`babel_rxcost`、`babel_type` 字段不再提供缺失时的默认值，所有节点需运行统一版本。缺失时返回 400/422 错误。
 - **create_peer.py** (独立脚本)：功能已被 `dn42ctl bgp peer add` 完全替代。
+- **peer 级 NetworkManager 后端**：`bgp peer` / `ibgp peer` 的 `--net nm` 选项与 `.nmconnection` 输出已移除，peer WireGuard 配置统一使用 `systemd-networkd`。`dummy_backend` 的 NM 支持不受影响。
 
 ### 命令
 

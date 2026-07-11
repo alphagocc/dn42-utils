@@ -70,20 +70,6 @@ class TestCreateBgpPeer:
             )
 
     @pytest.mark.usefixtures("_mock_wg")
-    def test_nm_backend(self, sample_config, db_path: Path) -> None:
-        result = create_bgp_peer(
-            config=sample_config,
-            db_path=db_path,
-            peer_asn=4242421234,
-            peer_public_key=VALID_PUBKEY,
-            endpoint=VALID_ENDPOINT,
-            peer_lla=VALID_PEER_LLA,
-            net_backend="nm",
-        )
-        nm_files = [f for f in result.generated_files if str(f).endswith(".nmconnection")]
-        assert len(nm_files) == 1
-
-    @pytest.mark.usefixtures("_mock_wg")
     def test_files_written(self, sample_config, db_path: Path) -> None:
         result = create_bgp_peer(
             config=sample_config,

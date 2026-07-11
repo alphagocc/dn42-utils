@@ -5,14 +5,12 @@ from pathlib import Path
 import pytest
 
 from dn42ctl.render import (
-    nm_uuid_for,
     render_babel_conf,
     render_bird_bgp_peer_conf,
     render_bird_ibgp_peer_conf,
     render_bird_main_conf,
     render_networkd_netdev,
     render_networkd_network,
-    render_nmconnection_wireguard,
     render_systemd_roa_service,
     render_systemd_roa_timer,
 )
@@ -143,94 +141,6 @@ class TestRenderNetworkdNetwork:
         assert "[Address]" in result
         assert "Address=fe80::abcd:1234/128" in result
         assert "Peer=fe80::1" in result
-
-
-class TestRenderNmconnection:
-    def test_basic(self) -> None:
-        result = render_nmconnection_wireguard(
-            conn_id="dn42_1234",
-            ifname="dn42_1234",
-            conn_uuid="test-uuid",
-            private_key="PRIVKEY",
-            listen_port=51820,
-            peer_public_key="PUBKEY",
-            endpoint="example.com:51820",
-            allowed_ips=["fe80::/64", "fd00::/8"],
-            local_lla="fe80::abcd:1234",
-            peer_lla="fe80::1",
-        )
-        assert "[connection]" in result
-        assert "id=dn42_1234" in result
-        assert "type=wireguard" in result
-        assert "[wireguard]" in result
-        assert "private-key=PRIVKEY" in result
-        assert "listen-port=51820" in result
-        assert "peer-routes=false" in result
-        assert "[wireguard-peer.PUBKEY]" in result
-        assert "endpoint=example.com:51820" in result
-        assert "allowed-ips=fe80::/64;fd00::/8;" in result
-        assert "[ipv6]" in result
-        assert "method=manual" in result
-        assert "address1=fe80::abcd:1234/128" in result
-        assert "route1=fe80::1/128" in result
-
-    def test_zero_listen_port_omitted(self) -> None:
-        result = render_nmconnection_wireguard(
-            conn_id="dn42_1234",
-            ifname="dn42_1234",
-            conn_uuid="test-uuid",
-            private_key="PRIVKEY",
-            listen_port=0,
-            peer_public_key="PUBKEY",
-            endpoint="",
-            allowed_ips=["fe80::/64"],
-            local_lla="fe80::abcd:1234",
-            peer_lla="fe80::1",
-        )
-        assert "listen-port" not in result
-
-    def test_persistent_keepalive(self) -> None:
-        result = render_nmconnection_wireguard(
-            conn_id="dn42_1234",
-            ifname="dn42_1234",
-            conn_uuid="test-uuid",
-            private_key="PRIVKEY",
-            listen_port=51820,
-            peer_public_key="PUBKEY",
-            endpoint="example.com:51820",
-            allowed_ips=["fe80::/64"],
-            local_lla="fe80::abcd:1234",
-            peer_lla="fe80::1",
-            persistent_keepalive=25,
-        )
-        assert "persistent-keepalive=25" in result
-
-    def test_no_endpoint_omitted(self) -> None:
-        result = render_nmconnection_wireguard(
-            conn_id="dn42_1234",
-            ifname="dn42_1234",
-            conn_uuid="test-uuid",
-            private_key="PRIVKEY",
-            listen_port=51820,
-            peer_public_key="PUBKEY",
-            endpoint="",
-            allowed_ips=["fe80::/64"],
-            local_lla="fe80::abcd:1234",
-            peer_lla="fe80::1",
-        )
-        assert "endpoint=" not in result
-
-
-class TestNmUuidFor:
-    def test_deterministic(self) -> None:
-        a = nm_uuid_for(node_id="test", ifname="dn42_1234")
-        b = nm_uuid_for(node_id="test", ifname="dn42_1234")
-        assert a == b
-
-    def test_different_inputs_differ(self) -> None:
-        a = nm_uuid_for(node_id="test", ifname="dn42_1234")
-        b = nm_uuid_for(node_id="test", ifname="dn42_5678")
-        assert a != b
 
 
 class TestRenderSystemdRoa:

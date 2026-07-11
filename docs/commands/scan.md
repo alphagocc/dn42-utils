@@ -10,11 +10,11 @@
 
 - Bird：`/etc/bird` 与 `/etc/bird6`（主要读取 peers 片段目录）。
 - systemd-networkd：`/etc/systemd/network`。
-- NetworkManager：`/etc/NetworkManager/system-connections`。
 
 不支持（已明确移除）：
 
 - wg-quick：`/etc/wireguard`。
+- NetworkManager：`/etc/NetworkManager/system-connections`。
 
 ## bird.conf 识别与 paths 自动修正
 
@@ -36,7 +36,7 @@
 - 尽力读取 `babel.conf` 并解析每个 `interface` 的 `rxcost`：
   - 若能匹配到 `wg_<name>` 接口：写入 DB 的 `ibgp_peers.babel_rxcost`。
   - 若无法读取/解析或缺失该接口：记录 warning，并回退到默认值（保持兼容）。
-- 尽力从 networkd/NM/Bird peers 中拼装出同一个 peer 的字段（例如 endpoint/keys/AllowedIPs/peer_lla 等）；缺失字段允许为空。
+- 尽力从 networkd/Bird peers 中拼装出同一个 peer 的字段（例如 endpoint/keys/AllowedIPs/peer_lla 等）；缺失字段允许为空。
 - `ListenPort` 可能缺失（例如仅出站连接、位于防火墙/NAT 后的场景）；scan 应允许缺失并以”未设置”状态入库（例如使用 0 作为哨兵值），后续重生成配置时应省略对应字段。
 - 冲突处理（DB 已存在同名 peer）：应提示用户手动处理（默认跳过，不静默覆盖）。
 

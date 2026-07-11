@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from pathlib import Path
 
 from jinja2 import Environment, PackageLoader, StrictUndefined
@@ -119,41 +118,3 @@ def render_systemd_roa_service(*, roa_parent: Path, roa_target: Path, roa_url: s
 
 def render_systemd_roa_timer() -> str:
     return _render_template("systemd_roa_timer.j2")
-
-
-NM_UUID_NAMESPACE = uuid.UUID("4b45d197-2d1f-4c65-9a2b-4efb5a2c602f")
-
-
-def nm_uuid_for(*, node_id: str, ifname: str) -> str:
-    # Deterministic UUID so that regeneration does not create a "new" profile.
-    return str(uuid.uuid5(NM_UUID_NAMESPACE, f"dn42ctl:{node_id}:{ifname}"))
-
-
-def render_nmconnection_wireguard(
-    *,
-    conn_id: str,
-    ifname: str,
-    conn_uuid: str,
-    private_key: str,
-    listen_port: int,
-    peer_public_key: str,
-    endpoint: str,
-    allowed_ips: list[str],
-    local_lla: str,
-    peer_lla: str,
-    persistent_keepalive: int | None = None,
-) -> str:
-    return _render_template(
-        "nmconnection.j2",
-        conn_id=conn_id,
-        ifname=ifname,
-        conn_uuid=conn_uuid,
-        private_key=private_key,
-        listen_port=listen_port,
-        peer_public_key=peer_public_key,
-        endpoint=endpoint,
-        allowed_ips=allowed_ips,
-        local_lla=local_lla,
-        peer_lla=peer_lla,
-        persistent_keepalive=persistent_keepalive,
-    )

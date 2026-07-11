@@ -123,4 +123,11 @@ MIGRATIONS: list[tuple[int, str]] = [
         );
         """.strip(),
     ),
+    (
+        2,
+        """
+        UPDATE bgp_peers SET net_backend = 'networkd' WHERE net_backend = 'nm';
+        UPDATE ibgp_peers SET net_backend = 'networkd' WHERE net_backend = 'nm';
+        """.strip(),
+    ),
 ]

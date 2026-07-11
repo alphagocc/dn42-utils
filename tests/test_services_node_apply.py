@@ -136,14 +136,6 @@ class TestBgpPeer:
         netdev = (networkd_dir / "dn42_1234.netdev").read_text()
         assert "PRIV" in netdev
 
-    def test_nm_peer(self, tmp_path: Path) -> None:
-        cfg = _cfg(tmp_path)
-        payload = _make_payload(tmp_path, bgp=[_bgp_peer(backend="nm")])
-        _seed_cache(cfg.cache_db_path, payload)
-        apply(node_config=cfg)
-        nm_dir = Path(payload["paths"]["nm_dir"])
-        assert (nm_dir / "dn42_1234.nmconnection").exists()
-
 
 class TestIbgpPeer:
     def test_with_wg(self, tmp_path: Path) -> None:
@@ -315,18 +307,6 @@ class TestStaleDeletion:
         apply(node_config=cfg)
         assert not (peers_dir / "ibgp_alpha.conf").exists()
         assert not (networkd_dir / "wg_alpha.netdev").exists()
-
-    def test_nm_backend_stale_cleanup(self, tmp_path: Path) -> None:
-        cfg = _cfg(tmp_path)
-        payload_a = _make_payload(tmp_path, bgp=[_bgp_peer(backend="nm")])
-        _seed_cache(cfg.cache_db_path, payload_a)
-        apply(node_config=cfg)
-        nm_dir = Path(payload_a["paths"]["nm_dir"])
-        assert (nm_dir / "dn42_1234.nmconnection").exists()
-        payload_b = _make_payload(tmp_path, bgp=[])
-        _seed_cache(cfg.cache_db_path, payload_b)
-        apply(node_config=cfg)
-        assert not (nm_dir / "dn42_1234.nmconnection").exists()
 
 
 class TestSummary:

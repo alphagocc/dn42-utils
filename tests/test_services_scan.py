@@ -12,7 +12,6 @@ from dn42ctl.services.scan import (
     _parse_bird_ibgp_peer_conf,
     _parse_networkd_netdev,
     _parse_networkd_network,
-    _parse_nmconnection,
     discover_bird_paths,
     scan_local_configs,
 )
@@ -78,35 +77,6 @@ Peer=fe80::1
         result = _parse_networkd_network(text)
         assert result["local_lla"] == "fe80::abcd:1234"
         assert result["peer_lla"] == "fe80::1"
-
-
-class TestParseNmconnection:
-    def test_basic(self) -> None:
-        text = """\
-[connection]
-id=dn42_1234
-type=wireguard
-
-[wireguard]
-private-key=PRIVKEY
-listen-port=51820
-peer-routes=false
-
-[wireguard-peer.PUBKEY]
-endpoint=example.com:51820
-allowed-ips=fe80::/64;fd00::/8;
-
-[ipv6]
-method=manual
-address1=fe80::abcd:1234/128
-"""
-        result = _parse_nmconnection(text)
-        assert result["private_key"] == "PRIVKEY"
-        assert result["listen_port"] == 51820
-        assert result["peer_public_key"] == "PUBKEY"
-        assert result["endpoint"] == "example.com:51820"
-        assert result["allowed_ips"] == ["fe80::/64", "fd00::/8"]
-        assert result["local_lla"] == "fe80::abcd:1234"
 
 
 class TestParseBirdBgpPeerConf:

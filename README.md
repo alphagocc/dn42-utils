@@ -5,7 +5,7 @@
 核心特性：
 
 - 业务逻辑与 CLI 解耦（Service 层可复用，REST API + Web UI 可选启用）。
-- 同时支持 `systemd-networkd` 与 `NetworkManager` 两种网络后端。
+- 同时支持 `systemd-networkd`（peer WireGuard 配置）与 `NetworkManager`（dummy 接口）两种网络后端。
 - **强制约束**：WireGuard 的 `AllowedIPs` 必须写入，但工具 **禁止自动修改路由表**。
 - 所有状态写入 SQLite；用 `node_id` 区分节点，便于多节点集中管理。
 - **Hub-Spoke 多节点同步**：中心节点运行 `dn42ctl serve`，远程节点通过 API 拉取配置并自动应用。
@@ -41,13 +41,13 @@ sudo uv run dn42ctl genconf
 ### 创建 BGP peer
 
 ```bash
-sudo uv run dn42ctl bgp peer --asn 424242xxxx --pubkey <PEER_PUBKEY> --endpoint <HOST:PORT> --peer-lla <fe80::...> --net networkd
+sudo uv run dn42ctl bgp peer --asn 424242xxxx --pubkey <PEER_PUBKEY> --endpoint <HOST:PORT> --peer-lla <fe80::...>
 ```
 
 ### 创建 iBGP peer
 
 ```bash
-sudo uv run dn42ctl ibgp peer --name <NAME> --pubkey <PEER_PUBKEY> --endpoint <HOST:PORT> --peer-lla <fe80::...> --net nm
+sudo uv run dn42ctl ibgp peer --name <NAME> --pubkey <PEER_PUBKEY> --endpoint <HOST:PORT> --peer-lla <fe80::...>
 ```
 
 ### 扫描并导入现有配置

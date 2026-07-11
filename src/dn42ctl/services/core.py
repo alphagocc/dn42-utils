@@ -8,16 +8,14 @@ from pathlib import Path
 from typing import cast
 
 from dn42ctl.config import AppConfig
-from dn42ctl.constants import FILE_MODE_NETDEV, FILE_MODE_PRIVATE, WG_PORT_RANGE
+from dn42ctl.constants import FILE_MODE_NETDEV, WG_PORT_RANGE
 from dn42ctl.db import Database, DatabaseError
 from dn42ctl.fs import chmod_best_effort, chown_best_effort
 from dn42ctl.render import (
-    nm_uuid_for,
     render_babel_conf,
     render_bird_bgp_peer_conf,
     render_networkd_netdev,
     render_networkd_network,
-    render_nmconnection_wireguard,
 )
 from dn42ctl.wg import WireGuardError, generate_wg_keypair
 
@@ -235,53 +233,35 @@ def write_net_backend_files(
     peer_lla: str,
     generated: list[Path],
 ) -> None:
-    """Write networkd or NetworkManager wireguard config files."""
+    """Write networkd wireguard config files."""
     if not allowed_ips:
         raise Dn42CtlError(f"AllowedIPs 不能为空 (ifname={ifname})，至少需要一个合法的 IPv6 CIDR")
-    if backend == "networkd":
-        netdev_path = Path(config.networkd_dir) / f"{ifname}.netdev"
-        network_path = Path(config.networkd_dir) / f"{ifname}.network"
-        write_text(
-            netdev_path,
-            render_networkd_netdev(
-                ifname=ifname,
-                private_key=private_key,
-                listen_port=listen_port,
-                peer_public_key=peer_public_key,
-                endpoint=endpoint,
-                allowed_ips=allowed_ips,
-            ),
-            mode=FILE_MODE_NETDEV,
-            owner=(0, "systemd-network"),
-        )
-        write_text(
-            network_path,
-            render_networkd_network(
-                ifname=ifname,
-                local_lla=local_lla,
-                peer_lla=peer_lla,
-            ),
-        )
-        generated.extend([netdev_path, network_path])
-    elif backend == "nm":
-        nm_path = Path(config.nm_system_connections_dir) / f"{ifname}.nmconnection"
-        write_text(
-            nm_path,
-            render_nmconnection_wireguard(
-                conn_id=ifname,
-                ifname=ifname,
-                conn_uuid=nm_uuid_for(node_id=node_id, ifname=ifname),
-                private_key=private_key,
-                listen_port=listen_port,
-                peer_public_key=peer_public_key,
-                endpoint=endpoint,
-                allowed_ips=allowed_ips,
-                local_lla=local_lla,
-                peer_lla=peer_lla,
-            ),
-            mode=FILE_MODE_PRIVATE,
-        )
-        generated.append(nm_path)
+    if backend != "networkd":
+        raise Dn42CtlError(f"不支持的网络后端: {backend}，peer 仅支持 networkd")
+    netdev_path = Path(config.networkd_dir) / f"{ifname}.netdev"
+    network_path = Path(config.networkd_dir) / f"{ifname}.network"
+    write_text(
+        netdev_path,
+        render_networkd_netdev(
+            ifname=ifname,
+            private_key=private_key,
+            listen_port=listen_port,
+            peer_public_key=peer_public_key,
+            endpoint=endpoint,
+            allowed_ips=allowed_ips,
+        ),
+        mode=FILE_MODE_NETDEV,
+        owner=(0, "systemd-network"),
+    )
+    write_text(
+        network_path,
+        render_networkd_network(
+            ifname=ifname,
+            local_lla=local_lla,
+            peer_lla=peer_lla,
+        ),
+    )
+    generated.extend([netdev_path, network_path])
 
 
 def normalize_net_backend(net_backend: str) -> str:
@@ -315,9 +295,6 @@ def peer_files_for_backend(
     if net_backend == "networkd":
         netdir = Path(config.networkd_dir)
         files.extend([netdir / f"{ifname}.netdev", netdir / f"{ifname}.network"])
-    elif net_backend == "nm":
-        nmdir = Path(config.nm_system_connections_dir)
-        files.append(nmdir / f"{ifname}.nmconnection")
 
     return files
 

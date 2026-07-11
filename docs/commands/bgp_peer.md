@@ -6,7 +6,7 @@
 
 ### 输入
 
-- 必填：`--asn`、`--pubkey`、`--peer-lla`、`--net`（`networkd` 或 `nm`）。
+- 必填：`--asn`、`--pubkey`、`--peer-lla`。
 - 可选：
   - `--endpoint`：对端 Endpoint（IP:Port）。可为空，适用于对端在防火墙后的场景。
   - `--listen-port`
@@ -21,7 +21,6 @@
 - `--pubkey`：WireGuard 公钥，base64 格式（40~44 字符）。
 - `--endpoint`：`host:port` 或 `[IPv6]:port` 格式，端口 1-65535。可为空。
 - `--peer-lla`：合法的 IPv6 地址。
-- `--net`：`networkd` 或 `nm`（也接受 `networkmanager`）。
 - `--listen-port`：0 或 1-65535。
 
 > 交互模式下：如果 `--pubkey/--endpoint/--peer-lla` 缺失，CLI 会先生成并输出本端 WG 公钥与本端 LLA，便于先发给对端；随后再提示输入对端信息。
@@ -40,8 +39,7 @@
 ### 输出
 
 - Bird peer conf：写入到 `bird_peers_dir/<ifname>.conf`。
-- networkd：写入 `<ifname>.netdev` 与 `<ifname>.network`。
-- NetworkManager：写入 `<ifname>.nmconnection`（文件权限目标为 0600）。
+- networkd：写入 `<ifname>.netdev` 与 `<ifname>.network`（文件权限 `0640 root:systemd-network`）。
 - CLI 会展示必要信息（本端公钥、本端 LLA、ListenPort、写入的文件路径）。
 
 ## `dn42ctl bgp peer modify`
@@ -68,4 +66,4 @@
 
 - 删除前必须二次确认（交互 prompt）。
 - 删除数据库记录。
-- 删除生成文件（Bird peer conf + networkd/NM 文件）。
+- 删除生成文件（Bird peer conf + networkd 文件）。

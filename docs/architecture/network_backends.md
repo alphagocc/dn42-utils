@@ -2,16 +2,14 @@
 
 ## 总体约束
 
-- 工具必须同时支持：
-  - `systemd-networkd`
-  - `NetworkManager`
+- peer WireGuard 配置（`bgp peer` / `ibgp peer`）仅支持 `systemd-networkd`。
+- `dummy_backend` 仍支持 `networkd` 和 `nm`（NetworkManager）。
 - WireGuard 的 `AllowedIPs` 必须写入（配置完整性）。
 - 但必须**禁止**因 `AllowedIPs` 自动修改系统路由表。
 
 该约束的实现方式如下：
 
 - networkd：显式设置 `RouteTable=off`
-- NetworkManager：显式设置 `peer-routes=false`
 
 工具不负责自动添加任何 DN42 路由策略；如需路由，请用户在系统层面自行管理。
 
@@ -26,7 +24,9 @@
   - 为接口配置 LLA 地址
   - 配置对端的 `Peer=<peer_lla>` 等必要信息
 
-## NetworkManager
+## NetworkManager（仅 dummy_backend，已废弃用于 peer）
+
+> **注意**：以下内容仅适用于 `dummy_backend = "nm"` 场景。peer WireGuard 配置已不再支持 NetworkManager。
 
 - 输出目录：通常为 `/etc/NetworkManager/system-connections/`（也允许由参数覆盖）。
 - 文件格式：keyfile（`.nmconnection`），`type=wireguard`。

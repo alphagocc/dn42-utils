@@ -132,19 +132,6 @@ class TestPeerFilesForBackend:
         assert any("dn42_1234.netdev" in p for p in paths)
         assert any("dn42_1234.network" in p for p in paths)
 
-    def test_ibgp_nm(self, sample_config) -> None:
-        files = peer_files_for_backend(
-            config=sample_config,
-            ifname="wg_mynode",
-            net_backend="nm",
-            kind="ibgp",
-            ibgp_name="mynode",
-        )
-        paths = [str(f) for f in files]
-        assert any("ibgp_mynode.conf" in p for p in paths)
-        assert any("wg_mynode.nmconnection" in p for p in paths)
-        assert any("babel.conf" in p for p in paths)
-
 
 class TestDeleteFilesAndCollectStatus:
     def test_deletes_existing(self, tmp_path: Path) -> None:

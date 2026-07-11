@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import configparser
 import ipaddress
 import re
 import shutil
@@ -235,52 +234,6 @@ def _parse_networkd_network(text: str) -> dict[str, object]:
     return out
 
 
-def _parse_nmconnection(text: str) -> dict[str, object]:
-    cfg = configparser.ConfigParser(interpolation=None)
-    cfg.read_string(text)
-    out: dict[str, object] = {}
-    if cfg.has_section("wireguard"):
-        out["private_key"] = cfg.get("wireguard", "private-key", fallback=None)
-        try:
-            out["listen_port"] = cfg.getint("wireguard", "listen-port", fallback=None)
-        except ValueError:
-            pass
-
-        # Canonical format: [wireguard-peer.<PUBLIC_KEY>] section
-        peer_section = None
-        for section in cfg.sections():
-            if section.startswith("wireguard-peer."):
-                peer_section = section
-                break
-        if peer_section is not None:
-            out["peer_public_key"] = peer_section.split(".", 1)[1]
-            ep = cfg.get(peer_section, "endpoint", fallback=None)
-            if ep:
-                out["endpoint"] = ep
-            raw_ips = cfg.get(peer_section, "allowed-ips", fallback=None)
-            if raw_ips:
-                ips: list[str] = []
-                for x in raw_ips.split(";"):
-                    x = x.strip()
-                    if not x:
-                        continue
-                    try:
-                        ipaddress.IPv6Network(x, strict=False)
-                    except ValueError:
-                        continue
-                    ips.append(x)
-                if ips:
-                    out["allowed_ips"] = ips
-
-    if cfg.has_section("ipv6"):
-        addr1 = cfg.get("ipv6", "address1", fallback=None)
-        if addr1:
-            addr_part = addr1.split(",", 1)[0].strip()
-            if addr_part:
-                out["local_lla"] = addr_part.split("/", 1)[0]
-    return out
-
-
 def _parse_bird_bgp_peer_conf(text: str, ifname: str) -> tuple[int | None, str | None]:
     # neighbor <peer_lla>%<ifname> as <asn>;
     m = re.search(
@@ -372,10 +325,6 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
         Path("/etc/bird6/peers"),
     ]
     networkd_dirs = [Path(config.networkd_dir), Path("/etc/systemd/network")]
-    nm_dirs = [
-        Path(config.nm_system_connections_dir),
-        Path("/etc/NetworkManager/system-connections"),
-    ]
 
     def _dedup(paths: list[Path]) -> list[Path]:
         seen: set[str] = set()
@@ -390,7 +339,6 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
 
     bird_peers_dirs = _dedup(bird_peers_dirs)
     networkd_dirs = _dedup(networkd_dirs)
-    nm_dirs = _dedup(nm_dirs)
 
     # Optional: parse babel.conf to import per-interface rxcost for iBGP peers.
     babel_params_by_ifname: dict[str, _BabelInterfaceParams] = {}
@@ -430,7 +378,6 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
 
     _collect_stems(networkd_dirs, ".netdev")
     _collect_stems(networkd_dirs, ".network")
-    _collect_stems(nm_dirs, ".nmconnection")
 
     db = open_db_and_ensure_node(db_path, config.node_id)
 
@@ -441,26 +388,16 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
         # Locate config sources.
         netdev_path = _find_first([d / f"{ifname}.netdev" for d in networkd_dirs])
         network_path = _find_first([d / f"{ifname}.network" for d in networkd_dirs])
-        nm_path = _find_first([d / f"{ifname}.nmconnection" for d in nm_dirs])
 
-        # Prefer supported backends.
-        backend: str | None = None
+        backend: str = "networkd"
         data: dict[str, object] = {}
 
         try:
             if netdev_path and network_path:
-                backend = "networkd"
                 data.update(_parse_networkd_netdev(_read_text(netdev_path)))
                 data.update(_parse_networkd_network(_read_text(network_path)))
-            elif nm_path:
-                backend = "nm"
-                try:
-                    data.update(_parse_nmconnection(_read_text(nm_path)))
-                except configparser.Error as exc:
-                    skipped.append(f"{ifname}: 解析 NM 配置失败: {exc}")
-                    continue
             else:
-                skipped.append(f"{ifname}: 未找到 networkd/NM 配置")
+                skipped.append(f"{ifname}: 未找到 networkd 配置")
                 continue
         except Dn42CtlError as exc:
             skipped.append(f"{ifname}: 读取配置失败: {exc}")

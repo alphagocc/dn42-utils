@@ -6,7 +6,7 @@
 
 ### 选项
 
-- `--all`：同时重新生成所有 peers 的 Bird peer 配置和 WireGuard 配置（networkd `.netdev`/`.network` 或 NM `.nmconnection`）。从 SQLite 遍历所有 BGP 和 iBGP peers，适用于配置文件丢失后批量恢复。生成完毕后若有 networkd 后端的 peer 则执行一次 `networkctl reload`。
+- `--all`：同时重新生成所有 peers 的 Bird peer 配置和 WireGuard networkd 配置（`.netdev`/`.network`）。从 SQLite 遍历所有 BGP 和 iBGP peers，适用于配置文件丢失后批量恢复。生成完毕后执行一次 `networkctl reload`。
 
 ### 行为
 

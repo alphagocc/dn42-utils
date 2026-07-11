@@ -1,5 +1,5 @@
 """Spoke-side `dn42ctl node apply`: turn a cached desired-state into actual
-files under /etc/bird, /etc/systemd/network, or /etc/NetworkManager.
+files under /etc/bird, /etc/systemd/network.
 
 Reuses the existing Jinja renderers. Does NOT generate the top-level bird.conf
 (which depends on local AppConfig fields like own_asn/router_id and is the
@@ -22,13 +22,11 @@ from dn42ctl.constants import FILE_MODE_NETDEV, FILE_MODE_PRIVATE
 from dn42ctl.fs import chmod_best_effort
 from dn42ctl.node_config import NodeConfig
 from dn42ctl.render import (
-    nm_uuid_for,
     render_babel_conf,
     render_bird_bgp_peer_conf,
     render_bird_ibgp_peer_conf,
     render_networkd_netdev,
     render_networkd_network,
-    render_nmconnection_wireguard,
 )
 from dn42ctl.services.core import Dn42CtlError
 
@@ -38,7 +36,7 @@ class ResolvedPaths:
     bird_peers_dir: Path
     babel_conf_path: Path
     networkd_dir: Path
-    nm_dir: Path
+    nm_dir: Path  # kept for stale-file cleanup of legacy .nmconnection files
 
 
 @dataclass(frozen=True)
@@ -127,52 +125,31 @@ def _render_bgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths, node_id: 
         )
     )
 
-    backend = peer["net_backend"]
-    if backend == "networkd":
-        out.append(
-            (
-                paths.networkd_dir / f"{ifname}.netdev",
-                render_networkd_netdev(
-                    ifname=ifname,
-                    private_key=peer["wg_private_key"],
-                    listen_port=int(peer["listen_port"]),
-                    peer_public_key=peer["peer_public_key"],
-                    endpoint=peer.get("endpoint") or "",
-                    allowed_ips=peer["allowed_ips"],
-                ),
-                FILE_MODE_NETDEV,
-            )
+    out.append(
+        (
+            paths.networkd_dir / f"{ifname}.netdev",
+            render_networkd_netdev(
+                ifname=ifname,
+                private_key=peer["wg_private_key"],
+                listen_port=int(peer["listen_port"]),
+                peer_public_key=peer["peer_public_key"],
+                endpoint=peer.get("endpoint") or "",
+                allowed_ips=peer["allowed_ips"],
+            ),
+            FILE_MODE_NETDEV,
         )
-        out.append(
-            (
-                paths.networkd_dir / f"{ifname}.network",
-                render_networkd_network(
-                    ifname=ifname,
-                    local_lla=peer["local_lla"],
-                    peer_lla=peer["peer_lla"],
-                ),
-                FILE_MODE_PRIVATE,
-            )
+    )
+    out.append(
+        (
+            paths.networkd_dir / f"{ifname}.network",
+            render_networkd_network(
+                ifname=ifname,
+                local_lla=peer["local_lla"],
+                peer_lla=peer["peer_lla"],
+            ),
+            FILE_MODE_PRIVATE,
         )
-    elif backend == "nm":
-        out.append(
-            (
-                paths.nm_dir / f"{ifname}.nmconnection",
-                render_nmconnection_wireguard(
-                    conn_id=ifname,
-                    ifname=ifname,
-                    conn_uuid=nm_uuid_for(node_id=node_id, ifname=ifname),
-                    private_key=peer["wg_private_key"],
-                    listen_port=int(peer["listen_port"]),
-                    peer_public_key=peer["peer_public_key"],
-                    endpoint=peer.get("endpoint") or "",
-                    allowed_ips=peer["allowed_ips"],
-                    local_lla=peer["local_lla"],
-                    peer_lla=peer["peer_lla"],
-                ),
-                FILE_MODE_PRIVATE,
-            )
-        )
+    )
     return out
 
 
@@ -189,52 +166,31 @@ def _render_ibgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths, node_id:
     )
     if not peer["has_wg"]:
         return out
-    backend = peer["net_backend"]
-    if backend == "networkd":
-        out.append(
-            (
-                paths.networkd_dir / f"{ifname}.netdev",
-                render_networkd_netdev(
-                    ifname=ifname,
-                    private_key=peer["wg_private_key"],
-                    listen_port=int(peer["listen_port"]),
-                    peer_public_key=peer["peer_public_key"],
-                    endpoint=peer.get("endpoint") or "",
-                    allowed_ips=peer["allowed_ips"],
-                ),
-                FILE_MODE_NETDEV,
-            )
+    out.append(
+        (
+            paths.networkd_dir / f"{ifname}.netdev",
+            render_networkd_netdev(
+                ifname=ifname,
+                private_key=peer["wg_private_key"],
+                listen_port=int(peer["listen_port"]),
+                peer_public_key=peer["peer_public_key"],
+                endpoint=peer.get("endpoint") or "",
+                allowed_ips=peer["allowed_ips"],
+            ),
+            FILE_MODE_NETDEV,
         )
-        out.append(
-            (
-                paths.networkd_dir / f"{ifname}.network",
-                render_networkd_network(
-                    ifname=ifname,
-                    local_lla=peer["local_lla"],
-                    peer_lla=peer.get("peer_lla") or "",
-                ),
-                FILE_MODE_PRIVATE,
-            )
+    )
+    out.append(
+        (
+            paths.networkd_dir / f"{ifname}.network",
+            render_networkd_network(
+                ifname=ifname,
+                local_lla=peer["local_lla"],
+                peer_lla=peer.get("peer_lla") or "",
+            ),
+            FILE_MODE_PRIVATE,
         )
-    elif backend == "nm":
-        out.append(
-            (
-                paths.nm_dir / f"{ifname}.nmconnection",
-                render_nmconnection_wireguard(
-                    conn_id=ifname,
-                    ifname=ifname,
-                    conn_uuid=nm_uuid_for(node_id=node_id, ifname=ifname),
-                    private_key=peer["wg_private_key"],
-                    listen_port=int(peer["listen_port"]),
-                    peer_public_key=peer["peer_public_key"],
-                    endpoint=peer.get("endpoint") or "",
-                    allowed_ips=peer["allowed_ips"],
-                    local_lla=peer["local_lla"],
-                    peer_lla=peer.get("peer_lla") or "",
-                ),
-                FILE_MODE_PRIVATE,
-            )
-        )
+    )
     return out
 
 
