@@ -70,11 +70,9 @@
 
 - `init` 和 `genconf` 均会尝试创建 `dn42-dummy` 接口并绑定 `OWNIPv6/128` 地址（幂等操作）。
 - 若接口已存在且地址已绑定，则跳过。
-- 网络管理方式自动检测：
-  - 若 `nmcli` 命令存在 **且** NetworkManager 服务正在运行（`nmcli general status` 返回 0），使用 NM 方式创建。
-  - 否则使用 `iproute2`（`ip link add` / `ip addr add`）。
-- NM 命令：`nmcli connection add type dummy ifname dn42-dummy ipv6.method manual ipv6.addresses <OWNIPv6>/128`
-- iproute2 命令：`ip link add dn42-dummy type dummy` + `ip addr add <OWNIPv6>/128 dev dn42-dummy` + `ip link set dn42-dummy up`
+- 网络管理后端通过 `config.toml` 的 `dummy_backend` 字段配置（`networkd` 或 `nm`），`init --dummy-backend` 指定。
+  - `networkd`：写入 `/etc/systemd/network/dn42-dummy.netdev` + `.network`，然后 `networkctl reload`。
+  - `nm`：`nmcli connection add type dummy ifname dn42-dummy ipv6.method manual ipv6.addresses <OWNIPv6>/128`。
 - 创建失败不应阻断 init/genconf 流程，仅输出警告。
 
 ## Babel interface type 设计
