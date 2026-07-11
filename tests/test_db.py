@@ -26,13 +26,63 @@ class TestMigrations:
     def test_all_versions_applied(self, mem_db: Database) -> None:
         rows = mem_db._conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
         versions = [row[0] for row in rows]
-        assert versions == [1, 2]
+        assert versions == [1, 8]
 
     def test_migrate_idempotent(self, mem_db: Database) -> None:
         mem_db.migrate()
         mem_db.migrate()
         rows = mem_db._conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
         assert len(rows) == 2
+        assert [r[0] for r in rows] == [1, 8]
+
+    def test_v2_converts_nm_to_networkd(self) -> None:
+        """Migration v8 must convert existing net_backend='nm' rows to 'networkd'.
+
+        Simulates production databases that have old incremental migrations v1-v7
+        already applied (consolidated into single v1 in current code).
+        """
+        import sqlite3
+
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        # Apply only migration v1 (simulate pre-v8 database)
+        from dn42ctl.migrations import MIGRATIONS
+
+        v1_sql = MIGRATIONS[0][1]
+        conn.executescript(v1_sql)
+        # Simulate production: old migrations v1-v7 recorded
+        for v in range(1, 8):
+            conn.execute("INSERT INTO schema_migrations(version) VALUES (?)", (v,))
+        conn.commit()
+
+        # Insert peers with net_backend='nm' (old state)
+        conn.execute("INSERT INTO nodes(node_id, created_at, updated_at) VALUES ('n1', '2024-01-01', '2024-01-01')")
+        conn.execute(
+            "INSERT INTO bgp_peers(node_id, peer_asn, ifname, wg_private_key, wg_public_key,"
+            " peer_public_key, endpoint, local_lla, peer_lla, listen_port, allowed_ips_json, net_backend,"
+            " created_at, updated_at)"
+            " VALUES ('n1', 4242421111, 'dn42_1111', 'pk', 'pub', 'ppub', 'ep:1', 'fe80::1', 'fe80::2',"
+            " 51820, '[\"fe80::/64\"]', 'nm', '2024-01-01', '2024-01-01')"
+        )
+        conn.execute(
+            "INSERT INTO ibgp_peers(node_id, name, ifname, wg_private_key, wg_public_key,"
+            " peer_public_key, endpoint, local_lla, peer_lla, listen_port, allowed_ips_json, net_backend,"
+            " babel_rxcost, peer_ip, has_wg, babel_type, created_at, updated_at)"
+            " VALUES ('n1', 'test', 'wg_test', 'pk', 'pub', 'ppub', 'ep:2', 'fe80::3', 'fe80::4',"
+            " 51821, '[\"fe80::/64\"]', 'nm', 20, 'fd00::1', 1, 'tunnel', '2024-01-01', '2024-01-01')"
+        )
+        conn.commit()
+
+        # Now create a Database instance wrapping this connection and run migrate
+        db = Database(conn)
+        db.migrate()
+
+        # Verify conversion happened
+        bgp_row = conn.execute("SELECT net_backend FROM bgp_peers WHERE peer_asn=4242421111").fetchone()
+        assert bgp_row["net_backend"] == "networkd", f"BGP peer not converted: {bgp_row['net_backend']}"
+
+        ibgp_row = conn.execute("SELECT net_backend FROM ibgp_peers WHERE name='test'").fetchone()
+        assert ibgp_row["net_backend"] == "networkd", f"iBGP peer not converted: {ibgp_row['net_backend']}"
 
 
 class TestEnsureNode:
