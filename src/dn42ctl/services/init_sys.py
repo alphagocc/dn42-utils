@@ -1,19 +1,23 @@
 from __future__ import annotations
 
+import subprocess
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 from dn42ctl.config import AppConfig, save_config
-from dn42ctl.render import render_bird_main_conf
+from dn42ctl.render import render_bird_ibgp_peer_conf, render_bird_main_conf
 from dn42ctl.services.core import (
     Dn42CtlError,
     GenConfResult,
     InitConfigResult,
     ensure_dir,
     open_db_and_ensure_node,
+    parse_allowed_ips_json,
     regenerate_babel_conf,
+    write_bird_bgp_peer,
+    write_net_backend_files,
     write_text,
 )
 from dn42ctl.services.dummy import DummyResult, ensure_dummy_interface
@@ -76,6 +80,7 @@ def genconf(
     db_path: Path,
     overwrite_bird_conf: bool,
     overwrite_babel_conf: bool,
+    regenerate_peers: bool = False,
 ) -> GenConfResult:
     node_id = config.node_id
     bird_conf_path = Path(config.bird_conf_path)
@@ -134,6 +139,81 @@ def genconf(
             placeholder = f"# dn42ctl: ROA v6 placeholder\n# 下载失败，请稍后手动获取: {DN42_ROA_V6_URL}\n"
             write_text(bird_roa_v6_conf_path, placeholder)
 
+    generated_peer_files: list[Path] = []
+
+    if regenerate_peers:
+        has_networkd_peers = False
+
+        for row in db.list_bgp_peers(node_id):
+            ifname = row["ifname"]
+            peer_lla = row["peer_lla"]
+            peer_asn = row["peer_asn"]
+            backend = row["net_backend"] or "networkd"
+
+            write_bird_bgp_peer(
+                config=config, ifname=ifname, peer_lla=peer_lla,
+                peer_asn=peer_asn, generated=generated_peer_files,
+            )
+            write_net_backend_files(
+                config=config,
+                node_id=node_id,
+                backend=backend,
+                ifname=ifname,
+                private_key=row["wg_private_key"],
+                listen_port=row["listen_port"],
+                peer_public_key=row["peer_public_key"],
+                endpoint=row["endpoint"] or "",
+                allowed_ips=parse_allowed_ips_json(row["allowed_ips_json"]),
+                local_lla=row["local_lla"],
+                peer_lla=peer_lla,
+                generated=generated_peer_files,
+            )
+            if backend == "networkd":
+                has_networkd_peers = True
+
+        for row in db.list_ibgp_peers(node_id):
+            ifname = row["ifname"]
+            peer_name = row["name"]
+            backend = row["net_backend"] or "networkd"
+            peer_ip = row["peer_ip"] or ""
+            has_wg = bool(row["has_wg"])
+
+            bird_peer_path = bird_peers_dir / f"ibgp_{peer_name}.conf"
+            bird_conf_text = render_bird_ibgp_peer_conf(
+                name=peer_name, ifname=ifname, peer_ip=peer_ip,
+            )
+            write_text(bird_peer_path, bird_conf_text)
+            generated_peer_files.append(bird_peer_path)
+
+            if has_wg:
+                write_net_backend_files(
+                    config=config,
+                    node_id=node_id,
+                    backend=backend,
+                    ifname=ifname,
+                    private_key=row["wg_private_key"],
+                    listen_port=row["listen_port"],
+                    peer_public_key=row["peer_public_key"],
+                    endpoint=row["endpoint"] or "",
+                    allowed_ips=parse_allowed_ips_json(row["allowed_ips_json"]),
+                    local_lla=row["local_lla"],
+                    peer_lla=row["peer_lla"] or "",
+                    generated=generated_peer_files,
+                )
+                if backend == "networkd":
+                    has_networkd_peers = True
+
+        if has_networkd_peers:
+            try:
+                subprocess.check_output(
+                    ["networkctl", "reload"],
+                    text=True,
+                    stderr=subprocess.STDOUT,
+                    timeout=10,
+                )
+            except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+                warnings.append(f"networkctl reload 失败: {exc}")
+
     return GenConfResult(
         config=config,
         db_path=db_path,
@@ -142,4 +222,5 @@ def genconf(
         bird_roa_v6_conf_path=bird_roa_v6_conf_path,
         dummy=dummy,
         warnings=warnings,
+        generated_peer_files=generated_peer_files,
     )

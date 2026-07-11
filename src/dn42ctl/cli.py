@@ -397,7 +397,10 @@ def cmd_init(
 
 
 @app.command("genconf")
-def cmd_genconf(ctx: typer.Context) -> None:
+def cmd_genconf(
+    ctx: typer.Context,
+    all_peers: bool = typer.Option(False, "--all", help="同时重新生成所有 peers 的 Bird 和 WireGuard 配置"),
+) -> None:
     appctx: AppContext = ctx.obj
     config = _require_config_or_exit(appctx)
 
@@ -413,6 +416,7 @@ def cmd_genconf(ctx: typer.Context) -> None:
             db_path=appctx.db_path,
             overwrite_bird_conf=overwrite_bird,
             overwrite_babel_conf=overwrite_babel,
+            regenerate_peers=all_peers,
         )
     except Dn42CtlError as exc:
         typer.echo(f"错误: {exc}")
@@ -422,6 +426,8 @@ def cmd_genconf(ctx: typer.Context) -> None:
     typer.echo(f"Bird: {res.bird_conf_path}")
     typer.echo(f"Babel: {res.bird_babel_conf_path}")
     typer.echo(f"ROA v6: {res.bird_roa_v6_conf_path}")
+    if res.generated_peer_files:
+        typer.echo(f"Peers: 已生成 {len(res.generated_peer_files)} 个文件")
     _print_dummy_result(res.dummy)
 
     if res.warnings:

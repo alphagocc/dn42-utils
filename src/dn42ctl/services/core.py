@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import random
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
@@ -154,6 +154,7 @@ class GenConfResult:
     bird_roa_v6_conf_path: Path
     dummy: DummyResult | None
     warnings: list[str]
+    generated_peer_files: list[Path] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
