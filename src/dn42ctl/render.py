@@ -100,6 +100,14 @@ def render_networkd_network(*, ifname: str, local_lla: str, peer_lla: str) -> st
     )
 
 
+def render_dummy_netdev() -> str:
+    return _render_template("dummy_netdev.j2")
+
+
+def render_dummy_network(*, own_ipv6: str) -> str:
+    return _render_template("dummy_network.j2", own_ipv6=own_ipv6)
+
+
 def render_systemd_roa_service(*, roa_parent: Path, roa_target: Path, roa_url: str) -> str:
     return _render_template(
         "systemd_roa_service.j2",

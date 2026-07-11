@@ -50,6 +50,7 @@ from dn42ctl.validators import (
     validate_endpoint,
     validate_ipv6_address,
     validate_ipv6_network,
+    validate_net_backend,
     validate_ownnetset_v6,
     validate_pubkey,
     validate_router_id,
@@ -272,6 +273,7 @@ def cmd_init(
         "--nm-system-connections-dir",
         help="NetworkManager system-connections 目录",
     ),
+    dummy_backend: str | None = typer.Option(None, "--dummy-backend", help="dummy 网卡后端 (networkd 或 nm)"),
     do_genconf: bool = typer.Option(
         False,
         "--genconf/--no-genconf",
@@ -322,6 +324,8 @@ def cmd_init(
         nm_system_connections_dir = (
             Path(existing.nm_system_connections_dir) if existing else DEFAULT_NM_SYSTEM_CONNECTIONS_DIR
         )
+    if dummy_backend is None:
+        dummy_backend = existing.dummy_backend if existing else typer.prompt("dummy 网卡后端", default="networkd")
 
     try:
         _cli_validate(validate_asn, own_asn)
@@ -329,6 +333,7 @@ def cmd_init(
         _cli_validate(validate_ipv6_network, ownnet_v6, field_name="OWNNETv6")
         _cli_validate(validate_ownnetset_v6, ownnetset_v6)
         _cli_validate(validate_router_id, router_id)
+        dummy_backend = _cli_validate(validate_net_backend, dummy_backend)
     except typer.BadParameter as exc:
         typer.echo(f"输入错误: {exc}")
         raise typer.Exit(2) from exc
@@ -355,6 +360,7 @@ def cmd_init(
             bird_roa_v6_conf_path=bird_roa_v6_conf_path,
             networkd_dir=networkd_dir,
             nm_system_connections_dir=nm_system_connections_dir,
+            dummy_backend=dummy_backend,
         )
     except Dn42CtlError as exc:
         typer.echo(f"错误: {exc}")

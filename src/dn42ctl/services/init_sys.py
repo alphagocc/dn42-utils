@@ -37,6 +37,7 @@ def init_node(
     bird_roa_v6_conf_path: Path,
     networkd_dir: Path,
     nm_system_connections_dir: Path,
+    dummy_backend: str = "networkd",
 ) -> InitConfigResult:
     config = AppConfig(
         node_id=node_id,
@@ -51,6 +52,7 @@ def init_node(
         bird_roa_v6_conf_path=str(bird_roa_v6_conf_path),
         networkd_dir=str(networkd_dir),
         nm_system_connections_dir=str(nm_system_connections_dir),
+        dummy_backend=dummy_backend,
     )
     try:
         save_config(config_path, config)
@@ -63,7 +65,7 @@ def init_node(
 
     dummy: DummyResult | None = None
     if sys.platform.startswith("linux"):
-        dummy = ensure_dummy_interface(own_ipv6)
+        dummy = ensure_dummy_interface(own_ipv6, backend=config.dummy_backend, networkd_dir=config.networkd_dir)
 
     return InitConfigResult(config=config, config_path=config_path, db_path=db_path, dummy=dummy)
 
@@ -85,7 +87,7 @@ def genconf(
 
     dummy: DummyResult | None = None
     if sys.platform.startswith("linux"):
-        dummy = ensure_dummy_interface(config.own_ipv6)
+        dummy = ensure_dummy_interface(config.own_ipv6, backend=config.dummy_backend, networkd_dir=config.networkd_dir)
 
     bird_conf_text = render_bird_main_conf(
         own_asn=config.own_asn,

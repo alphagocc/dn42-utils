@@ -22,6 +22,7 @@ class TestSaveAndLoadRoundtrip:
         assert loaded.bird_conf_path == sample_config.bird_conf_path
         assert loaded.bird_peers_dir == sample_config.bird_peers_dir
         assert loaded.networkd_dir == sample_config.networkd_dir
+        assert loaded.dummy_backend == sample_config.dummy_backend
 
     def test_creates_parent_dirs(self, tmp_path: Path, sample_config: AppConfig) -> None:
         cfg_path = tmp_path / "sub" / "dir" / "config.toml"

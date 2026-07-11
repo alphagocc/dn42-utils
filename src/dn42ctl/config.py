@@ -11,6 +11,7 @@ from dn42ctl.validators import (
     validate_asn,
     validate_ipv6_address,
     validate_ipv6_network,
+    validate_net_backend,
     validate_ownnetset_v6,
     validate_router_id,
 )
@@ -37,6 +38,7 @@ class AppConfig:
     bird_roa_v6_conf_path: str
     networkd_dir: str
     nm_system_connections_dir: str
+    dummy_backend: str = "networkd"
     dn42_registry_path: str | None = None
 
 
@@ -98,6 +100,14 @@ def load_config(path: Path) -> AppConfig:
     except ValidationError as exc:
         raise ConfigError(f"配置项不合法: {exc}") from exc
 
+    dummy_backend_raw = raw.get("dummy_backend", "networkd")
+    if not isinstance(dummy_backend_raw, str):
+        raise ConfigError("Invalid config key: dummy_backend")
+    try:
+        dummy_backend = validate_net_backend(dummy_backend_raw)
+    except ValidationError as exc:
+        raise ConfigError(f"配置项不合法: {exc}") from exc
+
     return AppConfig(
         node_id=_require_str(raw, "node_id"),
         own_asn=own_asn,
@@ -111,6 +121,7 @@ def load_config(path: Path) -> AppConfig:
         bird_roa_v6_conf_path=_require_str(paths, "bird_roa_v6_conf"),
         networkd_dir=_require_str(paths, "networkd_dir"),
         nm_system_connections_dir=_require_str(paths, "nm_system_connections_dir"),
+        dummy_backend=dummy_backend,
         dn42_registry_path=_optional_str(raw, "dn42_registry_path"),
     )
 
@@ -125,6 +136,7 @@ def save_config(path: Path, config: AppConfig) -> None:
         "own_ipv6": config.own_ipv6,
         "ownnet_v6": config.ownnet_v6,
         "ownnetset_v6": config.ownnetset_v6,
+        "dummy_backend": config.dummy_backend,
         "paths": {
             "bird_conf": config.bird_conf_path,
             "bird_peers_dir": config.bird_peers_dir,

@@ -40,6 +40,7 @@ def sample_config(tmp_path: Path) -> AppConfig:
         bird_roa_v6_conf_path=str(bird_dir / "roa_dn42_v6.conf"),
         networkd_dir=str(networkd_dir),
         nm_system_connections_dir=str(nm_dir),
+        dummy_backend="networkd",
     )
 
 
