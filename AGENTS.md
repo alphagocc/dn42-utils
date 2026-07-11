@@ -6,6 +6,7 @@ This repository contains `dn42ctl`, a Python CLI for generating/maintaining DN42
 
 - Python: **3.11+**
 - Recommended runner/env: **uv**
+- **Always use `uv run python` to execute Python code** (not bare `python` or `python3`).
 - System dependency: `wg` (wireguard-tools) is required for `bgp peer` / `ibgp peer` / `scan`
 
 Commands (from repo root):
