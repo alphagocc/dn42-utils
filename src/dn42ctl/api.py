@@ -53,6 +53,7 @@ from dn42ctl.services.auto_peer import (
 )
 from dn42ctl.services.show import show_bgp_peers, show_ibgp_peers, show_wg_tunnels
 from dn42ctl.validators import (
+    validate_allowed_ips_list,
     validate_asn,
     validate_babel_type,
     validate_endpoint,
@@ -524,6 +525,13 @@ class BgpPeerModifyRequest(BaseModel):
             return validate_listen_port(v, allow_zero=True)
         return v
 
+    @field_validator("allowed_ips")
+    @classmethod
+    def _check_allowed_ips(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            return validate_allowed_ips_list(v)
+        return v
+
 
 class BgpPeerCreateRequest(BgpPeerModifyRequest):
     peer_asn: int
@@ -612,7 +620,7 @@ class _IbgpPeerValidators(BaseModel):
     """Shared fields + validators for iBGP create/modify request models."""
 
     peer_ip: str
-    babel_rxcost: int = 0
+    babel_rxcost: int = 20
     babel_type: str = "tunnel"
     listen_port: int | None = None
     allowed_ips: list[str] | None = None
@@ -637,6 +645,13 @@ class _IbgpPeerValidators(BaseModel):
     def _check_port(cls, v: int | None) -> int | None:
         if v is not None:
             return validate_listen_port(v, allow_zero=True)
+        return v
+
+    @field_validator("allowed_ips")
+    @classmethod
+    def _check_allowed_ips(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            return validate_allowed_ips_list(v)
         return v
 
 

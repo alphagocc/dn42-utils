@@ -230,8 +230,9 @@ class TestValidateAllowedIps:
         result = validate_allowed_ips("  fd00::/8 , fe80::/64  ")
         assert result == ["fd00::/8", "fe80::/64"]
 
-    def test_empty_string_returns_empty_list(self) -> None:
-        assert validate_allowed_ips("") == []
+    def test_empty_string_raises(self) -> None:
+        with pytest.raises(ValidationError, match="不能为空"):
+            validate_allowed_ips("")
 
     def test_normalizes_to_network_address(self) -> None:
         result = validate_allowed_ips("fe80::1/64")
@@ -251,3 +252,39 @@ class TestValidateAllowedIps:
     def test_ipv4_cidr_raises(self) -> None:
         with pytest.raises(ValidationError, match="不是合法的 IPv6 CIDR"):
             validate_allowed_ips("10.0.0.0/8")
+
+    def test_only_whitespace_raises(self) -> None:
+        with pytest.raises(ValidationError, match="不能为空"):
+            validate_allowed_ips("  ,  , ")
+
+
+class TestValidateAllowedIpsList:
+    def test_empty_list_raises(self) -> None:
+        from dn42ctl.validators import validate_allowed_ips_list
+
+        with pytest.raises(ValidationError, match="不能为空"):
+            validate_allowed_ips_list([])
+
+    def test_list_with_empty_string_raises(self) -> None:
+        from dn42ctl.validators import validate_allowed_ips_list
+
+        with pytest.raises(ValidationError, match="空字符串"):
+            validate_allowed_ips_list([""])
+
+    def test_list_with_ipv4_raises(self) -> None:
+        from dn42ctl.validators import validate_allowed_ips_list
+
+        with pytest.raises(ValidationError, match="不是合法的 IPv6 CIDR"):
+            validate_allowed_ips_list(["10.0.0.0/8"])
+
+    def test_list_with_garbage_raises(self) -> None:
+        from dn42ctl.validators import validate_allowed_ips_list
+
+        with pytest.raises(ValidationError, match="不是合法的 IPv6 CIDR"):
+            validate_allowed_ips_list(["not-a-cidr"])
+
+    def test_valid_list_passes(self) -> None:
+        from dn42ctl.validators import validate_allowed_ips_list
+
+        result = validate_allowed_ips_list(["fe80::/64", "fd00::/8"])
+        assert result == ["fe80::/64", "fd00::/8"]

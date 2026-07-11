@@ -12,7 +12,7 @@
   - `--listen-port`
   - `0` 表示不设置（让系统自行选择端口，适用于仅出站/防火墙后场景）
   - 留空则按规则推导
-  - `--allowed-ips`：WireGuard AllowedIPs，逗号分隔的 IPv6 CIDR（如 `fd00::/8,fe80::/64`）。留空则使用默认值（`fe80::/64,fd00::/8`）。
+  - `--allowed-ips`：WireGuard AllowedIPs，逗号分隔的 IPv6 CIDR（如 `fd00::/8,fe80::/64`）。**必须至少包含一个合法的 IPv6 CIDR**，不允许为空列表。留空则使用默认值（`fe80::/64,fd00::/8`）。
 - 缺失时会提示用户输入。
 
 ### 输入校验

@@ -103,8 +103,8 @@
 
 - **旧版 API 路由** (`/api/bgp/peers`, `/api/ibgp/peers`, `/api/wg/tunnels`, `/api/genconf`)：已被 `/api/admin/bgp/peers`、`/api/admin/ibgp/peers`、`/api/admin/wg/tunnels`、`/api/admin/genconf` 端点取代。
 - **旧版 NetworkManager inline peers 格式**：scan 命令不再解析 `peers=` inline 格式，仅支持 `[wireguard-peer.<PUBLIC_KEY>]` section 格式。
-- **增量数据库迁移 (v1-v7)**：合并为单个建表语句。已有数据库不受影响（schema_migrations 跳过已应用版本）。
-- **payload 字段兼容默认值**：节点间 API 的 `has_wg`、`babel_rxcost`、`babel_type` 字段不再提供缺失时的默认值，所有节点需运行统一版本。
+- **增量数据库迁移 (v1-v7)**：合并为单个建表语句（single consolidated migration）。
+- **payload 字段兼容默认值**：节点间 API 的 `has_wg`、`babel_rxcost`、`babel_type` 字段不再提供缺失时的默认值，所有节点需运行统一版本。缺失时返回 400/422 错误。
 - **create_peer.py** (独立脚本)：功能已被 `dn42ctl bgp peer add` 完全替代。
 
 ### 命令
@@ -113,6 +113,7 @@
 - genconf：`docs/commands/genconf.md`
 - bgp peer (add/modify/del)：`docs/commands/bgp_peer.md`
 - ibgp peer (add/modify/del)：`docs/commands/ibgp_peer.md`
+- show：`docs/commands/show.md`
 - scan：`docs/commands/scan.md`
 - node (admin + 节点同步)：`docs/commands/node.md`
 - system (系统组件安装/卸载)：`docs/commands/system.md`

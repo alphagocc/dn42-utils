@@ -364,3 +364,88 @@ class TestImportReport:
         import_report(config=sample_config, db_path=db_path, report_id=r.id)
         with pytest.raises(Dn42CtlError, match="已被导入"):
             import_report(config=sample_config, db_path=db_path, report_id=r.id)
+
+
+class TestStrictIbgpPayloadValidation:
+    """Proposal accept and report import must reject payloads missing required fields."""
+
+    def test_proposal_peer_add_missing_has_wg_raises(self, sample_config: AppConfig, db_path: Path) -> None:
+        from dn42ctl.services.proposal_decisions import _apply_peer_add
+
+        _register(db_path)
+        payload = {
+            "peer_kind": "ibgp",
+            "peer": {
+                "name": "test",
+                "peer_ip": "fd42::1",
+                "peer_public_key": VALID_PUBKEY,
+                "babel_rxcost": 20,
+                "babel_type": "tunnel",
+            },
+        }
+        with pytest.raises(Dn42CtlError, match="缺少必填字段.*has_wg"):
+            _apply_peer_add(
+                config=sample_config,
+                db_path=db_path,
+                target_node_id=NODE_A,
+                payload=payload,
+            )
+
+    def test_proposal_peer_add_missing_babel_rxcost_raises(self, sample_config: AppConfig, db_path: Path) -> None:
+        from dn42ctl.services.proposal_decisions import _apply_peer_add
+
+        _register(db_path)
+        payload = {
+            "peer_kind": "ibgp",
+            "peer": {
+                "name": "test",
+                "peer_ip": "fd42::1",
+                "has_wg": True,
+                "peer_public_key": VALID_PUBKEY,
+                "babel_type": "tunnel",
+            },
+        }
+        with pytest.raises(Dn42CtlError, match="缺少必填字段.*babel_rxcost"):
+            _apply_peer_add(
+                config=sample_config,
+                db_path=db_path,
+                target_node_id=NODE_A,
+                payload=payload,
+            )
+
+    def test_report_import_missing_fields_raises(self, sample_config: AppConfig, db_path: Path) -> None:
+        from dn42ctl.services.report_import import _import_ibgp
+
+        _register(db_path)
+        peer = {
+            "name": "test",
+            "peer_ip": "fd42::1",
+            "peer_public_key": VALID_PUBKEY,
+        }
+        with pytest.raises(Dn42CtlError, match="缺少必填字段"):
+            _import_ibgp(
+                config=sample_config,
+                db_path=db_path,
+                target_node_id=NODE_A,
+                peer=peer,
+            )
+
+    def test_report_import_all_fields_present_succeeds(self, sample_config: AppConfig, db_path: Path) -> None:
+        from dn42ctl.services.report_import import _import_ibgp
+
+        _register(db_path)
+        peer = {
+            "name": "test_peer",
+            "peer_ip": "fd42::1",
+            "has_wg": False,
+            "peer_public_key": VALID_PUBKEY,
+            "babel_rxcost": 20,
+            "babel_type": "tunnel",
+        }
+        result = _import_ibgp(
+            config=sample_config,
+            db_path=db_path,
+            target_node_id=NODE_A,
+            peer=peer,
+        )
+        assert result == "created"

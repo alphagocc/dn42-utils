@@ -43,7 +43,7 @@
 
 - Bird iBGP peer conf：始终写入 `bird_peers_dir/ibgp_<name>.conf`。使用 `--peer-ip`（网内 IP）作为 neighbor 地址。
 - 有 WG 时：写入 networkd 或 NetworkManager 的 WireGuard 配置文件，**重生成** `babel.conf`。
-- 无 WG 时：仅写入 Bird peer conf，不写网络配置文件，不修改 babel.conf。
+- 无 WG 时：仅写入 Bird peer conf，不写网络配置文件，不修改 babel.conf。`--no-wg` peer 不会出现在 `babel.conf` 的 interface 列表中。
 
 ---
 

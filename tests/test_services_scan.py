@@ -9,6 +9,7 @@ from dn42ctl.services.core import Dn42CtlError
 from dn42ctl.services.scan import (
     _parse_babel_conf_interface_params,
     _parse_bird_bgp_peer_conf,
+    _parse_bird_ibgp_peer_conf,
     _parse_networkd_netdev,
     _parse_networkd_network,
     _parse_nmconnection,
@@ -228,3 +229,29 @@ class TestScanLocalConfigs:
             result = scan_local_configs(config=sample_config, db_path=db_path)
 
         assert len(result.conflicts) == 1
+
+
+class TestParseBirdIbgpPeerConf:
+    def test_parses_bare_ip_format(self) -> None:
+        text = """protocol bgp ibgp_mynode from ibgp_template {
+    neighbor fd42:4242:5678::1 as OWNAS;
+};"""
+        peer_ip, peer_lla = _parse_bird_ibgp_peer_conf(text, "wg_mynode")
+        assert peer_ip == "fd42:4242:5678::1"
+        assert peer_lla is None
+
+    def test_parses_percent_ifname_format(self) -> None:
+        text = """protocol bgp ibgp_legacy from ibgp_template {
+    neighbor fe80::1%wg_legacy as OWNAS;
+};"""
+        peer_ip, peer_lla = _parse_bird_ibgp_peer_conf(text, "wg_legacy")
+        assert peer_ip is None
+        assert peer_lla == "fe80::1"
+
+    def test_returns_none_when_no_match(self) -> None:
+        text = """protocol bgp ibgp_other from ibgp_template {
+    # no neighbor line
+};"""
+        peer_ip, peer_lla = _parse_bird_ibgp_peer_conf(text, "wg_other")
+        assert peer_ip is None
+        assert peer_lla is None

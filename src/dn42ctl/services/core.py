@@ -236,6 +236,8 @@ def write_net_backend_files(
     generated: list[Path],
 ) -> None:
     """Write networkd or NetworkManager wireguard config files."""
+    if not allowed_ips:
+        raise Dn42CtlError(f"AllowedIPs 不能为空 (ifname={ifname})，至少需要一个合法的 IPv6 CIDR")
     if backend == "networkd":
         netdev_path = Path(config.networkd_dir) / f"{ifname}.netdev"
         network_path = Path(config.networkd_dir) / f"{ifname}.network"
@@ -358,6 +360,7 @@ def regenerate_babel_conf(*, config: AppConfig, db: Database, node_id: str) -> P
         interfaces = [
             (str(r["ifname"]), int(r["babel_rxcost"]), str(r["babel_type"]) if r["babel_type"] else "tunnel")
             for r in db.list_ibgp_peers(node_id)
+            if r["has_wg"]
         ]
     except DatabaseError as exc:
         raise Dn42CtlError(str(exc)) from exc

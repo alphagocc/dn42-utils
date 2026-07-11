@@ -21,8 +21,5 @@
 ### ROA v6（Bird `roa_check`）
 
 - 若 `bird_roa_v6_conf_path` 不存在：自动从 DN42 ROA 源下载并写入（IPv6 / Bird2 格式）。
-- 安装并启用 systemd 定时更新（Linux/systemd 可用时）：
-  - 写入 `dn42-roa-v6.service` / `dn42-roa-v6.timer` 到 `/etc/systemd/system/`。
-  - 执行 `systemctl daemon-reload` 与 `systemctl enable --now dn42-roa-v6.timer`。
-  - service 内部使用 `curl` 定期刷新 ROA 文件，并在下载后尝试执行 `birdc configure`（失败不应导致 service 失败）。
-- 若当前系统缺少 systemd（或 `systemctl` 不可用）：跳过定时器配置并给出提示。
+- 下载失败时写入占位文件并输出警告（不阻断后续流程）。
+- genconf **不安装** systemd 定时器。如需自动定时更新 ROA 文件，请使用 `dn42ctl system install roa-service`。

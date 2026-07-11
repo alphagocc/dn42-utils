@@ -12,14 +12,14 @@ Payload schemas (set by node-side `push`):
         {"peer_kind": "bgp",  "peer": {peer_asn, peer_public_key, endpoint?, peer_lla,
                                        net_backend, listen_port?}}
         {"peer_kind": "ibgp", "peer": {name, peer_ip, has_wg, peer_public_key?, endpoint?,
-                                       peer_lla?, net_backend?, babel_rxcost?, babel_type?,
+                                       peer_lla?, net_backend?, babel_rxcost, babel_type,
                                        listen_port?}}
 
     kind=peer_modify (BGP): {"peer_kind": "bgp",  "peer": {peer_asn, peer_public_key, endpoint?,
                                                             peer_lla, net_backend, listen_port?}}
     kind=peer_modify (iBGP): {"peer_kind": "ibgp", "peer": {name, peer_ip, peer_public_key,
                                                              endpoint?, peer_lla?, net_backend,
-                                                             babel_rxcost?, babel_type?, listen_port?}}
+                                                             babel_rxcost, babel_type, listen_port?}}
 
     kind=peer_delete:
         {"peer_kind": "bgp",  "key": {"peer_asn": ...}}
@@ -52,6 +52,12 @@ def _require_peer_kind(payload: dict[str, Any]) -> str:
     return pk
 
 
+def _require_ibgp_fields(peer: dict[str, Any], fields: list[str]) -> None:
+    missing = [f for f in fields if f not in peer]
+    if missing:
+        raise Dn42CtlError(f"iBGP peer payload 缺少必填字段: {', '.join(missing)}")
+
+
 def _apply_peer_add(*, config: AppConfig, db_path: Path, target_node_id: str, payload: dict[str, Any]) -> None:
     peer_kind = _require_peer_kind(payload)
     peer = payload.get("peer")
@@ -71,6 +77,7 @@ def _apply_peer_add(*, config: AppConfig, db_path: Path, target_node_id: str, pa
             render_files=False,
         )
     else:
+        _require_ibgp_fields(peer, ["has_wg", "babel_rxcost", "babel_type"])
         create_ibgp_peer(
             config=config,
             db_path=db_path,
@@ -108,6 +115,7 @@ def _apply_peer_modify(*, config: AppConfig, db_path: Path, target_node_id: str,
             render_files=False,
         )
     else:
+        _require_ibgp_fields(peer, ["babel_rxcost", "babel_type"])
         modify_ibgp_peer(
             config=config,
             db_path=db_path,
@@ -117,8 +125,8 @@ def _apply_peer_modify(*, config: AppConfig, db_path: Path, target_node_id: str,
             peer_lla=str(peer.get("peer_lla") or ""),
             peer_ip=str(peer["peer_ip"]),
             net_backend=str(peer.get("net_backend") or "networkd"),
-            babel_rxcost=int(peer.get("babel_rxcost", 120)),
-            babel_type=str(peer.get("babel_type") or "tunnel"),
+            babel_rxcost=int(peer["babel_rxcost"]),
+            babel_type=str(peer["babel_type"]),
             listen_port=peer.get("listen_port"),
             node_id=target_node_id,
             render_files=False,

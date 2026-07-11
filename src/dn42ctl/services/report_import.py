@@ -44,6 +44,10 @@ def _import_bgp(*, config: AppConfig, db_path: Path, target_node_id: str, peer: 
 
 
 def _import_ibgp(*, config: AppConfig, db_path: Path, target_node_id: str, peer: dict[str, Any]) -> str:
+    _required = ("has_wg", "babel_rxcost", "babel_type")
+    missing = [f for f in _required if f not in peer]
+    if missing:
+        raise Dn42CtlError(f"iBGP peer payload 缺少必填字段: {', '.join(missing)}")
     db = Database.open(db_path)
     try:
         existing = db.get_ibgp_peer(target_node_id, str(peer["name"]))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import configparser
+import ipaddress
 import re
 import shutil
 from dataclasses import dataclass
@@ -198,6 +199,10 @@ def _parse_networkd_netdev(text: str) -> dict[str, object]:
                 for item in re.split(r"[\s,]+", val):
                     item = item.strip()
                     if item:
+                        try:
+                            ipaddress.IPv6Network(item, strict=False)
+                        except ValueError:
+                            continue
                         allowed_ips.append(item)
     if allowed_ips:
         out["allowed_ips"] = allowed_ips
@@ -254,7 +259,16 @@ def _parse_nmconnection(text: str) -> dict[str, object]:
                 out["endpoint"] = ep
             raw_ips = cfg.get(peer_section, "allowed-ips", fallback=None)
             if raw_ips:
-                ips = [x.strip() for x in raw_ips.split(";") if x.strip()]
+                ips: list[str] = []
+                for x in raw_ips.split(";"):
+                    x = x.strip()
+                    if not x:
+                        continue
+                    try:
+                        ipaddress.IPv6Network(x, strict=False)
+                    except ValueError:
+                        continue
+                    ips.append(x)
                 if ips:
                     out["allowed_ips"] = ips
 
@@ -283,14 +297,26 @@ def _parse_bird_bgp_peer_conf(text: str, ifname: str) -> tuple[int | None, str |
     return asn, peer_lla
 
 
-def _parse_bird_ibgp_peer_conf(text: str, ifname: str) -> str | None:
+def _parse_bird_ibgp_peer_conf(text: str, ifname: str) -> tuple[str | None, str | None]:
+    """Parse iBGP Bird peer conf. Returns (peer_ip, peer_lla).
+
+    Matches two formats:
+    - Generated: ``neighbor <peer_ip> as OWNAS;`` (bare IP, no interface binding)
+    - Legacy:    ``neighbor <ip>%<ifname> as OWNAS;`` (link-local with interface)
+    """
     m = re.search(
         rf"neighbor\s+([^%\s]+)%{re.escape(ifname)}\s+as\s+OWNAS\s*;",
         text,
     )
-    if not m:
-        return None
-    return m.group(1)
+    if m:
+        return None, m.group(1)
+    m = re.search(
+        r"neighbor\s+(\S+)\s+as\s+OWNAS\s*;",
+        text,
+    )
+    if m:
+        return m.group(1), None
+    return None, None
 
 
 _BABEL_INTERFACE_BLOCK_RE = re.compile(
@@ -563,8 +589,9 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
                 skipped.append(f"{ifname}: 接口名无效: {exc}")
                 continue
 
-            # Optional: try bird conf to extract peer_lla.
-            if peer_lla is None:
+            # Optional: try bird conf to extract peer_ip and/or peer_lla.
+            peer_ip: str | None = None
+            if True:
                 bird_path = _find_first([d / f"ibgp_{peer_name}.conf" for d in bird_peers_dirs])
                 if bird_path is not None:
                     try:
@@ -572,9 +599,11 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
                     except Dn42CtlError as exc:
                         warnings.append(f"{ifname}: 读取 Bird iBGP peer conf 失败: {exc}")
                     else:
-                        maybe = _parse_bird_ibgp_peer_conf(bird_text, ifname)
-                        if maybe:
-                            peer_lla = maybe
+                        parsed_ip, parsed_lla = _parse_bird_ibgp_peer_conf(bird_text, ifname)
+                        if parsed_ip:
+                            peer_ip = parsed_ip
+                        if parsed_lla and peer_lla is None:
+                            peer_lla = parsed_lla
 
             try:
                 if db.get_ibgp_peer(config.node_id, peer_name) is not None:
@@ -615,6 +644,7 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
                         net_backend=backend,
                         babel_rxcost=scan_rxcost,
                         babel_type=scan_babel_type,
+                        peer_ip=peer_ip,
                     )
                 )
                 inserted.append(

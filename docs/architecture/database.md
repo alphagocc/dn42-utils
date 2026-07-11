@@ -11,7 +11,7 @@
 - 使用 `schema_migrations(version)` 记录迁移版本。
 - 启动/初始化时应自动执行迁移，保证旧库可直接升级。
 
-## Schema（当前版本 v5）
+## Schema（single consolidated migration）
 
 ### 1) schema_migrations
 
@@ -44,7 +44,10 @@
 内网 iBGP peer（wireguard 隧道 + bird peers + babel 互联），字段与 `bgp_peers` 类似，额外包含：
 
 - `name`
-- `babel_rxcost`（生成 `babel.conf` 时写入对应 `interface` 段的 `rxcost`）
+- `peer_ip`（Bird neighbor 地址，网内 IPv6）
+- `has_wg`（是否创建 WireGuard 隧道，默认 1）
+- `babel_rxcost`（生成 `babel.conf` 时写入对应 `interface` 段的 `rxcost`，默认 20）
+- `babel_type`（`wired` / `wireless` / `tunnel`，默认 `tunnel`）
 
 约束：
 
@@ -58,7 +61,7 @@
 
 ---
 
-## v5：多节点中心化同步表
+## 多节点中心化同步表
 
 中心化 hub-spoke 同步引入 4 张新表。架构与流程详见
 `docs/architecture/sync_hub_spoke.md`。
@@ -145,6 +148,21 @@ CREATE INDEX idx_config_revisions_node_time ON config_revisions(node_id, generat
 
 - 每次生成 desired state 时写一条快照，供 `dn42ctl node rollback` 用。
 - 保留上限由应用层定时清理（默认 50 条 / 节点）。schema 不强制。
+
+### 9) node_desired_pin
+
+```sql
+CREATE TABLE node_desired_pin (
+    node_id TEXT PRIMARY KEY,
+    revision TEXT NOT NULL,
+    pinned_at TEXT NOT NULL,
+    FOREIGN KEY(node_id) REFERENCES nodes(node_id) ON DELETE CASCADE
+);
+```
+
+- 每个节点至多一条 pin 记录，表示该节点的 desired state 锁定到指定 revision。
+- `dn42ctl node rollback` 设置 pin；`dn42ctl node unpin` 删除 pin，恢复跟随最新。
+- `RevisionStore.trim()` 会保护被 pin 的 revision 不被清理。
 
 ### 设计取舍
 

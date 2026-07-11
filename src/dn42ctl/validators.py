@@ -119,8 +119,26 @@ def validate_ownnetset_v6(value: str) -> str:
 def validate_allowed_ips(value: str) -> list[str]:
     items = [s.strip() for s in value.split(",")]
     items = [s for s in items if s]
+    if not items:
+        raise ValidationError("AllowedIPs 不能为空，至少需要一个合法的 IPv6 CIDR")
     result: list[str] = []
     for item in items:
+        try:
+            net = ipaddress.IPv6Network(item, strict=False)
+        except ValueError as exc:
+            raise ValidationError(f"不是合法的 IPv6 CIDR: {item!r}") from exc
+        result.append(str(net))
+    return result
+
+
+def validate_allowed_ips_list(value: list[str]) -> list[str]:
+    if not value:
+        raise ValidationError("AllowedIPs 不能为空，至少需要一个合法的 IPv6 CIDR")
+    result: list[str] = []
+    for item in value:
+        item = item.strip()
+        if not item:
+            raise ValidationError("AllowedIPs 包含空字符串")
         try:
             net = ipaddress.IPv6Network(item, strict=False)
         except ValueError as exc:

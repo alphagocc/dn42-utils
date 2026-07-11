@@ -151,8 +151,11 @@ def genconf(
             backend = row["net_backend"] or "networkd"
 
             write_bird_bgp_peer(
-                config=config, ifname=ifname, peer_lla=peer_lla,
-                peer_asn=peer_asn, generated=generated_peer_files,
+                config=config,
+                ifname=ifname,
+                peer_lla=peer_lla,
+                peer_asn=peer_asn,
+                generated=generated_peer_files,
             )
             write_net_backend_files(
                 config=config,
@@ -178,12 +181,17 @@ def genconf(
             peer_ip = row["peer_ip"] or ""
             has_wg = bool(row["has_wg"])
 
-            bird_peer_path = bird_peers_dir / f"ibgp_{peer_name}.conf"
-            bird_conf_text = render_bird_ibgp_peer_conf(
-                name=peer_name, ifname=ifname, peer_ip=peer_ip,
-            )
-            write_text(bird_peer_path, bird_conf_text)
-            generated_peer_files.append(bird_peer_path)
+            if peer_ip:
+                bird_peer_path = bird_peers_dir / f"ibgp_{peer_name}.conf"
+                bird_conf_text = render_bird_ibgp_peer_conf(
+                    name=peer_name,
+                    ifname=ifname,
+                    peer_ip=peer_ip,
+                )
+                write_text(bird_peer_path, bird_conf_text)
+                generated_peer_files.append(bird_peer_path)
+            else:
+                warnings.append(f"iBGP peer {peer_name!r}: peer_ip 为空，跳过 Bird conf 生成")
 
             if has_wg:
                 write_net_backend_files(

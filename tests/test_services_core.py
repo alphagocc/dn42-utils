@@ -166,3 +166,61 @@ class TestOpenDbAndEnsureNode:
         row = db._conn.execute("SELECT COUNT(*) FROM nodes WHERE node_id='test-node'").fetchone()
         assert row[0] == 1
         db.close()
+
+
+class TestRegenerateBabelConfHasWgFilter:
+    def test_no_wg_peer_excluded_from_babel(self, sample_config, mem_db_with_node) -> None:
+        from conftest import FAKE_WG_PRIVKEY, FAKE_WG_PUBKEY, VALID_PEER_IP, VALID_PEER_LLA, VALID_PUBKEY
+
+        from dn42ctl.db import IbgpPeerRecord
+        from dn42ctl.services.core import regenerate_babel_conf
+
+        db = mem_db_with_node
+        node_id = "test-node"
+
+        db.insert_ibgp_peer(
+            IbgpPeerRecord(
+                node_id=node_id,
+                name="with_wg",
+                ifname="wg_with_wg",
+                wg_private_key=FAKE_WG_PRIVKEY,
+                wg_public_key=FAKE_WG_PUBKEY,
+                peer_public_key=VALID_PUBKEY,
+                endpoint="example.com:51820",
+                local_lla="fe80::1",
+                peer_lla=VALID_PEER_LLA,
+                listen_port=51821,
+                allowed_ips=["fe80::/64", "fd00::/8"],
+                net_backend="networkd",
+                babel_rxcost=20,
+                babel_type="tunnel",
+                peer_ip=VALID_PEER_IP,
+                has_wg=True,
+            )
+        )
+        db.insert_ibgp_peer(
+            IbgpPeerRecord(
+                node_id=node_id,
+                name="no_wg",
+                ifname="wg_no_wg",
+                wg_private_key="",
+                wg_public_key="",
+                peer_public_key="",
+                endpoint="",
+                local_lla="",
+                peer_lla="",
+                listen_port=0,
+                allowed_ips=[],
+                net_backend="networkd",
+                babel_rxcost=20,
+                babel_type="tunnel",
+                peer_ip="fd42::2",
+                has_wg=False,
+            )
+        )
+
+        babel_path = regenerate_babel_conf(config=sample_config, db=db, node_id=node_id)
+        babel_text = babel_path.read_text()
+
+        assert "wg_with_wg" in babel_text
+        assert "wg_no_wg" not in babel_text

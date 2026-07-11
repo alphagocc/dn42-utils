@@ -25,6 +25,7 @@ from dn42ctl.services.core import (
 )
 from dn42ctl.validators import (
     ValidationError,
+    validate_allowed_ips_list,
     validate_babel_type,
     validate_listen_port,
     validate_rxcost,
@@ -43,7 +44,7 @@ def create_ibgp_peer(
     endpoint: str | None = None,
     peer_lla: str | None = None,
     net_backend: str | None = None,
-    babel_rxcost: int = 0,
+    babel_rxcost: int = 20,
     babel_type: str = "tunnel",
     listen_port: int | None = None,
     wg_private_key: str | None = None,
@@ -102,6 +103,11 @@ def create_ibgp_peer(
         private_key, public_key = resolve_wg_keypair(wg_private_key, wg_public_key)
         local_lla_addr = local_lla or generate_random_lla()
         effective_allowed_ips = allowed_ips if allowed_ips is not None else IBGP_ALLOWED_IPS
+
+        try:
+            validate_allowed_ips_list(effective_allowed_ips)
+        except ValidationError as exc:
+            raise Dn42CtlError(str(exc)) from exc
     else:
         backend = "networkd"
         listen_port = 0
@@ -298,6 +304,11 @@ def modify_ibgp_peer(
         if new_listen_port in used_ports:
             raise Dn42CtlError(f"ListenPort 已被占用: {new_listen_port}")
     effective_allowed_ips = allowed_ips if allowed_ips is not None else parse_allowed_ips_json(row["allowed_ips_json"])
+
+    try:
+        validate_allowed_ips_list(effective_allowed_ips)
+    except ValidationError as exc:
+        raise Dn42CtlError(str(exc)) from exc
 
     try:
         db.update_ibgp_peer(

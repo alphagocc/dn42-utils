@@ -2,8 +2,14 @@
 
 <task>
 
-- [x] deploy web 添加一个参数指定 VITE_API_BASE
-- [x] 正确 token 调用 https://api-dn42.eof.moe/api/admin/bgp/peers?live=false 显示 404。构造 test 然后修复问题。
+- [ ] 修复旧数据库升级兼容性：重新设计合并后的 migration 版本识别，确保已有 `schema_migrations` v1-v7 的数据库能补齐当前表、字段、索引和 `node_desired_pin`；增加真实旧 schema 升级测试，并修正文档中”已有数据库不受影响”和当前 schema 版本的说明。
+- [x] 统一 `genconf` 与 ROA timer 的规格和实现：明确 timer 应由 `genconf` 自动安装，还是仅由 `dn42ctl system install roa-service` 管理；按最终设计修改 spec、命令文档、实现和测试。
+- [x] 强制 WireGuard `AllowedIPs` 非空且全部为合法 IPv6 CIDR：CLI、API、service 和导入路径使用一致校验，禁止 networkd 缺少 `AllowedIPs` 或 NetworkManager 生成 `allowed-ips=;`；增加空列表、空字符串和非法 CIDR 测试。
+- [x] 修复 iBGP scan 往返：scan 需要解析当前 Bird 配置中的 `neighbor <peer_ip> as OWNAS`，将 `peer_ip` 正确写入 SQLite，并保证 `scan -> genconf --all` 可恢复 iBGP Bird/WireGuard/Babel 配置；增加 networkd 和 NetworkManager 回归测试。
+- [x] 生成 `babel.conf` 时仅包含 `has_wg=true` 的 iBGP peer，确保 `--no-wg` peer 在后续 `genconf`、节点 desired-state apply 和删除/修改流程中都不会生成虚构的 `wg_<name>` Babel interface；增加混合 WG/no-WG 测试。
+- [x] 移除节点 proposal/report payload 的兼容默认值：`has_wg`、`babel_rxcost`、`babel_type` 在 add/modify/import 各路径均必须显式存在并经过统一 schema 校验，缺失时返回可控的 400/422，而不是 `KeyError` 或静默回退。
+- [x] 同步规范索引和详细文档：在 `docs/spec.md` 加入 `show.md`；修正 `init.md` 的 dummy backend 行为；更新 `database.md` 的表结构；更新 `testing.md` 的实际测试文件列表；清理已实现功能残留的”阶段”或过期描述。
+- [x] 为上述规范约束增加端到端回归覆盖，至少包含旧库迁移、空 AllowedIPs、iBGP scan/genconf 往返、no-WG Babel 过滤和严格 payload 校验，并运行完整 ruff、pyright、pytest 与 compileall 验证。
 
 </task>
 

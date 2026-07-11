@@ -46,18 +46,14 @@ class TestEnsureDummyInterfaceNetworkd:
             "[Match]\nName=dn42-dummy\n\n[Network]\nDHCP=no\nIPv6AcceptRA=false\n\n"
             "[Address]\nAddress=fd42:4242:1234::1/128\n"
         )
-        result = ensure_dummy_interface(
-            "fd42:4242:1234::1", backend="networkd", networkd_dir=str(tmp_path)
-        )
+        result = ensure_dummy_interface("fd42:4242:1234::1", backend="networkd", networkd_dir=str(tmp_path))
         assert result.skipped is True
         assert result.created is False
         assert result.backend == "networkd"
 
     def test_creates_files_and_reloads(self, tmp_path: Path) -> None:
         with patch("subprocess.check_output", return_value="") as mock_run:
-            result = ensure_dummy_interface(
-                "fd42:4242:1234::1", backend="networkd", networkd_dir=str(tmp_path)
-            )
+            result = ensure_dummy_interface("fd42:4242:1234::1", backend="networkd", networkd_dir=str(tmp_path))
         assert result.created is True
         assert result.backend == "networkd"
         assert (tmp_path / "dn42-dummy.netdev").exists()
@@ -73,9 +69,7 @@ class TestEnsureDummyInterfaceNetworkd:
         read_only = tmp_path / "no_write"
         read_only.mkdir()
         read_only.chmod(0o555)
-        result = ensure_dummy_interface(
-            "fd42:4242:1234::1", backend="networkd", networkd_dir=str(read_only)
-        )
+        result = ensure_dummy_interface("fd42:4242:1234::1", backend="networkd", networkd_dir=str(read_only))
         assert result.created is False
         assert len(result.warnings) > 0
         read_only.chmod(0o755)
@@ -87,9 +81,7 @@ class TestEnsureDummyInterfaceNM:
             patch("dn42ctl.services.dummy._interface_exists", return_value=True),
             patch("dn42ctl.services.dummy._address_bound", return_value=True),
         ):
-            result = ensure_dummy_interface(
-                "fd42:4242:1234::1", backend="nm", networkd_dir="/etc/systemd/network"
-            )
+            result = ensure_dummy_interface("fd42:4242:1234::1", backend="nm", networkd_dir="/etc/systemd/network")
             assert result.skipped is True
             assert result.created is False
             assert result.backend == "nm"
@@ -100,9 +92,7 @@ class TestEnsureDummyInterfaceNM:
             patch("dn42ctl.services.dummy._address_bound", return_value=False),
             patch("subprocess.check_output", return_value=""),
         ):
-            result = ensure_dummy_interface(
-                "fd42:4242:1234::1", backend="nm", networkd_dir="/etc/systemd/network"
-            )
+            result = ensure_dummy_interface("fd42:4242:1234::1", backend="nm", networkd_dir="/etc/systemd/network")
             assert result.created is True
             assert result.backend == "nm"
 
@@ -111,9 +101,7 @@ class TestEnsureDummyInterfaceNM:
             patch("dn42ctl.services.dummy._interface_exists", return_value=False),
             patch("subprocess.check_output", return_value=""),
         ):
-            result = ensure_dummy_interface(
-                "fd42:4242:1234::1", backend="nm", networkd_dir="/etc/systemd/network"
-            )
+            result = ensure_dummy_interface("fd42:4242:1234::1", backend="nm", networkd_dir="/etc/systemd/network")
             assert result.created is True
             assert result.backend == "nm"
 
@@ -125,8 +113,6 @@ class TestEnsureDummyInterfaceNM:
                 side_effect=subprocess.CalledProcessError(1, "nmcli"),
             ),
         ):
-            result = ensure_dummy_interface(
-                "fd42:4242:1234::1", backend="nm", networkd_dir="/etc/systemd/network"
-            )
+            result = ensure_dummy_interface("fd42:4242:1234::1", backend="nm", networkd_dir="/etc/systemd/network")
             assert result.created is False
             assert len(result.warnings) > 0

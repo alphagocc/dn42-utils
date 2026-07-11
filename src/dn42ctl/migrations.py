@@ -51,7 +51,7 @@ MIGRATIONS: list[tuple[int, str]] = [
             listen_port INTEGER NOT NULL,
             allowed_ips_json TEXT NOT NULL,
             net_backend TEXT NOT NULL,
-            babel_rxcost INTEGER NOT NULL DEFAULT 120,
+            babel_rxcost INTEGER NOT NULL DEFAULT 20,
             peer_ip TEXT,
             has_wg INTEGER NOT NULL DEFAULT 1,
             babel_type TEXT NOT NULL DEFAULT 'tunnel',

@@ -8,7 +8,6 @@ from dn42ctl.constants import FILE_MODE_NETDEV
 from dn42ctl.fs import chmod_best_effort
 from dn42ctl.render import render_dummy_netdev, render_dummy_network
 
-
 DUMMY_IFNAME = "dn42-dummy"
 
 

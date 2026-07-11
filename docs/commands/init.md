@@ -41,8 +41,8 @@
 `init`（以及 `genconf`）会自动创建 `dn42-dummy` dummy 接口并绑定 `OWNIPv6/128` 地址。
 
 - 若接口与地址已存在，跳过。
-- 自动检测网络管理方式：
-  - 若 `nmcli` 可用且 NetworkManager 服务正在运行，使用 `nmcli connection add type dummy ...` 创建。
-  - 否则使用 `ip link add ... type dummy` + `ip addr add ...`。
+- 网络管理后端通过 `config.toml` 的 `dummy_backend` 字段配置（`networkd` 或 `nm`），`init --dummy-backend` 指定。
+  - `networkd`：写入 `/etc/systemd/network/dn42-dummy.netdev` + `.network`，然后 `networkctl reload`。
+  - `nm`：`nmcli connection add type dummy ifname dn42-dummy ipv6.method manual ipv6.addresses <OWNIPv6>/128`。
 - 创建失败仅输出警告，不阻断 init/genconf 流程。
 - 仅在 Linux 平台执行。

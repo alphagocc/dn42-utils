@@ -20,7 +20,7 @@ from dn42ctl.services.core import (
     write_bird_bgp_peer,
     write_net_backend_files,
 )
-from dn42ctl.validators import ValidationError, validate_listen_port
+from dn42ctl.validators import ValidationError, validate_allowed_ips_list, validate_listen_port
 from dn42ctl.wg import generate_random_lla
 
 
@@ -79,6 +79,11 @@ def create_bgp_peer(
 
     local_lla_addr = local_lla or generate_random_lla()
     effective_allowed_ips = allowed_ips if allowed_ips is not None else DEFAULT_ALLOWED_IPS
+
+    try:
+        validate_allowed_ips_list(effective_allowed_ips)
+    except ValidationError as exc:
+        raise Dn42CtlError(str(exc)) from exc
 
     try:
         db.insert_bgp_peer(
@@ -174,6 +179,11 @@ def modify_bgp_peer(
             raise Dn42CtlError(f"ListenPort 已被占用: {new_listen_port}")
     local_lla = str(row["local_lla"])
     effective_allowed_ips = allowed_ips if allowed_ips is not None else parse_allowed_ips_json(row["allowed_ips_json"])
+
+    try:
+        validate_allowed_ips_list(effective_allowed_ips)
+    except ValidationError as exc:
+        raise Dn42CtlError(str(exc)) from exc
 
     try:
         db.update_bgp_peer(

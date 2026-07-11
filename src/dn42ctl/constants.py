@@ -3,7 +3,7 @@ from __future__ import annotations
 MAX_PORT = 65535
 FILE_MODE_PRIVATE = 0o600
 FILE_MODE_NETDEV = 0o640
-BABEL_DEFAULT_RXCOST = 120
+BABEL_DEFAULT_RXCOST = 20
 BABEL_DEFAULT_TYPE = "tunnel"
 BABEL_VALID_TYPES = ("wired", "wireless", "tunnel")
 WG_PORT_RANGE = (30000, 49999)
