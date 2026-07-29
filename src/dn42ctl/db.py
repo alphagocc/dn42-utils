@@ -7,7 +7,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from dn42ctl.constants import FILE_MODE_PRIVATE
+from dn42ctl.constants import (
+    FILE_MODE_PRIVATE,
+    SQLITE_BUSY_TIMEOUT_MS,
+    SYNC_EVENT_DESIRED,
+    SYNC_EVENTS_KEEP,
+    SYNC_EVENTS_TRIM_EVERY,
+)
 from dn42ctl.fs import chmod_best_effort
 from dn42ctl.migrations import MIGRATIONS
 
@@ -18,6 +24,29 @@ class DatabaseError(RuntimeError):
 
 def _now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
+
+
+def emit_sync_event(conn: sqlite3.Connection, *, node_id: str, kind: str = SYNC_EVENT_DESIRED) -> None:
+    """Append a change notification for the `dn42ctl serve` watcher.
+
+    Inserts into the CALLER'S already-open transaction — the caller commits. That
+    makes the event atomic with the business write it describes: there is no crash
+    window where the peer row landed but the notification did not.
+
+    `kind` is one of `SYNC_EVENT_DESIRED` (the node's desired state may have changed)
+    or `SYNC_EVENT_ACCESS_REVOKED` (drop this node's live connections).
+
+    Trimming is amortized: every `SYNC_EVENTS_TRIM_EVERY` rows we drop everything
+    older than the newest `SYNC_EVENTS_KEEP`. Safe at any cursor position because the
+    watcher initializes its cursor to `MAX(id)` and only ever moves forward.
+    """
+    cur = conn.execute(
+        "INSERT INTO sync_events(node_id, kind, created_at) VALUES (?,?,?)",
+        (node_id, kind, _now_iso()),
+    )
+    new_id = cur.lastrowid
+    if new_id is not None and new_id % SYNC_EVENTS_TRIM_EVERY == 0:
+        conn.execute("DELETE FROM sync_events WHERE id <= ?", (new_id - SYNC_EVENTS_KEEP,))
 
 
 @dataclass(frozen=True)
@@ -54,6 +83,9 @@ class Database:
         self._conn = conn
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
+        # hub 上 server 进程与 CLI 进程并发访问同一个库文件;没有 busy_timeout 时撞锁会
+        # 立刻抛 "database is locked" 而不是等待重试。不启用 WAL(见 docs/architecture/database.md)。
+        self._conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
 
     @property
     def connection(self) -> sqlite3.Connection:
@@ -161,6 +193,7 @@ class Database:
                     now,
                 ),
             )
+            emit_sync_event(self._conn, node_id=record.node_id)
             self._conn.commit()
         except sqlite3.IntegrityError as exc:
             self._conn.rollback()
@@ -211,6 +244,7 @@ class Database:
                 ).fetchone()
                 if exists is None:
                     raise DatabaseError("BGP peer not found")
+            emit_sync_event(self._conn, node_id=node_id)
             self._conn.commit()
         except sqlite3.Error as exc:
             self._conn.rollback()
@@ -243,6 +277,7 @@ class Database:
         get_fn: Callable[..., sqlite3.Row | None],
         where_params: tuple,
         error_label: str,
+        node_id: str,
     ) -> sqlite3.Row | None:
         try:
             row = get_fn(*where_params)
@@ -252,6 +287,7 @@ class Database:
                 f"DELETE FROM {table} WHERE {where_clause}",  # noqa: S608
                 where_params,
             )
+            emit_sync_event(self._conn, node_id=node_id)
             self._conn.commit()
             return row
         except sqlite3.Error as exc:
@@ -265,6 +301,7 @@ class Database:
             self.get_bgp_peer,
             (node_id, peer_asn),
             "BGP peer",
+            node_id,
         )
 
     def delete_ibgp_peer(self, node_id: str, name: str) -> sqlite3.Row | None:
@@ -274,6 +311,7 @@ class Database:
             self.get_ibgp_peer,
             (node_id, name),
             "iBGP peer",
+            node_id,
         )
 
     def insert_ibgp_peer(self, record: IbgpPeerRecord) -> None:
@@ -313,6 +351,7 @@ class Database:
                     now,
                 ),
             )
+            emit_sync_event(self._conn, node_id=record.node_id)
             self._conn.commit()
         except sqlite3.IntegrityError as exc:
             self._conn.rollback()
@@ -368,6 +407,7 @@ class Database:
                 ).fetchone()
                 if exists is None:
                     raise DatabaseError("iBGP peer not found")
+            emit_sync_event(self._conn, node_id=node_id)
             self._conn.commit()
         except sqlite3.Error as exc:
             self._conn.rollback()

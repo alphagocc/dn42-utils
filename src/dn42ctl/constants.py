@@ -12,3 +12,12 @@ NET_BACKEND_NM = "nm"
 IFNAME_PREFIX_BGP = "dn42_"
 IFNAME_PREFIX_IBGP = "wg_"
 LIVE_CMD_TIMEOUT = 2
+
+# sync_events(变更通知队列)
+SYNC_EVENT_DESIRED = "desired"
+SYNC_EVENT_ACCESS_REVOKED = "access_revoked"
+SYNC_EVENTS_KEEP = 1000
+SYNC_EVENTS_TRIM_EVERY = 256
+
+# SQLite busy timeout(毫秒)。hub 上 server 进程与 CLI 进程会并发访问同一个库文件。
+SQLITE_BUSY_TIMEOUT_MS = 5000

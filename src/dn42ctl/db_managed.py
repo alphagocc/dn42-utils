@@ -8,7 +8,8 @@ from datetime import UTC, datetime
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 
-from dn42ctl.db import DatabaseError
+from dn42ctl.constants import SYNC_EVENT_ACCESS_REVOKED, SYNC_EVENT_DESIRED
+from dn42ctl.db import DatabaseError, emit_sync_event
 
 
 def _now_iso() -> str:
@@ -240,6 +241,8 @@ class ManagedNodeStore:
             raise DatabaseError("拒绝删除 self 节点 (传入 force=True 强制删除)")
         try:
             self._conn.execute("DELETE FROM managed_nodes WHERE node_id=?", (node_id,))
+            # 节点没了,但通知必须活下来让 watcher 断开它的连接 —— 所以 sync_events 无 FK。
+            emit_sync_event(self._conn, node_id=node_id, kind=SYNC_EVENT_ACCESS_REVOKED)
             self._conn.commit()
         except sqlite3.Error as exc:
             self._conn.rollback()
@@ -257,6 +260,8 @@ class ManagedNodeStore:
             )
             if cur.rowcount == 0:
                 raise DatabaseError(f"节点不存在: {node_id}")
+            # 旧 token 立即失效 —— 踢掉该节点仍在用旧 token 的 WS 连接。
+            emit_sync_event(self._conn, node_id=node_id, kind=SYNC_EVENT_ACCESS_REVOKED)
             self._conn.commit()
         except sqlite3.Error as exc:
             self._conn.rollback()
@@ -703,6 +708,8 @@ class RevisionStore:
                 """,
                 (node_id, revision, now),
             )
+            # rollback 不碰 peer 表,但确实改变了该节点的 desired state。
+            emit_sync_event(self._conn, node_id=node_id, kind=SYNC_EVENT_DESIRED)
             self._conn.commit()
         except sqlite3.Error as exc:
             self._conn.rollback()
@@ -711,6 +718,7 @@ class RevisionStore:
     def unpin(self, node_id: str) -> None:
         try:
             self._conn.execute("DELETE FROM node_desired_pin WHERE node_id=?", (node_id,))
+            emit_sync_event(self._conn, node_id=node_id, kind=SYNC_EVENT_DESIRED)
             self._conn.commit()
         except sqlite3.Error as exc:
             self._conn.rollback()
@@ -725,3 +733,55 @@ class RevisionStore:
         if pin_row is None:
             return None
         return self.get_by_revision(node_id, pin_row["revision"])
+
+
+# --- sync_events ---
+
+
+@dataclass(frozen=True)
+class SyncEvent:
+    id: int
+    node_id: str
+    kind: str
+    created_at: str
+
+
+def _row_to_sync_event(row: sqlite3.Row) -> SyncEvent:
+    return SyncEvent(
+        id=row["id"],
+        node_id=row["node_id"],
+        kind=row["kind"],
+        created_at=row["created_at"],
+    )
+
+
+class SyncEventStore:
+    """Read side of the change-notification queue.
+
+    The write side lives in `dn42ctl.db.emit_sync_event` — it has to, because
+    `db_managed` imports `db` and the emit has to run inside each mutation's own
+    transaction. Only `dn42ctl serve`'s watcher reads this table.
+    """
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+
+    def latest_id(self) -> int:
+        """Current high-water mark. The watcher starts here rather than at 0:
+        anything older is already covered by each connection's initial sync.
+        """
+        try:
+            row = self._conn.execute("SELECT COALESCE(MAX(id), 0) FROM sync_events").fetchone()
+        except sqlite3.Error as exc:
+            raise DatabaseError("查询 sync_events 游标失败") from exc
+        return int(row[0])
+
+    def fetch_since(self, last_id: int, *, limit: int = 500) -> list[SyncEvent]:
+        try:
+            rows = self._conn.execute(
+                "SELECT * FROM sync_events WHERE id > ? ORDER BY id LIMIT ?",
+                (last_id, limit),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise DatabaseError("查询 sync_events 失败") from exc
+        return [_row_to_sync_event(r) for r in rows]

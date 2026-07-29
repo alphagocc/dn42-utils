@@ -130,4 +130,22 @@ MIGRATIONS: list[tuple[int, str]] = [
         UPDATE ibgp_peers SET net_backend = 'networkd' WHERE net_backend = 'nm';
         """.strip(),
     ),
+    (
+        9,
+        # 变更通知队列。`dn42ctl serve` 的 watcher 轮询这张表,把变更转成节点 WS 推送。
+        #
+        # AUTOINCREMENT 是必需的(不是风格问题):裸 INTEGER PRIMARY KEY 在最大行被删除后会
+        # 复用 rowid,而裁剪会常规性地删行 —— 一旦复用,watcher 游标会静默倒退并丢事件。
+        #
+        # 不加 FOREIGN KEY:remove_node 必须发 access_revoked,那行得在节点被删除后存活。
+        """
+        CREATE TABLE IF NOT EXISTS sync_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_sync_events_node ON sync_events(node_id, id);
+        """.strip(),
+    ),
 ]
