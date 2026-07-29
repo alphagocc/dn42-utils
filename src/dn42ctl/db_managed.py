@@ -658,6 +658,21 @@ class RevisionStore:
             raise DatabaseError("列出 revisions 失败") from exc
         return [_row_to_revision(r) for r in rows]
 
+    def latest_revision(self, node_id: str) -> str | None:
+        """Most recently recorded revision string, or None if the node has none.
+
+        Callers use this to skip recording a snapshot whose content is identical
+        to the previous one — see `services.desired_state.build_desired_state`.
+        """
+        try:
+            row = self._conn.execute(
+                "SELECT revision FROM config_revisions WHERE node_id=? ORDER BY id DESC LIMIT 1",
+                (node_id,),
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise DatabaseError("查询最新 revision 失败") from exc
+        return None if row is None else str(row["revision"])
+
     def trim(self, node_id: str, *, keep_latest: int = 50) -> int:
         """Delete all but the most recent `keep_latest` revisions for `node_id`.
 

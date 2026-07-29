@@ -86,6 +86,32 @@ def _now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
+def compute_content_digest(
+    *,
+    node_id: str,
+    bgp_peers: list[dict[str, Any]],
+    ibgp_peers: list[dict[str, Any]],
+    paths: dict[str, str],
+) -> str:
+    """8-char hex digest of everything that makes a desired state distinct.
+
+    Deliberately excludes `generated_at` — two builds of identical content produce
+    the same digest even though their revision strings differ. This is what lets
+    the hub answer "did anything actually change?" without writing to the DB.
+    """
+    canon = json.dumps(
+        {
+            "node_id": node_id,
+            "bgp_peers": bgp_peers,
+            "ibgp_peers": ibgp_peers,
+            "paths": paths,
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(canon.encode("utf-8")).hexdigest()[:8]
+
+
 def _compute_revision(payload_without_revision: dict[str, Any], generated_at: str) -> str:
     """Revision = timestamp + short content hash.
 
@@ -96,6 +122,72 @@ def _compute_revision(payload_without_revision: dict[str, Any], generated_at: st
     return f"{generated_at}-{digest}"
 
 
+def digest_of_revision(revision: str) -> str | None:
+    """Pull the content digest back out of a revision string.
+
+    The timestamp half contains `-` (ISO dates do), so split from the right.
+    Returns None for anything that doesn't look like our format.
+    """
+    _, sep, digest = revision.rpartition("-")
+    return digest if sep and digest else None
+
+
+@dataclass(frozen=True)
+class DesiredFingerprint:
+    """Cheap, read-only answer to "what would this node's desired state hash to?"
+
+    Built without writing a single row — no `config_revisions` insert, no `trim`.
+    The hub compares `content_hash` against what it last pushed on a connection to
+    decide whether a push is warranted at all.
+    """
+
+    node_id: str
+    content_hash: str
+    pinned_revision: str | None
+
+
+def compute_desired_fingerprint(*, db_path: Path, node_id: str) -> DesiredFingerprint:
+    """Fingerprint the payload this node would actually receive.
+
+    Note this is NOT `build_desired_state(record_revision=False)`: that path skips
+    the pin lookup entirely and would report the *live* content for a node that has
+    been rolled back, causing the hub to push a state the node should not get.
+    """
+    from dn42ctl.db_managed import RevisionStore
+
+    db = Database.open(db_path)
+    try:
+        bgp_rows = db.list_bgp_peers(node_id)
+        ibgp_rows = db.list_ibgp_peers(node_id)
+        pin = RevisionStore(db.connection).get_pin(node_id)
+    finally:
+        db.close()
+
+    if pin is not None:
+        payload = pin.payload
+        return DesiredFingerprint(
+            node_id=node_id,
+            content_hash=compute_content_digest(
+                node_id=payload.get("node_id", node_id),
+                bgp_peers=payload.get("bgp_peers", []),
+                ibgp_peers=payload.get("ibgp_peers", []),
+                paths=payload.get("paths", {}),
+            ),
+            pinned_revision=pin.revision,
+        )
+
+    return DesiredFingerprint(
+        node_id=node_id,
+        content_hash=compute_content_digest(
+            node_id=node_id,
+            bgp_peers=[_bgp_row_to_dict(r) for r in bgp_rows],
+            ibgp_peers=[_ibgp_row_to_dict(r) for r in ibgp_rows],
+            paths=dict(DEFAULT_PATHS),
+        ),
+        pinned_revision=None,
+    )
+
+
 def build_desired_state(
     *, db_path: Path, node_id: str, record_revision: bool = True, keep_latest: int = 50
 ) -> DesiredState:
@@ -103,8 +195,11 @@ def build_desired_state(
     produce a DesiredState.
 
     Side effects (when `record_revision=True`):
-      * Record the freshly-built revision into `config_revisions` (idempotent
-        on the (node_id, revision) UNIQUE constraint).
+      * Record the freshly-built revision into `config_revisions`, but only when
+        its content actually differs from the newest recorded one. Because the
+        revision string embeds `generated_at`, a naive record-every-time would
+        write a row on every single build — the agent's periodic reconcile alone
+        would then evict the rollback history within hours.
       * Trim old revisions down to `keep_latest`.
 
     If `node_desired_pin` has a row for `node_id`, the pinned (older) revision
@@ -136,20 +231,30 @@ def build_desired_state(
         db = Database.open(db_path)
         try:
             store = RevisionStore(db.connection)
-            store.record(
-                node_id=node_id,
-                revision=revision,
-                generated_at=generated_at,
-                payload={
-                    "node_id": node_id,
-                    "revision": revision,
-                    "generated_at": generated_at,
-                    "bgp_peers": bgp_peers,
-                    "ibgp_peers": ibgp_peers,
-                    "paths": paths,
-                },
-            )
-            store.trim(node_id, keep_latest=keep_latest)
+            previous = store.latest_revision(node_id)
+            if previous is not None and digest_of_revision(previous) == digest_of_revision(revision):
+                # Identical content to the last snapshot. Reuse that snapshot's
+                # revision string and timestamp verbatim so the identifier stays
+                # stable across rebuilds, and skip the write entirely.
+                existing = store.get_by_revision(node_id, previous)
+                if existing is not None:
+                    revision = existing.revision
+                    generated_at = existing.generated_at
+            else:
+                store.record(
+                    node_id=node_id,
+                    revision=revision,
+                    generated_at=generated_at,
+                    payload={
+                        "node_id": node_id,
+                        "revision": revision,
+                        "generated_at": generated_at,
+                        "bgp_peers": bgp_peers,
+                        "ibgp_peers": ibgp_peers,
+                        "paths": paths,
+                    },
+                )
+                store.trim(node_id, keep_latest=keep_latest)
             pin = store.get_pin(node_id)
         finally:
             db.close()

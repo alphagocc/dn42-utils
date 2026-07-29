@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from .bgp import create_bgp_peer, delete_bgp_peer, modify_bgp_peer
 from .core import Dn42CtlError
-from .desired_state import DesiredState, build_desired_state, require_managed_node_exists
+from .desired_state import (
+    DesiredFingerprint,
+    DesiredState,
+    build_desired_state,
+    compute_desired_fingerprint,
+    require_managed_node_exists,
+)
 from .dummy import DummyResult, ensure_dummy_interface
 from .ibgp import create_ibgp_peer, delete_ibgp_peer, modify_ibgp_peer
 from .init_sys import genconf, init_node
@@ -35,6 +41,7 @@ from .system import (
 )
 
 __all__ = [
+    "DesiredFingerprint",
     "DesiredState",
     "Dn42CtlError",
     "DummyResult",
@@ -45,6 +52,7 @@ __all__ = [
     "add_node",
     "build_desired_state",
     "clear_rollback",
+    "compute_desired_fingerprint",
     "create_bgp_peer",
     "create_ibgp_peer",
     "delete_bgp_peer",
