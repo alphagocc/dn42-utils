@@ -114,6 +114,9 @@ Tab 切换使用 React `useState`，刷新按钮递增 `refreshKey` 强制组件
 
 - **始终 `?live=false`**：服务端 sandbox 不能 shell out，强求会拖慢页面或报错。
 - **没有 WebSocket**：tab 切换 / 手动 "Refresh" 按钮触发轮询，避免引入额外协议。
+  > 注：`dn42ctl` 确实有一条 WebSocket 通道（`/api/v1/nodes/{id}/ws`），但它**只服务于节点
+  > 常驻 agent**，浏览器不使用——见 `docs/architecture/sync_ws_protocol.md`。
+  > 本条决策未被推翻。
 - **错误展示**：所有非 2xx 响应弹一个顶部 toast (3.5 秒消失)，正文显示 `detail` 字段。
 
 ## peer: 4 步向导

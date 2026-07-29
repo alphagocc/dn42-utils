@@ -82,7 +82,7 @@ sudo DN42CTL_API_TOKEN=<token> uv run dn42ctl serve --host ::1 --port 4242
 
 ## 多节点管理（Hub-Spoke）
 
-中心节点运行 `dn42ctl serve`，远程节点通过 API 同步：
+中心节点运行 `dn42ctl serve`，远程节点由常驻 agent 通过 WebSocket 长连接接收中心推送：
 
 ```bash
 # 中心侧
@@ -91,12 +91,16 @@ dn42ctl node token rotate <node-id>
 
 # 节点侧
 sudo dn42ctl node init --server https://hub.example.com --node-id <id> --token <token>
-sudo dn42ctl node once   # pull → apply → report
+sudo systemctl enable --now dn42ctl-node-agent   # 常驻同步 agent
 ```
 
-支持 pull/apply、push/scan、提案审批、配置快照回滚、token 与写策略管理。
+中心的配置变更会在 ~1 秒内推送到节点并自动 apply。
+`dn42ctl node once`（pull → apply → report）等一次性命令保留，用于人工排障。
 
-> 详见 `docs/architecture/sync_hub_spoke.md` 与 `docs/commands/node.md`。
+支持推送式同步、push/scan 提案审批、配置快照回滚、token 与写策略管理。
+
+> 详见 `docs/architecture/sync_hub_spoke.md`、`docs/architecture/sync_ws_protocol.md`
+> 与 `docs/commands/node.md`。
 
 ## 文档
 

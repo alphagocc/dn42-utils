@@ -5,12 +5,14 @@ dn42ctl 提供可选的 REST API 模式，通过 `dn42ctl serve` 启动 HTTP 服
 ## 运行方式
 
 ```bash
-dn42ctl serve [--host ::1] [--port 4242]
+dn42ctl serve [--host ::1] [--port 4242] [--sync-poll-interval 1.0]
         # admin token 必须通过环境变量 DN42CTL_API_TOKEN 提供
 ```
 
 - **默认绑定 `[::1]`**（IPv6 loopback），端口 `4242`。
 - **dn42ctl 不处理 TLS 证书。** 对外暴露与 HTTPS 终止由 nginx 反代承担——CLI 不接受 `--tls-cert` / `--tls-key`，且对非 loopback `--host` 会打 warning。
+- `--sync-poll-interval`（环境变量 `DN42CTL_SYNC_POLL_INTERVAL`，默认 `1.0` 秒）：
+  `sync_events` watcher 的轮询间隔，决定配置变更推送到节点的最大延迟。
 - 部署细节（systemd unit + nginx 反代示例）见 `docs/architecture/deployment.md`。
 
 ## 鉴权（admin / node / peer-session 三类 principal）
@@ -64,8 +66,39 @@ token hash 比对走恒定时间。self 节点的 token 由 `dn42ctl serve` 启�
 | `POST` | `/api/v1/nodes/{node_id}/proposals` | `node push` / `node scan` | 推送配置提案，依 `write_policy` 进队或自动走校验 |
 | `POST` | `/api/v1/nodes/{node_id}/reports` | `node report` | 上报 apply 结果 / scan 结果 / live status / error |
 | `GET` | `/api/v1/nodes/{node_id}/status` | `node status` | 中心视角看到的该节点最近 revision / last_seen 等 |
+| `WS` | `/api/v1/nodes/{node_id}/ws` | `node agent` | 常驻 agent 的全双工同步通道 |
 
 desired state JSON schema 详见 `docs/architecture/sync_hub_spoke.md`。
+
+上面 4 条 HTTP 路由服务于**一次性 CLI 命令**（人工排障）；常驻 `dn42ctl node agent` 走 WebSocket。
+两条通道共用同一套 token 与同一套 service 层，语义等价。
+
+### WebSocket 通道
+
+完整协议（信封、消息目录、生命周期、`sync_events` 变更检测）见
+`docs/architecture/sync_ws_protocol.md`。与 REST 相关的部分：
+
+- **握手鉴权**：`Authorization: Bearer <node token>` 请求头，与 HTTP 路由同一个 token、
+  同一个 `ManagedNodeStore.authenticate` 路径。argon2 验证**每连接只做一次**，
+  之后所有帧读缓存的 principal。
+- **失败不走 HTTP 状态码。** ASGI 规定在 `accept()` 之前 `close()` 会让握手回 HTTP 403，
+  客户端拿不到原因。所以服务端先 `accept()`，再鉴权，失败时发一个 `error` 帧后用私有段关闭码关闭：
+
+  | HTTP 语义 | WS 关闭码 |
+  |-----------|-----------|
+  | `401 Unauthorized` | `4401` |
+  | `403 Forbidden`（node_id 不匹配） | `4403` |
+  | `404 Not Found`（managed node 不存在） | `4404` |
+  | 访问被撤销（token 轮换 / 节点删除） | `4003` / `4004` |
+  | 协议版本不匹配 | `4008` |
+  | 并发连接超限（每节点上限 4） | `4009` |
+  | 握手 / hello 超时 | `4408` |
+  | hub 正在关闭 | `4000` |
+
+- **nginx 需要额外配置**：`Upgrade` / `Connection` 头透传 + 长 `proxy_read_timeout`。
+  必须用正则 location 精确匹配 `/ws`，不能在 `location /` 上统一强制 upgrade——
+  否则会打断同前缀的 `desired` / `proposals` / `reports` / `status` 路由。
+  见 `docs/architecture/deployment.md`。
 
 ### 管理员路由（admin token）
 
@@ -118,3 +151,4 @@ peer-session bearer 与 admin / node token 走完全独立的解析路径，作�
 - ASGI 服务器：Uvicorn
 - 请求/响应模型：Pydantic v2
 - token hash：argon2id（`argon2-cffi`）
+- WebSocket：Starlette 原生（服务端）/ `websockets`（节点 agent 客户端）

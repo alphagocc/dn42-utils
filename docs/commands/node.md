@@ -2,7 +2,8 @@
 
 `dn42ctl node` 是中心化同步的命令组。**admin 子命令**（中心主机执行）与**节点子命令**（spoke 主机执行）混在同一个 group 下，靠第二级动词区分。Typer 不会冲突。
 
-详细架构见 `docs/architecture/sync_hub_spoke.md`。
+详细架构见 `docs/architecture/sync_hub_spoke.md`，节点 agent 的同步协议见
+`docs/architecture/sync_ws_protocol.md`。
 
 ---
 
@@ -42,7 +43,8 @@
 3. **明文 token 仅在此命令返回时打印一次**。
 4. 若 `is_self=1`：同步重写中心主机的 `/etc/dn42ctl/node.toml`。
 
-旧 token 立即失效。
+旧 token 立即失效。中心会写一条 `access_revoked` 事件，watcher 随即用关闭码 `4003`
+断开该节点的 WS 连接；agent 进入 300 秒长退避，更新 `node.toml` 后自动恢复。
 
 ### `dn42ctl node policy set <node-id> [选项]`
 
@@ -87,11 +89,51 @@
 
 ### `dn42ctl node rollback <node-id> --to <revision>`（阶段 5）
 
-把该节点的"当前期望"指向指定 revision。下次 pull 返回该 revision 的 payload。
+把该节点的"当前期望"指向指定 revision。设置 `node_desired_pin` 后，中心会写一条 `desired`
+事件，watcher 随即把回滚后的 desired state 推给该节点（≤1 秒生效），无需等节点自己来拉。
 
 ---
 
 ## 节点子命令（在 spoke 主机执行）
+
+> **稳态同步走 `dn42ctl node agent`**（常驻，WebSocket 长连接）。
+> 下面的 `pull` / `apply` / `once` / `push` / `report` / `status` 都是**一次性命令**，
+> 走 HTTP 路由，保留用于人工排障。两条通道共用同一套 token 与 service 层。
+
+### `dn42ctl node agent [--node-config-path PATH]`
+
+**常驻同步 agent**，由 `dn42ctl-node-agent.service` 拉起。持有一条到中心的 WebSocket 长连接，
+承载 desired 下发、proposal / report 上报与心跳。协议详见 `docs/architecture/sync_ws_protocol.md`。
+
+行为：
+
+1. **启动时先用本地缓存跑一次 `apply()`**（best-effort），然后才尝试连接。
+   这补回了删除 `node-once.timer` 时一并失去的开机收敛保证——hub 不可达时 `/etc/bird` 仍会被渲染。
+2. 连接 → 握手鉴权 → 发 `hello{cached_revision}` → 中心按需推送 desired。
+3. 稳态下三个并发任务：收消息、每 60 秒发心跳、每 900 秒发一次全量对账请求。
+4. 收到 `desired_push` 后：写缓存 → `apply()` → 上报 `apply_result`
+   （payload 形状与 `node once` 完全一致）。apply 失败上报 `error` 并继续，不断连接。
+5. 断线后按 **full jitter** 退避重连；**每轮重连都重读 `node.toml`**，所以 token 轮换后
+   更新文件即可，无需 `systemctl restart`。
+
+`node.toml` 的 `[agent]` 段（全部可选）：
+
+```toml
+[agent]
+reconnect_initial_seconds  = 1.0      # 退避基数
+reconnect_max_seconds      = 60.0     # 退避上限
+auth_retry_seconds         = 300.0    # 鉴权类致命关闭后的固定重试间隔
+reconcile_interval_seconds = 900.0    # 全量对账间隔
+heartbeat_interval_seconds = 60.0     # 心跳间隔
+```
+
+鉴权类致命关闭（token 被轮换、节点被删除、协议版本不匹配等）用固定的 `auth_retry_seconds`
+而不是指数爬坡——否则一个过期 token 就变成了对中心的高频 argon2 DoS。
+
+退出码：`node.toml` 缺失或非法 → `2`；重试循环救不回来的运行时故障 → `1`；
+`SIGTERM` / `Ctrl-C` → `0`（让 `systemctl stop` 干净收尾）。
+
+**急停**：`systemctl stop dn42ctl-node-agent`，之后仍可手动 `dn42ctl node once` / `pull` / `apply`。
 
 ### `dn42ctl node init --server <url> --node-id <id> --token <token>`
 
@@ -150,11 +192,16 @@ token   = "<token>"
 
 ### `dn42ctl node once`
 
-= `pull && apply && report (apply_result)`。供 `dn42ctl-node-once.timer` 调用。
+= `pull && apply && report (apply_result)`。**一次性排障命令**。
 
-- 任一步失败：整个命令以非零退出，由 timer 下一轮重试；失败时尽量上报 `kind=error` 的 report（best-effort）。
-- 不做指数退避（timer `OnUnitActiveSec=10min` 已经够稳）。
+- 稳态同步由常驻 `dn42ctl node agent` 负责；本命令不再由任何 systemd timer 驱动
+  （`dn42ctl-node-once.timer` 已删除）。
+- 适用场景：agent 被 `systemctl stop` 之后的手工收敛、验证 HTTP 通道是否可达、
+  排查 agent 与手动 apply 结果是否一致。
+- 任一步失败：整个命令以非零退出；失败时尽量上报 `kind=error` 的 report（best-effort）。
+- 不做指数退避（一次性命令，重试交给调用者）。
 - `--no-report` 关闭自动 apply_result 上报。
+- 与 agent 同时运行不会冲突：两者共用同一份缓存与同一套幂等的 `apply()`。
 
 ### `dn42ctl node status`
 
@@ -174,6 +221,7 @@ token   = "<token>"
 2. 读 / 创 `/var/lib/dn42ctl/self_node_id`。
 3. UPSERT `managed_nodes` 中 `is_self=1` 的行。
 4. 若 `/etc/dn42ctl/node.toml` 缺失或不匹配，生成 self token 写入。
-5. 监听 `[::1]:4242`。
+5. 监听 `[::1]:4242`，并起 `sync_events` watcher 后台任务。
 
-`--no-self-register` 关闭步骤 2-4。详见 `docs/architecture/sync_hub_spoke.md`。
+`--no-self-register` 关闭步骤 2-4。`--sync-poll-interval`（默认 1.0 秒）调 watcher 轮询间隔，
+决定配置变更推送到节点的最大延迟。详见 `docs/architecture/sync_hub_spoke.md`。

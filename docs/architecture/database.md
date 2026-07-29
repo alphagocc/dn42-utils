@@ -10,6 +10,25 @@
 
 - 使用 `schema_migrations(version)` 记录迁移版本。
 - 启动/初始化时应自动执行迁移，保证旧库可直接升级。
+- 迁移是 `(version, sql)` 列表，逐版本 `executescript` + commit；SQL 必须**幂等**（`IF NOT EXISTS` /
+  条件 UPDATE）。
+- **版本号不连续是有意的。** v1 是合并后的建表脚本，v2–v7 已在 2026-05-31 的清理中并入 v1；
+  v8 是 `nm` → `networkd` 的数据回填（编号跳到 8 是为了避开生产库里已应用的旧 v2）。
+  **当前最大版本是 v9**（`sync_events` 表），新迁移从 v10 开始。
+
+## 连接 PRAGMA
+
+每个连接在打开后设置：
+
+- `PRAGMA foreign_keys = ON`
+- `PRAGMA busy_timeout = 5000` — hub 上 server 进程与 CLI 进程会并发写同一个库文件
+  （管理员跑 `dn42ctl bgp peer add` 的同时 server 的 `sync_events` watcher 在读）。
+  没有 busy_timeout 时，撞锁会立刻抛 `database is locked` 而不是等待重试。
+
+> **不启用 WAL。** WAL 会在库文件旁生成 `-wal` / `-shm`，owner 是创建它们的进程；
+> hub 上 `sudo dn42ctl ...`（root）创建之后，以 `dn42ctl` 用户运行的 server 会被锁在外面。
+> 现有的写入都很短，`busy_timeout` 已经够用。
+
 
 ## Schema（single consolidated migration）
 
@@ -63,8 +82,9 @@
 
 ## 多节点中心化同步表
 
-中心化 hub-spoke 同步引入 4 张新表。架构与流程详见
-`docs/architecture/sync_hub_spoke.md`。
+中心化 hub-spoke 同步引入 5 张新表。架构与流程详见
+`docs/architecture/sync_hub_spoke.md`，WebSocket 推送与 `sync_events` 的用法详见
+`docs/architecture/sync_ws_protocol.md`。
 
 ### 5) managed_nodes
 
@@ -91,6 +111,7 @@ CREATE TABLE managed_nodes (
   - `report` ∈ {`auto`, `review`}：节点上报状态进 `node_reports` 是否需要管理员审核。注意 report 永远不直接改业务表，`auto` 仅免去入队审核步骤。
 - `is_self = 1`：标记为中心主机自身（self 节点）。仅用于 `dn42ctl node list` 显示 `[self]` 与 `dn42ctl node remove` 默认拒绝。
 - `last_seen_at`：最近一次该节点的 pull / push / report 时间，由 server 在请求处理时更新。
+  WS 长连接下由节点每 60 秒发起的 `ping` 触发（每连接节流到最多 60 秒一次，避免心跳放大写入）。
 
 ### 6) config_proposals
 
@@ -164,8 +185,48 @@ CREATE TABLE node_desired_pin (
 - `dn42ctl node rollback` 设置 pin；`dn42ctl node unpin` 删除 pin，恢复跟随最新。
 - `RevisionStore.trim()` 会保护被 pin 的 revision 不被清理。
 
+### 10) sync_events
+
+```sql
+CREATE TABLE sync_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id TEXT NOT NULL,
+    kind TEXT NOT NULL,                   -- 'desired' | 'access_revoked'
+    created_at TEXT NOT NULL
+);
+CREATE INDEX idx_sync_events_node ON sync_events(node_id, id);
+```
+
+变更通知队列。`dn42ctl serve` 的后台 watcher 每秒轮询这张表，把 `desired` 事件转成对应节点的
+WebSocket 推送，把 `access_revoked` 事件转成断开该节点的连接。存在的理由是 CLI 命令是
+**独立进程**写同一个库文件，server 进程内存里的连接注册表收不到通知。
+
+写入点全部在 DB 层，插进业务写入**同一个事务**（各方法在自己 `commit()` 之前发射），
+所以不存在"peer 写了但事件没记"的崩溃窗口：
+
+| 文件 | 方法 | kind |
+|------|------|------|
+| `db.py` | `insert_bgp_peer` / `update_bgp_peer` / `insert_ibgp_peer` / `update_ibgp_peer` / `_delete_peer` | `desired` |
+| `db_managed.py` | `RevisionStore.pin` / `unpin` | `desired` |
+| `db_managed.py` | `ManagedNodeStore.set_token_hash` / `delete` | `access_revoked` |
+
+两个刻意的 schema 选择：
+
+- **`AUTOINCREMENT` 是必需的。** 裸 `INTEGER PRIMARY KEY` 在最大行被删除后会复用 rowid，
+  而裁剪会常规性地删行——一旦复用，watcher 游标会静默倒退并丢事件。
+- **不加 FOREIGN KEY。** `remove_node` 必须发 `access_revoked`，那行得在节点被删除后存活。
+
+裁剪：发射时按 `id % SYNC_EVENTS_TRIM_EVERY == 0`（256）触发
+`DELETE FROM sync_events WHERE id <= ? - SYNC_EVENTS_KEEP`（1000），常量在 `constants.py`。
+watcher 游标启动时初始化为 `MAX(id)` 且只前进，所以裁剪在任何游标位置下都安全。
+
+> spoke 的本地库也会因本机 `bgp peer add` 累积 `sync_events`。那里没人读它，裁剪保证有界，惰性无害。
+
 ### 设计取舍
 
 - `write_policy` 选 JSON 而非新增策略子表：字段少、读多写少、按节点单值。
+- `sync_events` 选轮询小表而非"server 定时重算内容哈希"或"CLI kick loopback 端点"：
+  写入与业务变更同事务、不要求 CLI 能访问 server、漏埋点不会静默失效。
+  轮询没有消失，但它从跨网络 10 分钟粒度变成了 hub 本机 1 秒粒度的一条带索引 SELECT。
 - `config_revisions` 第一阶段就建表，但写入与回滚实现在阶段 5。schema 一次到位避免再加迁移。
 - `is_self` 不放索引：值集小 + 只在 CLI 显示时按 PK 已知 node_id 查询。

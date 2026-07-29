@@ -2,7 +2,7 @@
 
 <task>
 
-- [x] 移除 ibgp bgp 的 networkmanager 后端。自动将数据库中的 networkmanager 转化为 networkd，以后只要支持 networkd。将 ibgp bgp 中关于 networkmanager 的文档标记为 obsolete。
+- [ ] 修改多节点中心化同步过程，使用 websocket 长连接保持同步而不是轮询。
 
 </task>
 

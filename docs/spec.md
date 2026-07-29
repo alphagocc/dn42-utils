@@ -11,7 +11,7 @@
 - 网络后端：peer WireGuard 配置仅支持 `systemd-networkd`；`dummy_backend` 仍支持 `networkd` 与 `nm`。
 - 强制约束：WireGuard 的 AllowedIPs **必须写入**，但**禁止自动修改路由表**。
 - 数据落库：所有状态写入 SQLite，便于多端/多节点集中管理；以 `node_id` 区分节点。
-- 多节点中心化同步：hub-spoke 架构，详见 `docs/architecture/sync_hub_spoke.md`。
+- 多节点中心化同步：hub-spoke 架构，详见 `docs/architecture/sync_hub_spoke.md`；节点侧常驻 agent 通过 WebSocket 长连接接收中心推送，详见 `docs/architecture/sync_ws_protocol.md`。
 - 分层：CLI/Service/Render/DB 解耦，便于未来接入 RESTful API。
 
 ## 运行环境与安装
@@ -91,6 +91,7 @@
 - 网络后端：`docs/architecture/network_backends.md`
 - REST API：`docs/architecture/rest_api.md`
 - 多节点中心化同步：`docs/architecture/sync_hub_spoke.md`
+- 节点同步 WebSocket 协议：`docs/architecture/sync_ws_protocol.md`
 - 部署（systemd + nginx）：`docs/architecture/deployment.md`
 - 输入校验：`docs/architecture/validation.md`
 - 测试基础设施：`docs/architecture/testing.md`
@@ -107,6 +108,7 @@
 - **payload 字段兼容默认值**：节点间 API 的 `has_wg`、`babel_rxcost`、`babel_type` 字段不再提供缺失时的默认值，所有节点需运行统一版本。缺失时返回 400/422 错误。
 - **create_peer.py** (独立脚本)：功能已被 `dn42ctl bgp peer add` 完全替代。
 - **peer 级 NetworkManager 后端**：`bgp peer` / `ibgp peer` 的 `--net nm` 选项与 `.nmconnection` 输出已移除，peer WireGuard 配置统一使用 `systemd-networkd`。`dummy_backend` 的 NM 支持不受影响。
+- **节点侧轮询同步 (`dn42ctl-node-once.timer`)**：每 10 分钟跑一次 `dn42ctl node once` 的 systemd timer 已删除，改为常驻 `dn42ctl node agent` + WebSocket 长连接（`dn42ctl-node-agent.service`）。CLI 命令 `dn42ctl node once` / `pull` / `push` / `report` / `status` **保留**，用于人工排障；对应的 HTTP 路由也保留。详见 `docs/architecture/sync_ws_protocol.md`。
 
 ### 命令
 

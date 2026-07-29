@@ -42,6 +42,7 @@ tests/
 ├── test_db_managed.py                   # managed_nodes CRUD
 ├── test_db_managed_proposals_reports.py # proposals/reports 存储
 ├── test_db_managed_revisions.py         # config_revisions 存储
+├── test_db_sync_events.py               # sync_events 发射 / 裁剪 / 游标
 ├── test_wg.py                           # WireGuard 子进程
 ├── test_fs.py                           # 文件权限辅助
 ├── test_services_core.py               # 服务层公共函数
@@ -67,10 +68,14 @@ tests/
 ├── test_api_bgp_peers.py              # REST API: BGP peers
 ├── test_api_decisions.py              # REST API: proposal decisions
 ├── test_api_node_routes.py            # REST API: 节点路由
+├── test_api_node_ws.py                # WS: 握手 / 鉴权 / 消息分发
+├── test_ws_hub_watcher.py             # WS: sync_events watcher 端到端推送
+├── test_ws_protocol.py                # WS: 信封编解码
 ├── test_api_proposals_reports.py      # REST API: proposals/reports
 ├── test_api_public_auto_peer.py       # REST API: 公共 auto-peer
 ├── test_api_revisions.py             # REST API: revisions
 ├── test_cli_node.py                   # CLI: node 命令
+├── test_cli_node_agent.py             # CLI: node agent 命令
 ├── test_cli_node_decisions.py         # CLI: node decision 命令
 ├── test_cli_node_push_report.py       # CLI: node push/report
 ├── test_cli_node_revisions.py         # CLI: node revisions
@@ -78,6 +83,7 @@ tests/
 ├── test_node_client.py               # node HTTP client
 ├── test_node_config.py               # node 配置
 ├── test_node_status.py               # node 状态
+├── test_node_ws_agent.py             # 常驻 agent: 重连 / 心跳 / 对账
 └── test_serve_bootstrap.py           # server 启动
 ```
 
@@ -105,6 +111,59 @@ Patch `generate_wg_keypair()` 返回固定密钥对，避免依赖系统 `wg` �
 - `os.chmod` / `os.chown` — 文件权限（best-effort 函数）
 
 CI 环境不安装 wireguard-tools 等系统包。
+
+## WebSocket 测试策略
+
+**不引入新的测试依赖。** 没有 `pytest-asyncio`，也没有 anyio 的 pytest 插件。
+
+### Hub 侧：`TestClient.websocket_connect`
+
+`with TestClient(app) as client:` 会在后台 portal 线程里跑 lifespan，于是**真实的** watcher
+轮询**真实的** sqlite 文件，而测试线程直接改这个文件。这比 mock 出来的异步框架更接近端到端，
+且零管道成本。
+
+```python
+with TestClient(app) as client:
+    with client.websocket_connect(f"/api/v1/nodes/{nid}/ws",
+                                  headers={"Authorization": f"Bearer {token}"}) as ws:
+        ws.send_json(hello_envelope)
+        assert ws.receive_json()["type"] == "hello_ack"
+```
+
+- **现有测试不受影响**：它们用裸 `TestClient(app)`（不是 context manager），lifespan 不会跑，
+  watcher 也就不会起。只有新的 WS 测试用 `with`。
+- **argon2 必须放慢速度之外还要变便宜**：沿用 `_fast_argon2` autouse fixture
+  （monkeypatch `dn42ctl.db_managed._password_hasher`）。
+
+### Spoke 侧：注入缝 + 裸 `asyncio.run()`
+
+`run_agent()` 是 `async def`，`TestClient` 驱动不了。但普通同步测试里 `asyncio.run()` 就够用，
+**前提是模块留了缝**——`run_agent(connect_factory=..., sleep=..., rng=...)`：
+
+- `connect_factory` → 传入假 WS 对象，脚本化收发序列
+- `sleep` → 记录延迟并立即返回，第 N 次抛哨兵异常打破无限重连循环
+- `rng` → `random.Random(0)`，让 full jitter 的退避值可断言
+
+这三个参数是为了可测性而存在的，不是可有可无的装饰。**重连循环的测试里没有任何真实 sleep。**
+
+### 否定断言用排序，不用超时
+
+`WebSocketTestSession.receive` **没有超时、会永久阻塞**，所以"断言某次变更没有触发推送"
+不能写成朴素的"等 X 秒看有没有消息"。
+
+正确做法是靠**顺序**：先改节点 **B**，再改节点 **A**，然后断言 A 的连接收到的**第一条**消息
+是 A 的推送。watcher 按 `sync_events.id` 顺序处理，所以如果 B 的变更错误地推给了 A，
+它一定排在前面。无 sleep、无 flake。
+
+### 并发写入
+
+hub 测试里 watcher 线程与测试线程会并发访问同一个 sqlite 文件。项目**不启用 WAL**
+（原因见 `docs/architecture/database.md`），靠 `PRAGMA busy_timeout=5000` 兜住撞锁。
+
+### respx 的边界
+
+`respx` 只能 mock httpx，对 WebSocket 无用。它继续服务于现有的 HTTP 通道测试
+（`test_node_client.py` / `test_services_node_agent.py` / `test_cli_node_sync.py`）。
 
 ## CI 流水线
 
