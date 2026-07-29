@@ -145,6 +145,86 @@ class TestReport:
         assert result.exit_code != 0
 
 
+class TestAuthFailureIsHandled:
+    """Regression: `_post_json` used to raise NodeClientError (a plain RuntimeError)
+    on 401/403, but the CLI only catches Dn42CtlError — so an expired token
+    produced a raw traceback instead of the intended `错误: ...` + exit 1.
+    """
+
+    def test_push_401(self, runner: CliRunner, base_args: list[str], node_toml_path: Path, tmp_path: Path) -> None:
+        json_file = tmp_path / "items.json"
+        json_file.write_text(json.dumps([{"kind": "peer_add", "payload": {"n": 1}}]), encoding="utf-8")
+        with respx.mock(base_url=SERVER) as router:
+            router.post(f"/api/v1/nodes/{NODE_A}/proposals").mock(return_value=httpx.Response(401))
+            result = runner.invoke(
+                app,
+                [*base_args, "node", "push", "--json", str(json_file), "--node-config-path", str(node_toml_path)],
+            )
+        assert result.exit_code == 1
+        assert result.exception is None or isinstance(result.exception, SystemExit)
+        assert "错误" in result.output
+        assert "401" in result.output
+
+    def test_push_403(self, runner: CliRunner, base_args: list[str], node_toml_path: Path, tmp_path: Path) -> None:
+        json_file = tmp_path / "items.json"
+        json_file.write_text(json.dumps([{"kind": "peer_add", "payload": {"n": 1}}]), encoding="utf-8")
+        with respx.mock(base_url=SERVER) as router:
+            router.post(f"/api/v1/nodes/{NODE_A}/proposals").mock(return_value=httpx.Response(403))
+            result = runner.invoke(
+                app,
+                [*base_args, "node", "push", "--json", str(json_file), "--node-config-path", str(node_toml_path)],
+            )
+        assert result.exit_code == 1
+        assert "403" in result.output
+
+    def test_report_401(self, runner: CliRunner, base_args: list[str], node_toml_path: Path, tmp_path: Path) -> None:
+        json_file = tmp_path / "payload.json"
+        json_file.write_text(json.dumps({"ok": True}), encoding="utf-8")
+        with respx.mock(base_url=SERVER) as router:
+            router.post(f"/api/v1/nodes/{NODE_A}/reports").mock(return_value=httpx.Response(401))
+            result = runner.invoke(
+                app,
+                [
+                    *base_args,
+                    "node",
+                    "report",
+                    "--kind",
+                    "apply_result",
+                    "--json",
+                    str(json_file),
+                    "--node-config-path",
+                    str(node_toml_path),
+                ],
+            )
+        assert result.exit_code == 1
+        assert result.exception is None or isinstance(result.exception, SystemExit)
+        assert "错误" in result.output
+
+    def test_report_server_unreachable(
+        self, runner: CliRunner, base_args: list[str], node_toml_path: Path, tmp_path: Path
+    ) -> None:
+        json_file = tmp_path / "payload.json"
+        json_file.write_text(json.dumps({"ok": True}), encoding="utf-8")
+        with respx.mock(base_url=SERVER) as router:
+            router.post(f"/api/v1/nodes/{NODE_A}/reports").mock(side_effect=httpx.ConnectError("boom"))
+            result = runner.invoke(
+                app,
+                [
+                    *base_args,
+                    "node",
+                    "report",
+                    "--kind",
+                    "apply_result",
+                    "--json",
+                    str(json_file),
+                    "--node-config-path",
+                    str(node_toml_path),
+                ],
+            )
+        assert result.exit_code == 1
+        assert "错误" in result.output
+
+
 class TestAdminProposalsReports:
     def test_proposals_empty(self, runner: CliRunner, base_args: list[str]) -> None:
         # Need to register node first.

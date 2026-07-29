@@ -51,23 +51,17 @@ def _post_json(
     body: dict[str, Any],
     error_label: str,
 ) -> dict[str, Any]:
-    base = node_config.server.rstrip("/")
-    url = f"{base}/api/v1/nodes/{node_config.node_id}{suffix}"
-    headers = {"Authorization": f"Bearer {node_config.token}"}
-    import httpx
-
+    client = NodeClient(
+        server=node_config.server,
+        node_id=node_config.node_id,
+        token=node_config.token,
+    )
     try:
-        resp = httpx.post(url, headers=headers, json=body, timeout=10.0)
-    except httpx.HTTPError as exc:
-        raise Dn42CtlError(f"无法访问 server: {exc}") from exc
-
-    if resp.status_code == 401:
-        raise NodeClientError("server 拒绝鉴权 (401): 检查 node.toml 中的 token")
-    if resp.status_code == 403:
-        raise NodeClientError("server 返回 403: node_id 与 token 不匹配")
-    if resp.status_code >= 400:
-        raise Dn42CtlError(f"server 错误 {resp.status_code}: {resp.text}")
-    return resp.json()
+        return client.post_json(suffix, body)
+    except NodeClientError as exc:
+        # Callers (cli.cmd_node_push / cmd_node_report) only catch Dn42CtlError.
+        # Letting NodeClientError escape turned an ordinary 401 into a traceback.
+        raise Dn42CtlError(f"{error_label} 提交失败: {exc}") from exc
 
 
 # Helpers to construct proposal payloads from a desired-state-style peer dict.
