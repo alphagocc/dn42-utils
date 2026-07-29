@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import contextlib
 import secrets as _secrets
+from collections.abc import AsyncIterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
+import anyio
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, WebSocket
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, field_validator
 
@@ -62,24 +65,45 @@ from dn42ctl.validators import (
     validate_pubkey,
     validate_rxcost,
 )
+from dn42ctl.ws_hub import (
+    DEFAULT_SYNC_POLL_INTERVAL,
+    ConnectionRegistry,
+    run_sync_watcher,
+    serve_node_connection,
+)
 
 _bearer = HTTPBearer(auto_error=False)
 
 _config: AppConfig | None = None
 _db_path: Path | None = None
 _admin_token: str = ""
+_sync_poll_interval: float = DEFAULT_SYNC_POLL_INTERVAL
+
+# In-process map of live node WebSockets. Correct only because `dn42ctl serve`
+# runs a single uvicorn worker; see docs/architecture/sync_ws_protocol.md.
+_registry = ConnectionRegistry()
 
 
-def configure(*, config: AppConfig, db_path: Path, token: str) -> None:
+def configure(
+    *,
+    config: AppConfig,
+    db_path: Path,
+    token: str,
+    sync_poll_interval: float = DEFAULT_SYNC_POLL_INTERVAL,
+) -> None:
     """Inject runtime config. `token` becomes the admin token.
 
     Node tokens are managed separately via `dn42ctl node token rotate` and stored
     as argon2id hashes in `managed_nodes.api_token_hash`; they are not configured here.
+
+    `sync_poll_interval` is how often the watcher scans `sync_events`, i.e. the
+    worst-case delay between a config change and the node being told about it.
     """
-    global _config, _db_path, _admin_token
+    global _config, _db_path, _admin_token, _sync_poll_interval
     _config = config
     _db_path = db_path
     _admin_token = token
+    _sync_poll_interval = sync_poll_interval
 
 
 @dataclass(frozen=True)
@@ -97,6 +121,11 @@ def _get_config() -> AppConfig:
 def _get_db_path() -> Path:
     if _db_path is None:
         raise HTTPException(status_code=500, detail="Server not configured")
+    return _db_path
+
+
+def _db_path_or_none() -> Path | None:
+    """Non-raising variant for the background watcher, which has no request to fail."""
     return _db_path
 
 
@@ -147,7 +176,27 @@ def require_node_self_or_admin(
     raise HTTPException(status_code=403, detail="Forbidden")
 
 
-app = FastAPI(title="dn42ctl API")
+@contextlib.asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Run the sync_events watcher for the lifetime of the server.
+
+    Existing tests construct `TestClient(app)` without a context manager, so
+    lifespan never runs there and no watcher is spawned. WebSocket tests use
+    `with TestClient(app)` and get the real thing.
+    """
+    async with anyio.create_task_group() as tg:
+        # `start`, not `start_soon`: startup blocks until the watcher has anchored
+        # its sync_events cursor, so no change can slip through the gap between
+        # the server accepting connections and the first poll.
+        await tg.start(run_sync_watcher, _registry, _db_path_or_none, lambda: _sync_poll_interval)
+        try:
+            yield
+        finally:
+            await _registry.close_all()
+            tg.cancel_scope.cancel()
+
+
+app = FastAPI(title="dn42ctl API", lifespan=_lifespan)
 admin_prefix = "/api/admin"
 node_prefix = "/api/v1/nodes"
 
@@ -349,6 +398,24 @@ def api_node_post_report(
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _report_to_dict(report)
+
+
+@_node_router.websocket("/{node_id}/ws")
+async def api_node_ws(websocket: WebSocket, node_id: str) -> None:
+    """Resident node agent channel. Protocol: docs/architecture/sync_ws_protocol.md.
+
+    Deliberately NOT using `Depends(_resolve_principal)`: it works by duck-typing
+    (HTTPBearer accepts the WebSocket), but signals failure with HTTPException,
+    which Starlette cannot render on a WebSocket. `serve_node_connection` parses
+    the header itself and closes with a specific code instead.
+    """
+    await serve_node_connection(
+        websocket,
+        node_id=node_id,
+        db_path=_get_db_path(),
+        config=_config,
+        registry=_registry,
+    )
 
 
 @_node_router.get("/{node_id}/status")
