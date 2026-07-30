@@ -48,18 +48,12 @@ class PullResult:
     payload: dict[str, Any]
 
 
-def pull(*, node_config: NodeConfig) -> PullResult:
-    """Fetch desired state from server and persist into local cache."""
-    client = NodeClient(
-        server=node_config.server,
-        node_id=node_config.node_id,
-        token=node_config.token,
-    )
-    try:
-        payload = client.pull_desired()
-    except NodeClientError as exc:
-        raise Dn42CtlError(str(exc)) from exc
+def store_desired(*, node_config: NodeConfig, payload: dict[str, Any]) -> PullResult:
+    """Write a desired-state payload into the local cache. No network.
 
+    Split out of `pull()` so the resident WebSocket agent can reuse it: there the
+    payload arrives pushed on the connection rather than fetched over HTTP.
+    """
     revision = payload.get("revision")
     if not isinstance(revision, str) or not revision:
         raise Dn42CtlError("server 返回的 desired state 缺少 revision")
@@ -83,6 +77,21 @@ def pull(*, node_config: NodeConfig) -> PullResult:
         conn.close()
 
     return PullResult(revision=revision, fetched_at=fetched_at, payload=payload)
+
+
+def pull(*, node_config: NodeConfig) -> PullResult:
+    """Fetch desired state from server and persist into local cache."""
+    client = NodeClient(
+        server=node_config.server,
+        node_id=node_config.node_id,
+        token=node_config.token,
+    )
+    try:
+        payload = client.pull_desired()
+    except NodeClientError as exc:
+        raise Dn42CtlError(str(exc)) from exc
+
+    return store_desired(node_config=node_config, payload=payload)
 
 
 def read_cache(*, node_config: NodeConfig) -> PullResult | None:

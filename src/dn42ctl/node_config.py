@@ -15,12 +15,19 @@ The schema:
 
     [cache]
     db_path = "/var/lib/dn42ctl/node-cache.sqlite3"
+
+    [agent]                            # all optional, tuning for `dn42ctl node agent`
+    reconnect_initial_seconds  = 1.0
+    reconnect_max_seconds      = 60.0
+    auth_retry_seconds         = 300.0
+    reconcile_interval_seconds = 900.0
+    heartbeat_interval_seconds = 60.0
 """
 
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -36,12 +43,35 @@ class NodeConfigError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class AgentOptions:
+    """Tuning for the resident agent. Defaults are what production should use.
+
+    There is deliberately no `enabled` flag: the kill switch is
+    `systemctl stop dn42ctl-node-agent` plus a manual `dn42ctl node once`. A
+    config toggle would only invite a half-migrated fleet where the unit is
+    running but silently doing nothing.
+    """
+
+    reconnect_initial_seconds: float = 1.0
+    reconnect_max_seconds: float = 60.0
+    # Auth-fatal closes get a long fixed wait rather than the exponential ramp:
+    # a stale token retrying every second is an argon2 DoS against the hub.
+    auth_retry_seconds: float = 300.0
+    reconcile_interval_seconds: float = 900.0
+    heartbeat_interval_seconds: float = 60.0
+
+
+DEFAULT_AGENT_OPTIONS = AgentOptions()
+
+
+@dataclass(frozen=True)
 class NodeConfig:
     server: str
     node_id: str
     token: str
     apply_overrides: dict[str, str] = field(default_factory=dict)
     cache_db_path: Path = field(default_factory=lambda: NODE_CACHE_DB_PATH)
+    agent: AgentOptions = field(default_factory=AgentOptions)
 
 
 def _require_str(data: dict[str, Any], key: str, *, file: Path) -> str:
@@ -49,6 +79,22 @@ def _require_str(data: dict[str, Any], key: str, *, file: Path) -> str:
     if not isinstance(value, str) or not value:
         raise NodeConfigError(f"{file}: 缺失或类型错误的字段 '{key}'")
     return value
+
+
+def _parse_agent_block(block: Any, *, file: Path) -> AgentOptions:
+    if not isinstance(block, dict):
+        raise NodeConfigError(f"{file}: [agent] 段格式错误")
+    known = {f: getattr(DEFAULT_AGENT_OPTIONS, f) for f in asdict(DEFAULT_AGENT_OPTIONS)}
+    values: dict[str, float] = {}
+    for key, raw_value in block.items():
+        if key not in known:
+            raise NodeConfigError(f"{file}: [agent] 未知字段 '{key}'")
+        if isinstance(raw_value, bool) or not isinstance(raw_value, int | float):
+            raise NodeConfigError(f"{file}: [agent].{key} 必须是数字")
+        if raw_value <= 0:
+            raise NodeConfigError(f"{file}: [agent].{key} 必须大于 0")
+        values[key] = float(raw_value)
+    return AgentOptions(**{**known, **values})
 
 
 def load_node_config(path: Path) -> NodeConfig:
@@ -88,12 +134,18 @@ def load_node_config(path: Path) -> NodeConfig:
                 raise NodeConfigError(f"{path}: [cache].db_path 必须是字符串")
             cache_db_path = Path(db_str)
 
+    agent = DEFAULT_AGENT_OPTIONS
+    agent_block = raw.get("agent")
+    if agent_block is not None:
+        agent = _parse_agent_block(agent_block, file=path)
+
     return NodeConfig(
         server=server,
         node_id=node_id,
         token=token,
         apply_overrides=apply_overrides,
         cache_db_path=cache_db_path,
+        agent=agent,
     )
 
 
@@ -108,6 +160,10 @@ def save_node_config(path: Path, config: NodeConfig) -> None:
         data["apply"] = dict(config.apply_overrides)
     if config.cache_db_path != NODE_CACHE_DB_PATH:
         data["cache"] = {"db_path": str(config.cache_db_path)}
+    if config.agent != DEFAULT_AGENT_OPTIONS:
+        # Only write the block when it differs, so `node init` and self
+        # registration keep producing the same minimal file as before.
+        data["agent"] = asdict(config.agent)
     with path.open("wb") as f:
         tomli_w.dump(data, f)
     chmod_best_effort(path, FILE_MODE_PRIVATE)

@@ -5,7 +5,9 @@ from pathlib import Path
 import pytest
 
 from dn42ctl.node_config import (
+    DEFAULT_AGENT_OPTIONS,
     NODE_CACHE_DB_PATH,
+    AgentOptions,
     NodeConfig,
     NodeConfigError,
     load_node_config,
@@ -74,3 +76,78 @@ class TestLoadErrors:
         )
         with pytest.raises(NodeConfigError, match="apply"):
             load_node_config(p)
+
+
+def _write(path: Path, agent_block: str = "") -> Path:
+    path.write_text(f'server = "s"\nnode_id = "x"\ntoken = "y"\n{agent_block}', encoding="utf-8")
+    return path
+
+
+class TestAgentOptions:
+    def test_defaults_when_absent(self, tmp_path: Path) -> None:
+        cfg = load_node_config(_write(tmp_path / "node.toml"))
+        assert cfg.agent == DEFAULT_AGENT_OPTIONS
+        assert cfg.agent.reconnect_initial_seconds == 1.0
+        assert cfg.agent.reconnect_max_seconds == 60.0
+        assert cfg.agent.auth_retry_seconds == 300.0
+        assert cfg.agent.reconcile_interval_seconds == 900.0
+        assert cfg.agent.heartbeat_interval_seconds == 60.0
+
+    def test_partial_override_keeps_other_defaults(self, tmp_path: Path) -> None:
+        cfg = load_node_config(_write(tmp_path / "node.toml", "[agent]\nreconcile_interval_seconds = 120\n"))
+        assert cfg.agent.reconcile_interval_seconds == 120.0
+        assert cfg.agent.reconnect_max_seconds == DEFAULT_AGENT_OPTIONS.reconnect_max_seconds
+
+    def test_integers_are_accepted_as_floats(self, tmp_path: Path) -> None:
+        cfg = load_node_config(_write(tmp_path / "node.toml", "[agent]\nheartbeat_interval_seconds = 30\n"))
+        assert cfg.agent.heartbeat_interval_seconds == 30.0
+        assert isinstance(cfg.agent.heartbeat_interval_seconds, float)
+
+    def test_unknown_key_rejected(self, tmp_path: Path) -> None:
+        """A typo'd tuning key must not be silently ignored."""
+        with pytest.raises(NodeConfigError, match="未知字段"):
+            load_node_config(_write(tmp_path / "node.toml", "[agent]\nreconect_max_seconds = 5\n"))
+
+    def test_non_numeric_rejected(self, tmp_path: Path) -> None:
+        with pytest.raises(NodeConfigError, match="必须是数字"):
+            load_node_config(_write(tmp_path / "node.toml", '[agent]\nauth_retry_seconds = "soon"\n'))
+
+    def test_bool_rejected(self, tmp_path: Path) -> None:
+        """bool is an int subclass — must not pass the numeric check."""
+        with pytest.raises(NodeConfigError, match="必须是数字"):
+            load_node_config(_write(tmp_path / "node.toml", "[agent]\nauth_retry_seconds = true\n"))
+
+    def test_non_positive_rejected(self, tmp_path: Path) -> None:
+        """Zero would busy-loop the reconnect ramp."""
+        with pytest.raises(NodeConfigError, match="必须大于 0"):
+            load_node_config(_write(tmp_path / "node.toml", "[agent]\nreconnect_initial_seconds = 0\n"))
+
+    def test_block_not_dict(self, tmp_path: Path) -> None:
+        with pytest.raises(NodeConfigError, match="agent"):
+            load_node_config(_write(tmp_path / "node.toml", 'agent = "bogus"\n'))
+
+    def test_save_omits_defaults(self, tmp_path: Path) -> None:
+        """`node init` and self-registration must keep producing a minimal file."""
+        path = tmp_path / "node.toml"
+        save_node_config(path, NodeConfig(server="s", node_id="x", token="y"))
+        assert "[agent]" not in path.read_text(encoding="utf-8")
+
+    def test_save_writes_non_defaults(self, tmp_path: Path) -> None:
+        path = tmp_path / "node.toml"
+        save_node_config(
+            path,
+            NodeConfig(server="s", node_id="x", token="y", agent=AgentOptions(reconcile_interval_seconds=42.0)),
+        )
+        assert load_node_config(path).agent.reconcile_interval_seconds == 42.0
+
+    def test_round_trip(self, tmp_path: Path) -> None:
+        path = tmp_path / "node.toml"
+        opts = AgentOptions(
+            reconnect_initial_seconds=2.0,
+            reconnect_max_seconds=30.0,
+            auth_retry_seconds=120.0,
+            reconcile_interval_seconds=300.0,
+            heartbeat_interval_seconds=15.0,
+        )
+        save_node_config(path, NodeConfig(server="s", node_id="x", token="y", agent=opts))
+        assert load_node_config(path).agent == opts

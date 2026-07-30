@@ -1130,6 +1130,12 @@ def cmd_serve(
     no_self_register: bool = typer.Option(
         False, "--no-self-register", help="跳过 self node 自动注册 (测试 / 不希望中心机自管时使用)"
     ),
+    sync_poll_interval: float = typer.Option(
+        1.0,
+        "--sync-poll-interval",
+        envvar="DN42CTL_SYNC_POLL_INTERVAL",
+        help="sync_events 轮询间隔(秒)，决定配置变更推送到节点的最大延迟",
+    ),
 ) -> None:
     appctx: AppContext = ctx.obj
     config = _require_config_or_exit(appctx)
@@ -1137,7 +1143,11 @@ def cmd_serve(
     from dn42ctl.api import app as api_app
     from dn42ctl.api import configure
 
-    configure(config=config, db_path=appctx.db_path, token=token)
+    if sync_poll_interval <= 0:
+        typer.echo("输入错误: --sync-poll-interval 必须大于 0", err=True)
+        raise typer.Exit(2)
+
+    configure(config=config, db_path=appctx.db_path, token=token, sync_poll_interval=sync_poll_interval)
 
     origins = [o.strip() for o in cors_origin.split(",") if o.strip()] if cors_origin else []
     if origins:
