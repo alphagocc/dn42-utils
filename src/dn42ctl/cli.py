@@ -1518,6 +1518,46 @@ def cmd_node_once(
         raise typer.Exit(1) from exc
 
 
+@node_app.command("agent")
+def cmd_node_agent(
+    ctx: typer.Context,
+    node_config_path: Path = typer.Option(None, "--node-config-path"),
+) -> None:
+    """常驻同步 agent: 持有到中心的 WebSocket 长连接，接收推送并 apply。
+
+    由 dn42ctl-node-agent.service 拉起。启动时先用本地缓存 apply 一次，
+    然后连接中心；断线后按指数退避 + 随机抖动重连，每轮重连都会重新读取
+    node.toml，因此 token 轮换后无需 restart。
+
+    急停: systemctl stop dn42ctl-node-agent，之后仍可手动 dn42ctl node once。
+    """
+    appctx: AppContext = ctx.obj
+    import asyncio
+
+    from dn42ctl.node_config import NodeConfigError, load_node_config
+    from dn42ctl.node_ws_agent import run_agent
+
+    path = _resolve_node_config_path(appctx, node_config_path)
+    try:
+        load_node_config(path)
+    except NodeConfigError as exc:
+        typer.echo(f"错误: {exc}", err=True)
+        raise typer.Exit(2) from exc
+
+    try:
+        asyncio.run(run_agent(node_config_path=path))
+    except KeyboardInterrupt:
+        # systemctl stop sends SIGTERM/SIGINT; a clean stop is not a failure.
+        typer.echo("已停止")
+    except NodeConfigError as exc:
+        # node.toml became unreadable during a reconnect (e.g. bad edit).
+        typer.echo(f"错误: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+
 @node_app.command("status")
 def cmd_node_status(
     ctx: typer.Context,
