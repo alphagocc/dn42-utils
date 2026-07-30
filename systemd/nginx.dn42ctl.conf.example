@@ -24,6 +24,25 @@ server {
     # allow fd00::/8;
     # deny all;
 
+    # WebSocket: 常驻 node agent 的长连接。
+    #
+    # 必须用正则 location 精确匹配 /ws,不能在 location / 上统一强制 upgrade ——
+    # 兄弟路由 /api/v1/nodes/{id}/desired|proposals|reports|status 共享同一前缀,
+    # 强制 upgrade 会把它们打断。nginx 中正则 location 优先于前缀 location,
+    # 所以下面的 location / 原样不动。
+    location ~ ^/api/v1/nodes/[^/]+/ws$ {
+        proxy_pass         http://[::1]:4242;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade           $http_upgrade;
+        proxy_set_header   Connection        "upgrade";
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Forwarded-For   $remote_addr;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        # uvicorn 每 20s 发一次协议 ping,60s 大概率也够;放宽只是不去依赖这一点。
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
     location / {
         proxy_pass         http://[::1]:4242;
         proxy_http_version 1.1;

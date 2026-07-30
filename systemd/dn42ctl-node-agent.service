@@ -1,0 +1,49 @@
+[Unit]
+Description=dn42ctl node agent (resident WebSocket sync)
+Documentation=https://github.com/alphagocc/dn42-utils
+After=network-online.target
+Wants=network-online.target
+# agent 自身有指数退避重连,不该被 systemd 判定为"反复失败"而熔断停掉。
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+# 需写 /etc/bird /etc/systemd/network /etc/NetworkManager,调用 wg / ip / nmcli,
+# 因此以 root 运行。相比原先每 10 分钟约 1 秒的 oneshot,这是一个 7x24 的 root
+# 进程,安全姿态的权衡见 docs/architecture/deployment.md。
+ExecStart=/usr/local/bin/dn42ctl node agent
+Restart=always
+RestartSec=5s
+
+# ---- 文件系统 ----
+ReadWritePaths=/etc/bird /etc/systemd/network /etc/NetworkManager/system-connections /var/lib/dn42ctl /etc/dn42ctl
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+UMask=0077
+
+# ---- 内核接口 ----
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+
+# ---- 进程能力 ----
+# 刻意不清空 CapabilityBoundingSet: 不同于 server,本进程要对
+# /etc/systemd/network/*.netdev 调 chown。若要收窄到
+# CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER,请先在目标环境实测验证。
+NoNewPrivileges=true
+RestrictRealtime=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+# ---- 网络 ----
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
