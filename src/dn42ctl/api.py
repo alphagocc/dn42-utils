@@ -13,6 +13,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, field_validator
 
 from dn42ctl.config import AppConfig
+from dn42ctl.constants import UNSET
 from dn42ctl.db import Database
 from dn42ctl.db_managed import ManagedNodeStore
 from dn42ctl.services import (
@@ -54,15 +55,25 @@ from dn42ctl.services.auto_peer import (
     submit_peer,
     verify_challenge,
 )
+from dn42ctl.services.db_browse import (
+    DEFAULT_LIMIT,
+    MAX_LIMIT,
+    browse_table,
+    list_tables,
+    table_page_to_dict,
+)
+from dn42ctl.services.node_address import set_node_addresses
 from dn42ctl.services.show import show_bgp_peers, show_ibgp_peers, show_wg_tunnels
 from dn42ctl.validators import (
     validate_allowed_ips_list,
     validate_asn,
     validate_babel_type,
     validate_endpoint,
+    validate_endpoint_host,
     validate_ipv6_address,
     validate_listen_port,
     validate_pubkey,
+    validate_router_id,
     validate_rxcost,
 )
 from dn42ctl.ws_hub import (
@@ -127,6 +138,34 @@ def _get_db_path() -> Path:
 def _db_path_or_none() -> Path | None:
     """Non-raising variant for the background watcher, which has no request to fail."""
     return _db_path
+
+
+def _self_node_id() -> str | None:
+    """hub 自身在 managed_nodes 里的 node_id（is_self=1）。"""
+    db = Database.open(_get_db_path())
+    try:
+        node = ManagedNodeStore(db.connection).get_self()
+    finally:
+        db.close()
+    return node.node_id if node is not None else None
+
+
+def _resolve_target_node(node_id: str | None) -> str:
+    """这个 admin 请求操作的是哪个节点的行？
+
+    显式 `?node_id=` 优先；否则用 hub 的 **self 节点**（`managed_nodes.is_self=1`），
+    **而不是** `config.node_id`。
+
+    这不是风格问题：`config.toml` 的 `node_id` 来自 `dn42ctl init`，self 节点 id 来自
+    `serve_bootstrap` 独立生成的 `/var/lib/dn42ctl/self_node_id`，两者从不互相校验。
+    以前 admin API 用前者写 peer、desired-state 用后者读 peer —— 一旦分叉，管理员在 UI
+    里加的 peer 永远不会下发，且没有任何报错。默认对齐到 self 就消除了这条静默失败路径。
+
+    没有 self 行（`--no-self-register` 部署）时才回落到 `config.node_id`。
+    """
+    if node_id:
+        return node_id
+    return _self_node_id() or _get_config().node_id
 
 
 def _resolve_principal(
@@ -226,6 +265,37 @@ class NodePolicyPatchRequest(BaseModel):
     report: str | None = None
 
 
+class NodePatchRequest(BaseModel):
+    """局部更新节点。
+
+    **字段缺席 = 不改动；显式传 `null` = 清除（交还节点本地管理）。** 这个区分只能靠
+    `model_fields_set` 表达，不能简化成 `is not None` 判断 —— 那样就永远无法清除一个字段。
+    """
+
+    name: str | None = None
+    enabled: bool | None = None
+    endpoint_host: str | None = None
+    own_ipv6: str | None = None
+    router_id: str | None = None
+    propagate: bool = True
+    dry_run: bool = False
+
+    @field_validator("endpoint_host")
+    @classmethod
+    def _check_endpoint_host(cls, v: str | None) -> str | None:
+        return None if v is None else validate_endpoint_host(v)
+
+    @field_validator("own_ipv6")
+    @classmethod
+    def _check_own_ipv6(cls, v: str | None) -> str | None:
+        return None if v is None else validate_ipv6_address(v, field_name="own_ipv6")
+
+    @field_validator("router_id")
+    @classmethod
+    def _check_router_id(cls, v: str | None) -> str | None:
+        return None if v is None else validate_router_id(v)
+
+
 def _managed_node_to_dict(node) -> dict:  # noqa: ANN001 — ManagedNode dataclass
     return {
         "node_id": node.node_id,
@@ -237,6 +307,9 @@ def _managed_node_to_dict(node) -> dict:  # noqa: ANN001 — ManagedNode datacla
         "created_at": node.created_at,
         "updated_at": node.updated_at,
         "has_token": node.api_token_hash is not None,
+        "endpoint_host": node.endpoint_host,
+        "own_ipv6": node.own_ipv6,
+        "router_id": node.router_id,
     }
 
 
@@ -265,6 +338,33 @@ def api_get_managed_node(node_id: str) -> dict:
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _managed_node_to_dict(node)
+
+
+@_admin_nodes_router.patch("/nodes/{node_id}")
+def api_patch_managed_node(node_id: str, body: NodePatchRequest) -> dict:
+    # 用 model_fields_set 而非 `is not None`:body 里没出现的字段保持不变,显式传 null
+    # 才是"清除该字段"。两者语义不同,合并掉就再也无法取消中心管理了。
+    given = body.model_fields_set
+    try:
+        result = set_node_addresses(
+            db_path=_get_db_path(),
+            node_id=node_id,
+            name=body.name if "name" in given and body.name is not None else UNSET,
+            enabled=body.enabled if "enabled" in given and body.enabled is not None else UNSET,
+            endpoint_host=body.endpoint_host if "endpoint_host" in given else UNSET,
+            own_ipv6=body.own_ipv6 if "own_ipv6" in given else UNSET,
+            router_id=body.router_id if "router_id" in given else UNSET,
+            propagate=body.propagate,
+            dry_run=body.dry_run,
+        )
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        **_managed_node_to_dict(result.node),
+        "propagated": [asdict(c) for c in result.changes],
+        "warnings": result.warnings,
+        "dry_run": result.dry_run,
+    }
 
 
 @_admin_nodes_router.delete("/nodes/{node_id}")
@@ -603,18 +703,18 @@ class BgpPeerCreateRequest(BgpPeerModifyRequest):
 
 
 @_admin_nodes_router.get("/bgp/peers")
-def api_list_bgp_peers(live: bool = Query(False)) -> list[dict]:
+def api_list_bgp_peers(live: bool = Query(False), node_id: str | None = Query(None)) -> list[dict]:
     config = _get_config()
     db_path = _get_db_path()
     try:
-        peers = show_bgp_peers(config=config, db_path=db_path, include_live=live)
+        peers = show_bgp_peers(config=config, db_path=db_path, include_live=live, node_id=_resolve_target_node(node_id))
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return [asdict(p) for p in peers]
 
 
 @_admin_nodes_router.post("/bgp/peers", status_code=201)
-def api_create_bgp_peer(body: BgpPeerCreateRequest) -> dict:
+def api_create_bgp_peer(body: BgpPeerCreateRequest, node_id: str | None = Query(None)) -> dict:
     config = _get_config()
     db_path = _get_db_path()
     try:
@@ -627,6 +727,7 @@ def api_create_bgp_peer(body: BgpPeerCreateRequest) -> dict:
             peer_lla=body.peer_lla,
             net_backend="networkd",
             listen_port=body.listen_port,
+            node_id=_resolve_target_node(node_id),
             render_files=False,
             allowed_ips=body.allowed_ips,
         )
@@ -636,7 +737,7 @@ def api_create_bgp_peer(body: BgpPeerCreateRequest) -> dict:
 
 
 @_admin_nodes_router.put("/bgp/peers/{peer_asn}")
-def api_modify_bgp_peer(peer_asn: int, body: BgpPeerModifyRequest) -> dict:
+def api_modify_bgp_peer(peer_asn: int, body: BgpPeerModifyRequest, node_id: str | None = Query(None)) -> dict:
     config = _get_config()
     db_path = _get_db_path()
     try:
@@ -649,6 +750,7 @@ def api_modify_bgp_peer(peer_asn: int, body: BgpPeerModifyRequest) -> dict:
             peer_lla=body.peer_lla,
             net_backend="networkd",
             listen_port=body.listen_port,
+            node_id=_resolve_target_node(node_id),
             render_files=False,
             allowed_ips=body.allowed_ips,
         )
@@ -658,7 +760,7 @@ def api_modify_bgp_peer(peer_asn: int, body: BgpPeerModifyRequest) -> dict:
 
 
 @_admin_nodes_router.delete("/bgp/peers/{peer_asn}")
-def api_delete_bgp_peer(peer_asn: int) -> dict:
+def api_delete_bgp_peer(peer_asn: int, node_id: str | None = Query(None)) -> dict:
     config = _get_config()
     db_path = _get_db_path()
     try:
@@ -666,6 +768,7 @@ def api_delete_bgp_peer(peer_asn: int) -> dict:
             config=config,
             db_path=db_path,
             peer_asn=peer_asn,
+            node_id=_resolve_target_node(node_id),
             render_files=False,
         )
     except Dn42CtlError as exc:
@@ -684,6 +787,8 @@ class _IbgpPeerValidators(BaseModel):
     babel_type: str = "tunnel"
     listen_port: int | None = None
     allowed_ips: list[str] | None = None
+    # 这条记录所代表的受管节点,用于地址传播。modify 时字段缺席 = 保留既有关联。
+    remote_node_id: str | None = None
 
     @field_validator("peer_ip")
     @classmethod
@@ -766,18 +871,20 @@ class IbgpPeerModifyRequest(_IbgpPeerValidators):
 
 
 @_admin_nodes_router.get("/ibgp/peers")
-def api_list_ibgp_peers(live: bool = Query(False)) -> list[dict]:
+def api_list_ibgp_peers(live: bool = Query(False), node_id: str | None = Query(None)) -> list[dict]:
     config = _get_config()
     db_path = _get_db_path()
     try:
-        peers = show_ibgp_peers(config=config, db_path=db_path, include_live=live)
+        peers = show_ibgp_peers(
+            config=config, db_path=db_path, include_live=live, node_id=_resolve_target_node(node_id)
+        )
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return [asdict(p) for p in peers]
 
 
 @_admin_nodes_router.post("/ibgp/peers", status_code=201)
-def api_create_ibgp_peer(body: IbgpPeerCreateRequest) -> dict:
+def api_create_ibgp_peer(body: IbgpPeerCreateRequest, node_id: str | None = Query(None)) -> dict:
     config = _get_config()
     db_path = _get_db_path()
     try:
@@ -794,8 +901,10 @@ def api_create_ibgp_peer(body: IbgpPeerCreateRequest) -> dict:
             babel_rxcost=body.babel_rxcost,
             babel_type=body.babel_type,
             listen_port=body.listen_port,
+            node_id=_resolve_target_node(node_id),
             render_files=False,
             allowed_ips=body.allowed_ips,
+            remote_node_id=body.remote_node_id,
         )
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -803,7 +912,7 @@ def api_create_ibgp_peer(body: IbgpPeerCreateRequest) -> dict:
 
 
 @_admin_nodes_router.put("/ibgp/peers/{name}")
-def api_modify_ibgp_peer(name: str, body: IbgpPeerModifyRequest) -> dict:
+def api_modify_ibgp_peer(name: str, body: IbgpPeerModifyRequest, node_id: str | None = Query(None)) -> dict:
     config = _get_config()
     db_path = _get_db_path()
     try:
@@ -819,8 +928,11 @@ def api_modify_ibgp_peer(name: str, body: IbgpPeerModifyRequest) -> dict:
             babel_rxcost=body.babel_rxcost,
             babel_type=body.babel_type,
             listen_port=body.listen_port,
+            node_id=_resolve_target_node(node_id),
             render_files=False,
             allowed_ips=body.allowed_ips,
+            # 缺席时保留既有关联:proposal 接受与上报导入并不知道它的存在。
+            remote_node_id=(body.remote_node_id if "remote_node_id" in body.model_fields_set else UNSET),
         )
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -828,7 +940,7 @@ def api_modify_ibgp_peer(name: str, body: IbgpPeerModifyRequest) -> dict:
 
 
 @_admin_nodes_router.delete("/ibgp/peers/{name}")
-def api_delete_ibgp_peer(name: str) -> dict:
+def api_delete_ibgp_peer(name: str, node_id: str | None = Query(None)) -> dict:
     config = _get_config()
     db_path = _get_db_path()
     try:
@@ -836,6 +948,7 @@ def api_delete_ibgp_peer(name: str) -> dict:
             config=config,
             db_path=db_path,
             name=name,
+            node_id=_resolve_target_node(node_id),
             render_files=False,
         )
     except Dn42CtlError as exc:
@@ -847,11 +960,13 @@ def api_delete_ibgp_peer(name: str) -> dict:
 
 
 @_admin_nodes_router.get("/wg/tunnels")
-def api_list_wg_tunnels(live: bool = Query(False)) -> list[dict]:
+def api_list_wg_tunnels(live: bool = Query(False), node_id: str | None = Query(None)) -> list[dict]:
     config = _get_config()
     db_path = _get_db_path()
     try:
-        tunnels = show_wg_tunnels(config=config, db_path=db_path, include_live=live)
+        tunnels = show_wg_tunnels(
+            config=config, db_path=db_path, include_live=live, node_id=_resolve_target_node(node_id)
+        )
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return [asdict(t) for t in tunnels]
@@ -1105,21 +1220,62 @@ _show_router = APIRouter(prefix="/api/show", dependencies=[Depends(require_admin
 
 
 @_show_router.get("/all")
-def api_show_all(live: bool = Query(False)) -> dict:
+def api_show_all(live: bool = Query(False), node_id: str | None = Query(None)) -> dict:
     config = _get_config()
     db_path = _get_db_path()
+    target = _resolve_target_node(node_id)
+    self_id = _self_node_id()
     try:
-        wg = show_wg_tunnels(config=config, db_path=db_path, include_live=live)
-        bgp = show_bgp_peers(config=config, db_path=db_path, include_live=live)
-        ibgp = show_ibgp_peers(config=config, db_path=db_path, include_live=live)
+        wg = show_wg_tunnels(config=config, db_path=db_path, include_live=live, node_id=target)
+        bgp = show_bgp_peers(config=config, db_path=db_path, include_live=live, node_id=target)
+        ibgp = show_ibgp_peers(config=config, db_path=db_path, include_live=live, node_id=target)
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
-        "node_id": config.node_id,
+        "node_id": target,
+        "self_node_id": self_id,
+        "config_node_id": config.node_id,
+        # config.toml 的 node_id 与 self 节点 id 分叉时,admin 写入的 peer 会落在
+        # desired-state 读不到的分区里。前端据此渲染警告横幅。
+        "node_id_mismatch": self_id is not None and self_id != config.node_id,
         "wg": [asdict(x) for x in wg],
         "bgp": [asdict(x) for x in bgp],
         "ibgp": [asdict(x) for x in ibgp],
     }
+
+
+# --- Admin: 数据库只读浏览 ---
+
+
+@_admin_nodes_router.get("/db/tables")
+def api_list_db_tables() -> list[dict]:
+    try:
+        tables = list_tables(db_path=_get_db_path())
+    except Dn42CtlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return [asdict(t) for t in tables]
+
+
+@_admin_nodes_router.get("/db/tables/{table}")
+def api_browse_db_table(
+    table: str,
+    limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    node_id: str | None = Query(None),
+) -> dict:
+    try:
+        page = browse_table(
+            db_path=_get_db_path(),
+            table=table,
+            limit=limit,
+            offset=offset,
+            node_id=node_id,
+        )
+    except Dn42CtlError as exc:
+        # 未命中白名单 = 这张表不存在(对调用方而言)。不用 400,免得把"表存在但你不能看"
+        # 和"表不存在"区分开来。
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return table_page_to_dict(page)
 
 
 @app.get("/api/version")
