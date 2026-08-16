@@ -10,9 +10,8 @@ dn42ctl serve [--host ::1] [--port 4242] [--sync-poll-interval 1.0]
 ```
 
 - **默认绑定 `[::1]`**（IPv6 loopback），端口 `4242`。
-- **dn42ctl 不处理 TLS 证书。** 对外暴露与 HTTPS 终止由 nginx 反代承担——CLI 不接受 `--tls-cert` / `--tls-key`，且对非 loopback `--host` 会打 warning。
-- `--sync-poll-interval`（环境变量 `DN42CTL_SYNC_POLL_INTERVAL`，默认 `1.0` 秒）：
-  `sync_events` watcher 的轮询间隔，决定配置变更推送到节点的最大延迟。
+- **dn42ctl 不处理 TLS 证书。** 对外暴露与 HTTPS 终止由 nginx 反代承担。CLI 不接受 `--tls-cert` / `--tls-key`，且对非 loopback `--host` 会打 warning。
+- `--sync-poll-interval`（环境变量 `DN42CTL_SYNC_POLL_INTERVAL`，默认 `1.0` 秒）：`sync_events` watcher 的轮询间隔，决定配置变更推送到节点的最大延迟。
 - 部署细节（systemd unit + nginx 反代示例）见 `docs/architecture/deployment.md`。
 
 ## 鉴权（admin / node / peer-session 三类 principal）
@@ -27,8 +26,8 @@ dn42ctl serve [--host ::1] [--port 4242] [--sync-poll-interval 1.0]
 
 错误码：
 
-- `401 Unauthorized` — 缺 token / token 不可解析。
-- `403 Forbidden` — token 有效但越权（node token 试图访问其他 node_id，或访问 admin 路由）。
+- `401 Unauthorized`：缺 token / token 不可解析。
+- `403 Forbidden`：token 有效但越权（node token 试图访问其他 node_id，或访问 admin 路由）。
 
 token hash 比对走恒定时间。self 节点的 token 由 `dn42ctl serve` 启动时自动签发并明文写入 `/etc/dn42ctl/node.toml`；与远程节点 token 走同一套校验路径。
 
@@ -70,35 +69,15 @@ token hash 比对走恒定时间。self 节点的 token 由 `dn42ctl serve` 启�
 
 desired state JSON schema 详见 `docs/architecture/sync_hub_spoke.md`。
 
-上面 4 条 HTTP 路由服务于**一次性 CLI 命令**（人工排障）；常驻 `dn42ctl node agent` 走 WebSocket。
-两条通道共用同一套 token 与同一套 service 层，语义等价。
+上面 4 条 HTTP 路由服务于**一次性 CLI 命令**（人工排障）；常驻 `dn42ctl node agent` 走 WebSocket。两条通道共用同一套 token 与同一套 service 层，语义等价。
 
 ### WebSocket 通道
 
-完整协议（信封、消息目录、生命周期、`sync_events` 变更检测）见
-`docs/architecture/sync_ws_protocol.md`。与 REST 相关的部分：
+完整协议（信封、消息目录、关闭码全表、生命周期、`sync_events` 变更检测）见 `docs/architecture/sync_ws_protocol.md`。与 REST 相关的三点：
 
-- **握手鉴权**：`Authorization: Bearer <node token>` 请求头，与 HTTP 路由同一个 token、
-  同一个 `ManagedNodeStore.authenticate` 路径。argon2 验证**每连接只做一次**，
-  之后所有帧读缓存的 principal。
-- **失败不走 HTTP 状态码。** ASGI 规定在 `accept()` 之前 `close()` 会让握手回 HTTP 403，
-  客户端拿不到原因。所以服务端先 `accept()`，再鉴权，失败时发一个 `error` 帧后用私有段关闭码关闭：
-
-  | HTTP 语义 | WS 关闭码 |
-  |-----------|-----------|
-  | `401 Unauthorized` | `4401` |
-  | `403 Forbidden`（node_id 不匹配） | `4403` |
-  | `404 Not Found`（managed node 不存在） | `4404` |
-  | 访问被撤销（token 轮换 / 节点删除） | `4003` / `4004` |
-  | 协议版本不匹配 | `4008` |
-  | 并发连接超限（每节点上限 4） | `4009` |
-  | 握手 / hello 超时 | `4408` |
-  | hub 正在关闭 | `4000` |
-
-- **nginx 需要额外配置**：`Upgrade` / `Connection` 头透传 + 长 `proxy_read_timeout`。
-  必须用正则 location 精确匹配 `/ws`，不能在 `location /` 上统一强制 upgrade——
-  否则会打断同前缀的 `desired` / `proposals` / `reports` / `status` 路由。
-  见 `docs/architecture/deployment.md`。
+- **握手鉴权**：`Authorization: Bearer <node token>` 请求头，与 HTTP 路由使用同一个 token、同一个 `ManagedNodeStore.authenticate` 实现。argon2 验证**每连接只做一次**，之后所有帧读缓存的 principal。
+- **失败通过关闭码表达**：服务端先 `accept()` 再鉴权，失败时发一个 `error` 帧后用 RFC 6455 私有段关闭码关闭。其中 `4401` / `4403` / `4404` 与 HTTP 的 401 / 403 / 404 一一对应。
+- **nginx 需要额外配置**：`Upgrade` / `Connection` 头透传与长 `proxy_read_timeout`，且必须用正则 location 精确匹配 `/ws`。配置示例与原因见 `docs/architecture/deployment.md`。
 
 ### 管理员路由（admin token）
 
@@ -129,11 +108,15 @@ desired state JSON schema 详见 `docs/architecture/sync_hub_spoke.md`。
 | `POST` | `/api/public/auto-peer/verify` | （无） | 提交签名；服务端通过 `ssh-keygen -Y verify` 或 `gpg --verify` 校验，成功后返回 `peer_session_token`（TTL 15 分钟，绑定到该 ASN） |
 | `POST` | `/api/public/auto-peer/submit` | peer-session | 提交 WG pubkey/endpoint/peer_lla 等字段，服务端转换为 `peer_add` proposal 写入 self 节点队列 |
 
-peer-session bearer 与 admin / node token 走完全独立的解析路径，作用域仅限 `/api/public/auto-peer/submit`，使用 in-memory TTL store 管理。
-- `init` 涉及交互式配置创建和系统接口初始化。
-- `scan` 涉及扫描本地文件系统并修改 config.toml。
+peer-session bearer 与 admin / node token 使用完全独立的解析实现，作用域仅限 `/api/public/auto-peer/submit`，由 in-memory TTL store 管理。
 
-> 注：`dn42ctl node scan` / `dn42ctl node push` 在节点侧执行，通过 `POST /api/v1/nodes/{id}/proposals` 把扫描结果**作为提案**推送给中心；这与中心 admin 的 `scan` 命令是两回事。
+独立解析有三个原因。三种凭据的后端各不相同：admin token 是环境变量中的静态串，node token 是 SQLite 里的 argon2id hash，peer-session 是进程内的 TTL 字典。`_resolve_principal` 对任何非 admin 的 token 都要遍历全部 enabled 节点做 argon2id 验证，若公共端点共用这套解析，任何人发一个无效 Bearer 就能触发 O(nodes) 次 argon2 计算。`Principal.kind` 的类型是 `Literal["admin", "node"]`，peer-session 不构造 `Principal`，因而在类型层面就无法出现在 admin 或 node 路由上。
+
+### 未提供 API 的命令
+
+`init` 涉及交互式配置创建与系统接口初始化，`scan` 涉及扫描本地文件系统并修改 `config.toml`。两者都依赖执行机的本地状态，因此仅提供 CLI。
+
+> `dn42ctl node scan` / `dn42ctl node push` 在节点侧执行，通过 `POST /api/v1/nodes/{id}/proposals` 把扫描结果**作为提案**推送给中心；这与中心 admin 的 `scan` 命令是两回事。
 
 ## 错误处理
 

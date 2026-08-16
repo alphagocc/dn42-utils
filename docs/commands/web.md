@@ -38,7 +38,7 @@ sudo dn42ctl deploy daemon --dest /usr/local/bin --tool-dir /opt/dn42ctl
 | `--dest` | 可执行文件安装目录 (默认 `/usr/local/bin`) |
 | `--tool-dir` | uv tool venv 目录 (默认 `/opt/dn42ctl`) |
 
-venv 放在 `--tool-dir` 而非 `~/.local/share/uv/tools/`，避免 systemd `ProtectHome=true` 导致无法启动。
+venv 放在 `--tool-dir` 指定的目录，避开 `~/.local/share/uv/tools/`，防止 systemd `ProtectHome=true` 导致启动失败。
 
 ```bash
 sudo dn42ctl deploy daemon

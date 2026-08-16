@@ -57,8 +57,7 @@ persistent-keepalive=25
 
 ## dn42-dummy 接口
 
-目前 `dn42-dummy` 是唯一同时支持 `networkd` 与 `nm` 两种后端的接口，由 `config.toml` 的 `dummy_backend` 字段选择。
-创建行为与失败处理详见 [`../commands/init.md`](../commands/init.md)。
+目前 `dn42-dummy` 是唯一同时支持 `networkd` 与 `nm` 两种后端的接口，由 `config.toml` 的 `dummy_backend` 字段选择。创建行为与失败处理详见 [`../commands/init.md`](../commands/init.md)。
 
 ## 相关文档
 

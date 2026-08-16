@@ -8,7 +8,7 @@
 - 同时支持 `systemd-networkd`（peer WireGuard 配置）与 `NetworkManager`（dummy 接口）两种网络后端。
 - **强制约束**：WireGuard 的 `AllowedIPs` 必须写入，但工具 **禁止自动修改路由表**。
 - 所有状态写入 SQLite；用 `node_id` 区分节点，便于多节点集中管理。
-- **Hub-Spoke 多节点同步**：中心节点运行 `dn42ctl serve`，远程节点通过 API 拉取配置并自动应用。
+- **Hub-Spoke 多节点同步**：中心节点运行 `dn42ctl serve`，远程节点由常驻 agent 通过 WebSocket 长连接接收推送并自动应用配置。
 - **Auto-peer**：公共 Web 向导，持有合法 dn42 ASN 的用户可通过 SSH/PGP 签名验证身份后提交 peering 请求。
 
 > 详细规格见 `docs/spec.md`。
@@ -74,18 +74,16 @@ sudo DN42CTL_API_TOKEN=<token> uv run dn42ctl serve --host ::1 --port 4242
 - 启动时自动注册 self 节点（`--no-self-register` 可关闭）。
 - 三类鉴权主体：**admin**（全局管理）、**node**（节点同步）、**peer-session**（auto-peer 向导）。
 
-`web/` 是一个 Vite 多页应用（React 19 + TypeScript + Tailwind CSS v4），构建产物由 nginx 托管，
-FastAPI 始终只回 JSON：
+`web/` 是一个 Vite 多页应用（React 19 + TypeScript + Tailwind CSS v4），nginx 托管网站，FastAPI 只返回 JSON：
 
-- **`web/src/admin/`** — 管理后台：节点/peer 管理、提案审批、配置快照回滚。
-- **`web/src/peer/`** — 公共 auto-peer 向导：4 步完成 peering 请求。
+- **`web/src/admin/`**：管理后台，负责节点/peer 管理、提案审批、配置快照回滚。
+- **`web/src/peer/`**：公共 auto-peer 向导，4 步完成 peering 请求。
 
 ```bash
 cd web && pnpm install && pnpm build   # 产物在 web/dist/
 ```
 
-> 路由表见 `docs/architecture/rest_api.md`，前端设计见 `docs/architecture/web_ui.md`，
-> 部署见 `docs/architecture/deployment.md`。
+> 路由表见 `docs/architecture/rest_api.md`，前端设计见 `docs/architecture/web_ui.md`，部署见 `docs/architecture/deployment.md`。
 
 ## 多节点管理（Hub-Spoke）
 
@@ -101,13 +99,11 @@ sudo dn42ctl node init --server https://hub.example.com --node-id <id> --token <
 sudo systemctl enable --now dn42ctl-node-agent   # 常驻同步 agent
 ```
 
-中心的配置变更会在 ~1 秒内推送到节点并自动 apply。
-`dn42ctl node once`（pull → apply → report）等一次性命令保留，用于人工排障。
+中心的配置变更会在 ~1 秒内推送到节点并自动 apply。`dn42ctl node once`（pull → apply → report）等一次性命令保留，用于人工排障。
 
 支持推送式同步、push/scan 提案审批、配置快照回滚、token 与写策略管理。
 
-> 详见 `docs/architecture/sync_hub_spoke.md`、`docs/architecture/sync_ws_protocol.md`
-> 与 `docs/commands/node.md`。
+> 详见 `docs/architecture/sync_hub_spoke.md`、`docs/architecture/sync_ws_protocol.md` 与 `docs/commands/node.md`。
 
 ## 文档
 

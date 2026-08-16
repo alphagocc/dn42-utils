@@ -2,8 +2,8 @@
 
 dn42ctl 在生产环境以两类 systemd unit 运行：
 
-- `dn42ctl-server.service` —— 中心主机 hub，常驻 API server。
-- `dn42ctl-node-agent.service` —— 任何节点（含 self）的常驻同步 agent，持有到 hub 的 WebSocket 长连接。
+- `dn42ctl-server.service`：中心主机 hub，常驻 API server。
+- `dn42ctl-node-agent.service`：任何节点（含 self）的常驻同步 agent，持有到 hub 的 WebSocket 长连接。
 
 unit 模板与 nginx 反代示例位于项目根 `systemd/` 目录。
 
@@ -24,13 +24,11 @@ systemd/
 - **server 不碰系统配置**：`dn42ctl serve` 只读写权威 SQLite 与 self 的 `node.toml`。`/etc/bird` / `/etc/systemd/network` 等渲染目标由 `dn42ctl-node-agent.service` 处理。两者职责彻底分离，让 server unit 能用最严的 sandbox。
 - **server 只监听 loopback**：TLS / 对外暴露完全交给 nginx。dn42ctl 不接受 `--tls-cert` / `--tls-key`。
 - **self 节点不走 nginx**：`node.toml` 中 `server = "http://[::1]:4242"`，直连 uvicorn。
-- **node-agent 自带重连退避**：不依赖 systemd 重试，因此 `StartLimitIntervalSec=0` 关掉 systemd 的熔断，
-  让 `Restart=always` 永远生效。
+- **node-agent 自带重连退避**：不依赖 systemd 重试，因此 `StartLimitIntervalSec=0` 关掉 systemd 的熔断，让 `Restart=always` 永远生效。
 
 ## 安全姿态变化（从 timer 迁移到常驻 agent）
 
-原先的 `dn42ctl-node-once.timer` 每 10 分钟拉起一个约 1 秒的 root oneshot；现在是一个 7×24 的
-root 常驻进程。这是一次**有意识的权衡**，必须明确认可：
+原先的 `dn42ctl-node-once.timer` 每 10 分钟拉起一个约 1 秒的 root oneshot；现在是一个 7×24 的 root 常驻进程。这是一次**有意识的权衡**，必须明确认可：
 
 | | 之前（`node-once.timer`） | 之后（`node-agent.service`） |
 |---|---|---|
@@ -44,8 +42,7 @@ root 常驻进程。这是一次**有意识的权衡**，必须明确认可：
 
 - agent unit 的 sandbox 比原 `node-once.service` **更严**（见下）。
 - hub 仍是唯一权威，节点无法直接改权威表。
-- **逃生通道**：`systemctl stop dn42ctl-node-agent` 之后仍可手动
-  `dn42ctl node once` / `pull` / `apply`（HTTP 路由保留）。
+- **后备指令**：`systemctl stop dn42ctl-node-agent` 之后仍可手动 `dn42ctl node once` / `pull` / `apply`（HTTP 路由保留）。
 
 ## systemd unit 说明
 
@@ -61,14 +58,10 @@ root 常驻进程。这是一次**有意识的权衡**，必须明确认可：
 ### dn42ctl-node-agent.service
 
 - 必须以 root 运行（需写 `/etc/bird` 等，调用 `wg` / `ip` / `nmcli`），sandbox 比 server 宽松。
-- `Type=exec` + `Restart=always` + `RestartSec=5s`；`[Unit] StartLimitIntervalSec=0`
-  关掉 systemd 熔断——agent 自己有指数退避，不该被 systemd 判定为"反复失败"而停掉。
-- sandbox 在原 `node-once.service` 基础上收紧：`UMask=0077`、`MemoryDenyWriteExecute=true`、
-  `ProtectProc=invisible`、`RestrictNamespaces=true`、`RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6`。
-- **刻意不清空 `CapabilityBoundingSet`**：不同于 server，这个进程要对
-  `/etc/systemd/network/*.netdev` 调 `chown`。若要收窄到 `CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER`，
-  请先在目标环境实测验证。
-- **中心主机上**额外投一个 drop-in（不能放进共享 unit，因为 spoke 上没有 server）：
+- `Type=exec` + `Restart=always` + `RestartSec=5s`；`[Unit] StartLimitIntervalSec=0` 关掉 systemd 熔断。agent 自身带有指数退避，不应被 systemd 判定为"反复失败"而停掉。
+- sandbox 在原 `node-once.service` 基础上收紧：`UMask=0077`、`MemoryDenyWriteExecute=true`、`ProtectProc=invisible`、`RestrictNamespaces=true`、`RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6`。
+- **刻意不清空 `CapabilityBoundingSet`**：不同于 server，这个进程要对 `/etc/systemd/network/*.netdev` 调 `chown`。若要收窄到 `CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER`，请先在目标环境实测验证。
+- **中心主机上**额外设置一个 drop-in（不能放进共享 unit，因为 spoke 上没有 server）：
 
   ```ini
   # /etc/systemd/system/dn42ctl-node-agent.service.d/hub.conf
@@ -81,10 +74,7 @@ root 常驻进程。这是一次**有意识的权衡**，必须明确认可：
 
 ### 开机收敛
 
-删掉 timer 的同时也删掉了它的 `OnBootSec=2min`。作为补偿，**agent 在尝试第一次连接之前，
-会先用本地缓存（`/var/lib/dn42ctl/node-cache.sqlite3`）跑一次 `apply()`**。
-所以即使 spoke 重启时 hub 不可达，`/etc/bird` 仍会被渲染。这不是可选优化，
-是"无 timer 兜底"这个设计能成立的前提。
+原 timer 的 `OnBootSec=2min` 随之删除。作为补偿，agent 在尝试第一次连接之前会先用本地缓存（`/var/lib/dn42ctl/node-cache.sqlite3`）跑一次 `apply()`，因此即使 spoke 重启时 hub 不可达，`/etc/bird` 仍会被渲染。该设计的完整论证见 `docs/architecture/sync_ws_protocol.md`。
 
 ## nginx 反代示例
 
@@ -93,8 +83,7 @@ root 常驻进程。这是一次**有意识的权衡**，必须明确认可：
 核心要点：
 
 - **API 子域名**：反代到 `[::1]:4242`（uvicorn），无静态文件。
-- **WebSocket**：节点 agent 的 `/api/v1/nodes/{id}/ws` 需要单独一条**正则** location，
-  透传 `Upgrade` / `Connection` 头并把 `proxy_read_timeout` 放宽到 3600s：
+- **WebSocket**：节点 agent 的 `/api/v1/nodes/{id}/ws` 需要单独一条**正则** location，透传 `Upgrade` / `Connection` 头并把 `proxy_read_timeout` 放宽到 3600s：
 
   ```nginx
   location ~ ^/api/v1/nodes/[^/]+/ws$ {
@@ -110,9 +99,7 @@ root 常驻进程。这是一次**有意识的权衡**，必须明确认可：
   }
   ```
 
-  **必须用正则而不是在 `location /` 上统一强制 upgrade**：兄弟路由
-  `/api/v1/nodes/{id}/desired|proposals|reports|status` 共享同一前缀，强制 upgrade 会把它们打断。
-  nginx 中正则 location 优先于前缀 location，所以 `location /` 原样不动。
+  **必须使用正则 location 精确匹配**：兄弟路由 `/api/v1/nodes/{id}/desired|proposals|reports|status` 共享同一前缀，在 `location /` 上统一强制 upgrade 会打断这些路由。nginx 中正则 location 优先于前缀 location，因此 `location /` 保持原样。
 - **admin / peer 子域名**：各自 `try_files $uri /{admin,peer}/index.html`，`root /var/www/dn42ctl`。
 - **CORS**：前端跨域访问 API 子域名，需要在 `server.env` 中设置 `DN42CTL_CORS_ORIGINS`。
 - **构建时**：需设置 `VITE_API_BASE` 环境变量指向 API 子域名。
@@ -176,8 +163,7 @@ sudo systemctl enable --now dn42ctl-node-agent.service
 journalctl -fu dn42ctl-node-agent
 ```
 
-> 中心主机上跑 CLI 写命令时建议用 `sudo -u dn42ctl dn42ctl ...`，与 server 进程保持同一个
-> 文件 owner，避免 SQLite 文件权限漂移。
+> 中心主机上跑 CLI 写命令时建议用 `sudo -u dn42ctl dn42ctl ...`，与 server 进程保持同一个文件 owner，避免 SQLite 文件权限漂移。
 
 ## 从 node-once.timer 升级
 
@@ -199,64 +185,25 @@ sudo systemctl restart dn42ctl-server            # 跑 migration v9 + 起 watche
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-`dn42ctl node once` / `pull` / `push` / `report` / `status` 这些一次性命令**保留可用**，
-用于人工排障。
+`dn42ctl node once` / `pull` / `push` / `report` / `status` 这些一次性命令**保留可用**，用于人工排障。
 
-## self node 自动注册流程
+## self node 自动注册
 
-```
-systemctl start dn42ctl-server.service
-            │
-            ▼
-   dn42ctl serve 启动
-            │
-            ▼
-   ┌─────────────────────┐
-   │ 1. 跑迁移 (至 v9)   │
-   └──────────┬──────────┘
-              ▼
-   ┌─────────────────────────────────────┐
-   │ 2. /var/lib/dn42ctl/self_node_id    │
-   │    不存在?  → 生成 UUIDv4 + 写文件  │
-   └──────────┬──────────────────────────┘
-              ▼
-   ┌─────────────────────────────────────┐
-   │ 3. UPSERT managed_nodes             │
-   │    (is_self=1, name='self', ...)    │
-   └──────────┬──────────────────────────┘
-              ▼
-   ┌─────────────────────────────────────┐
-   │ 4. /etc/dn42ctl/node.toml           │
-   │    缺失 / 不匹配 / 缺 token?        │
-   │    → 生成 token,hash 入库,         │
-   │      明文写 node.toml (0600)        │
-   └──────────┬──────────────────────────┘
-              ▼
-   ┌─────────────────────────────────────┐
-   │ 5. uvicorn 监听 [::1]:4242         │
-   │    + sync_events watcher 后台任务   │
-   └─────────────────────────────────────┘
-```
+`dn42ctl serve` 启动时自动完成 self 节点注册：跑迁移、生成或读取 `/var/lib/dn42ctl/self_node_id`、UPSERT `managed_nodes` 中 `is_self=1` 的行、在 `/etc/dn42ctl/node.toml` 缺失或不匹配时签发 self token，最后监听 `[::1]:4242` 并起 `sync_events` watcher。各步骤的详细语义见 `docs/architecture/sync_hub_spoke.md`。
 
-第一次 `enable --now` 后 self 节点完全就绪；后续 restart 幂等（不会重新生成 token）。
-
-`--no-self-register` 关闭步骤 2-4，适用于测试或不希望中心机自管的部署。
+第一次 `enable --now` 后 self 节点完全就绪，后续 restart 幂等，不会重新生成 token。`--no-self-register` 关闭其中的注册步骤，适用于测试或不希望中心机自管的部署。
 
 ## token 轮换
 
 ```bash
-# admin token: 改 /etc/dn42ctl/server.env -> systemctl restart dn42ctl-server
-# 注意:节点 token 不受影响,但所有正在用旧 admin token 的请求立即失效
+# admin token: 改 /etc/dn42ctl/server.env 后 systemctl restart dn42ctl-server
+# 节点 token 不受影响,但所有正在使用旧 admin token 的请求立即失效
 
 # 节点 token (任意节点):
 dn42ctl node token rotate <node-id>     # 打印新 token 明文
-# 中心会立即用关闭码 4003 断开该节点的 WS 连接
-# 若是 self 节点: /etc/dn42ctl/node.toml 自动同步更新,agent 下一轮重连即恢复
-# 若是远程节点: 把新 token 安全送达对端,在对端
+# self 节点: /etc/dn42ctl/node.toml 自动同步更新
+# 远程节点: 把新 token 安全送达对端,在对端重新执行
 #   dn42ctl node init --server ... --node-id ... --token <new>
-# 重新覆写 /etc/dn42ctl/node.toml
-# agent 每轮重连都重读 node.toml,所以 **无需** systemctl restart
 ```
 
-轮换后 agent 会进入 300 秒的长退避（防止过期 token 变成对 hub 的 argon2 DoS）。
-想立刻恢复就 `sudo systemctl restart dn42ctl-node-agent`。
+轮换后中心立即用关闭码 `4003` 断开该节点的 WS 连接，agent 进入 300 秒长退避后自动恢复。agent 每轮重连都重读 `node.toml`，因此更新文件即可生效，无需 `systemctl restart`。需要立刻恢复时执行 `sudo systemctl restart dn42ctl-node-agent`。长退避的设计原因见 `docs/architecture/sync_ws_protocol.md`。

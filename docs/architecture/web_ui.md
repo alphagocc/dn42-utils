@@ -1,4 +1,4 @@
-# Web UI（admin + peer — React + Vite）
+# Web UI（admin + peer，React + Vite）
 
 dn42ctl 不内置任何 HTML 渲染；UI 是一个 Vite 多页应用，构建后由 **nginx** 托管，**不**由 FastAPI 提供。FastAPI 始终只回 JSON。
 
@@ -15,42 +15,42 @@ dn42ctl 不内置任何 HTML 渲染；UI 是一个 Vite 多页应用，构建后
 ```
 web/
 ├── package.json
-├── pnpm-workspace.yaml           # minimumReleaseAge 配置
+├── pnpm-workspace.yaml          # minimumReleaseAge 配置
 ├── pnpm-lock.yaml
-├── vite.config.ts                 # 多页入口 (admin + peer)
+├── vite.config.ts               # 多页入口 (admin + peer)
 ├── tsconfig.json
 ├── admin/
-│   └── index.html                 # Vite 入口 → src/admin/main.tsx
+│   └── index.html               # Vite 入口 → src/admin/main.tsx
 ├── peer/
-│   └── index.html                 # Vite 入口 → src/peer/main.tsx
+│   └── index.html               # Vite 入口 → src/peer/main.tsx
 └── src/
     ├── shared/
-    │   ├── api.ts                 # fetch 封装 (Bearer token, 401 处理)
-    │   ├── theme.ts               # 主题切换逻辑
-    │   ├── index.css              # Tailwind 指令 + 字体
+    │   ├── api.ts               # fetch 封装 (Bearer token, 401 处理)
+    │   ├── theme.ts             # 主题切换逻辑
+    │   ├── index.css            # Tailwind 指令 + 字体
     │   └── components/
-    │       ├── Table.tsx           # 通用数据表格
-    │       ├── Modal.tsx           # 弹窗 (表单 + 确认)
-    │       ├── Toast.tsx           # 通知 (React Context)
-    │       └── ThemeToggle.tsx     # 主题切换按钮
+    │       ├── Table.tsx        # 通用数据表格
+    │       ├── Modal.tsx        # 弹窗 (表单 + 确认)
+    │       ├── Toast.tsx        # 通知 (React Context)
+    │       └── ThemeToggle.tsx  # 主题切换按钮
     ├── admin/
-    │   ├── main.tsx               # React 根
-    │   ├── App.tsx                # 登录/仪表盘条件渲染
-    │   ├── Login.tsx              # token 登录表单
-    │   ├── Dashboard.tsx          # Tab 容器 + 标题栏
+    │   ├── main.tsx             # React 根
+    │   ├── App.tsx              # 登录/仪表盘条件渲染
+    │   ├── Login.tsx            # token 登录表单
+    │   ├── Dashboard.tsx        # Tab 容器 + 标题栏
     │   └── tabs/
     │       ├── Overview.tsx
-    │       ├── Bgp.tsx            # CRUD
-    │       ├── Ibgp.tsx           # CRUD
-    │       ├── Wg.tsx             # 只读
-    │       ├── Nodes.tsx          # CRUD + rotate token
-    │       ├── Proposals.tsx      # accept/reject + 节点选择器
-    │       ├── Reports.tsx        # import + 节点选择器
-    │       ├── Revisions.tsx      # pin/unpin + 节点选择器
-    │       └── Genconf.tsx        # 触发按钮
+    │       ├── Bgp.tsx          # CRUD
+    │       ├── Ibgp.tsx         # CRUD
+    │       ├── Wg.tsx           # 只读
+    │       ├── Nodes.tsx        # CRUD + rotate token
+    │       ├── Proposals.tsx    # accept/reject + 节点选择器
+    │       ├── Reports.tsx      # import + 节点选择器
+    │       ├── Revisions.tsx    # pin/unpin + 节点选择器
+    │       └── Genconf.tsx      # 触发按钮
     └── peer/
         ├── main.tsx
-        ├── App.tsx                # 步骤状态机 + 步骤指示器
+        ├── App.tsx              # 步骤状态机 + 步骤指示器
         └── steps/
             ├── Step1Lookup.tsx
             ├── Step2Auth.tsx
@@ -114,9 +114,7 @@ Tab 切换使用 React `useState`，刷新按钮递增 `refreshKey` 强制组件
 
 - **始终 `?live=false`**：服务端 sandbox 不能 shell out，强求会拖慢页面或报错。
 - **没有 WebSocket**：tab 切换 / 手动 "Refresh" 按钮触发轮询，避免引入额外协议。
-  > 注：`dn42ctl` 确实有一条 WebSocket 通道（`/api/v1/nodes/{id}/ws`），但它**只服务于节点
-  > 常驻 agent**，浏览器不使用——见 `docs/architecture/sync_ws_protocol.md`。
-  > 本条决策未被推翻。
+  > 注：`dn42ctl` 确实有一条 WebSocket 通道（`/api/v1/nodes/{id}/ws`），但它**只服务于节点常驻 agent**，浏览器不使用，详见 `docs/architecture/sync_ws_protocol.md`。本条决策未被推翻。
 - **错误展示**：所有非 2xx 响应弹一个顶部 toast (3.5 秒消失)，正文显示 `detail` 字段。
 
 ## peer: 4 步向导
@@ -128,7 +126,7 @@ Tab 切换使用 React `useState`，刷新按钮递增 `refreshKey` 强制组件
 | 3. Sign challenge | 页面展示 nonce + 复制粘贴命令，用户回填签名 | `POST /api/public/auto-peer/verify {challenge_id, signature}` → `peer_session_token` |
 | 4. Submit peer | 表单：WG pubkey, endpoint (可空), peer LLA, net_backend, listen_port | `POST /api/public/auto-peer/submit` (带 Bearer peer-session) |
 
-- `peer_session_token` 只放在 React 组件状态中，不写 storage——刷新即作废。
+- `peer_session_token` 只放在 React 组件状态中，不写 storage，因此刷新即作废。
 - 成功后展示：`Proposal #N is pending operator approval`。
 
 ## 构建与开发

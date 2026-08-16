@@ -1,7 +1,6 @@
 # dn42ctl 规格说明（Index）
 
-本文件是 `dn42ctl` 的**总索引**，只保留全局目标与必须长期保持的核心约束。
-详细的命令与架构规范拆分在 [`docs/commands/`](commands/) 与 [`docs/architecture/`](architecture/)。
+本文件是 `dn42ctl` 的**总索引**，只保留全局目标与必须长期保持的核心约束。详细的命令与架构规范拆分在 [`docs/commands/`](commands/) 与 [`docs/architecture/`](architecture/)。
 
 > 新增功能时：为其创建专门的文档文件，完整规格写入该文件，并在本文件中添加**一行**引用。
 
@@ -10,8 +9,7 @@
 `dn42ctl` 是一个用于生成/维护 DN42 相关配置的 Python CLI 工具，核心目标：
 
 - 可复现环境：使用 `uv` 锁定依赖与运行环境。
-- CLI 功能：`init`、`genconf`、`bgp peer [add|modify|del]`、`ibgp peer [add|modify|del]`、
-  `show`、`scan`、`serve`、`node`、`system`、`deploy`。
+- CLI 功能：`init`、`genconf`、`bgp peer [add|modify|del]`、`ibgp peer [add|modify|del]`、`show`、`scan`、`serve`、`node`、`system`、`deploy`。
 - 网络后端：peer WireGuard 配置仅支持 `systemd-networkd`；`dummy_backend` 仍支持 `networkd` 与 `nm`。
 - 强制约束：WireGuard 的 AllowedIPs **必须写入**，但**禁止自动修改路由表**。
 - 数据落库：所有状态写入 SQLite，便于多端/多节点集中管理；以 `node_id` 区分节点。
@@ -27,8 +25,7 @@
   - NetworkManager（仅 dummy_backend）：`peer-routes=false`
   - 工具不负责添加任何 DN42 路由策略；如需路由，由用户在系统层面自行管理。
 - **`scan` 仅支持 `systemd-networkd`**：不支持 wg-quick（`/etc/wireguard`）或 NetworkManager 扫描。
-- **渲染引擎使用 Jinja2**，且启用 `StrictUndefined`——缺失上下文变量视为 bug。
-  验收以"语义一致"为准（允许空白差异）。
+- **渲染引擎使用 Jinja2**，且启用 `StrictUndefined`，因此缺失上下文变量应视为 bug。验收以"语义一致"为准（允许空白差异）。
 - **所有节点运行统一版本**：节点间协议不做版本协商与向后兼容，中心与节点需同步升级。
 
 ## 运行环境
@@ -36,8 +33,7 @@
 - Python 3.11+（使用标准库 `tomllib` 读取 TOML），依赖管理使用 `uv`。
 - `bgp peer` / `ibgp peer` / `scan` 会调用系统 `wg` 命令，需要安装 wireguard-tools。
 
-> 安装与上手步骤见 [`../README.md`](../README.md)；
-> 默认路径与提权要求见 [`architecture/paths.md`](architecture/paths.md)。
+> 安装与上手步骤见 [`../README.md`](../README.md)；默认路径与提权要求见 [`architecture/paths.md`](architecture/paths.md)。
 
 ## 详细规范索引
 
@@ -55,7 +51,7 @@
 | [`architecture/deployment.md`](architecture/deployment.md) | 部署（systemd + nginx） |
 | [`architecture/validation.md`](architecture/validation.md) | 输入校验 |
 | [`architecture/testing.md`](architecture/testing.md) | 测试基础设施 |
-| [`architecture/web_ui.md`](architecture/web_ui.md) | Web UI（admin + peer — React + Vite） |
+| [`architecture/web_ui.md`](architecture/web_ui.md) | Web UI（admin + peer，React + Vite） |
 | [`architecture/auto_peer.md`](architecture/auto_peer.md) | Auto-peer 公共 API |
 
 ### 命令
@@ -76,5 +72,4 @@
 
 [`deprecated.md`](deprecated.md) 记录已废弃、已删除的功能及其替代品。
 
-[`reviews/`](reviews/) 存放历史代码审计报告。每份报告均为特定时间点的快照，其中的判断应以报告
-所对应的 commit 为准，当前代码状态需另行核实。
+[`reviews/`](reviews/) 存放历史代码审计报告。每份报告均为特定时间点的快照，其中的判断应以报告所对应的 commit 为准，当前代码状态需另行核实。
