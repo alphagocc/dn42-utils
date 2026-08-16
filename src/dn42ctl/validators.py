@@ -12,6 +12,9 @@ class ValidationError(ValueError):
 
 _WG_PUBKEY_RE = re.compile(r"^[A-Za-z0-9+/]{42,44}={0,2}$")
 _ENDPOINT_RE = re.compile(r"^(\[.+\]|[^:]+):(\d+)$")
+_HOSTNAME_RE = re.compile(
+    r"^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?$"
+)
 
 
 def validate_listen_port(value: int, *, allow_zero: bool = False) -> int:
@@ -149,3 +152,51 @@ def validate_allowed_ips_list(value: list[str]) -> list[str]:
 
 def validate_router_id(value: str) -> str:
     return validate_ipv4_address(value, field_name="Router ID")
+
+
+def validate_endpoint_host(value: str) -> str:
+    """节点的公网可达 host：DNS 名 / IPv4 / IPv6 字面量（裸写，不带方括号）。
+
+    **拒绝带端口。** 端口是每条隧道各自的 listen_port，不是节点属性——一个节点对不同
+    对端可以监听不同端口，也可能在 NAT 后被映射成完全不同的端口。
+    """
+    value = value.strip()
+    if not value:
+        raise ValidationError("endpoint_host 不能为空")
+    if value.startswith("["):
+        raise ValidationError(f"endpoint_host 是裸主机名/地址，不要带方括号或端口: {value!r}")
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        pass
+    else:
+        return value  # 合法的 IPv4 / IPv6 字面量
+    # 不是 IP 字面量。此时出现 ':' 只可能是误带了端口(或畸形的 IPv6)。
+    if ":" in value:
+        raise ValidationError(f"endpoint_host 不能包含端口: {value!r}")
+    if not _HOSTNAME_RE.match(value):
+        raise ValidationError(f"endpoint_host 不是合法的主机名: {value!r}")
+    return value
+
+
+def split_endpoint(value: str) -> tuple[str, int]:
+    """`host:port` / `[v6]:port` -> (host, port)。host 不含方括号。"""
+    m = _ENDPOINT_RE.match(value.strip())
+    if not m:
+        raise ValidationError(f"Endpoint 格式错误: 需要 host:port 或 [IPv6]:port 形式: {value!r}")
+    host = m.group(1)
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    return host, int(m.group(2))
+
+
+def format_endpoint(host: str, port: int) -> str:
+    """(host, port) -> endpoint。IPv6 字面量自动加方括号。"""
+    host = host.strip()
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    try:
+        needs_brackets = isinstance(ipaddress.ip_address(host), ipaddress.IPv6Address)
+    except ValueError:
+        needs_brackets = False
+    return f"[{host}]:{port}" if needs_brackets else f"{host}:{port}"

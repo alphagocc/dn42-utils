@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from dn42ctl.db import BgpPeerRecord, Database, IbgpPeerRecord
-from dn42ctl.db_managed import RevisionStore
+from dn42ctl.db_managed import ManagedNodeStore, RevisionStore
 from dn42ctl.services.core import Dn42CtlError
 from dn42ctl.services.desired_state import (
     build_desired_state,
@@ -258,6 +258,102 @@ class TestComputeContentDigest:
         a = compute_content_digest(node_id=NODE_A, bgp_peers=[], ibgp_peers=[], paths={})
         b = compute_content_digest(node_id=NODE_B, bgp_peers=[], ibgp_peers=[], paths={})
         assert a != b
+
+
+class TestNodeBlockDigest:
+    """零抖动规则:空 block 必须与"没有 block"哈希成同一个值。
+
+    否则升级瞬间全网每个节点的内容哈希都会变,于是每个节点各收一次无意义的推送、
+    各写一行 config_revisions。
+    """
+
+    def test_empty_block_digest_unchanged(self) -> None:
+        args = {"node_id": NODE_A, "bgp_peers": [], "ibgp_peers": [], "paths": {"a": "b"}}
+        baseline = compute_content_digest(**args)
+        assert compute_content_digest(**args, node=None) == baseline
+        assert compute_content_digest(**args, node={}) == baseline
+
+    def test_non_empty_block_changes_digest(self) -> None:
+        args = {"node_id": NODE_A, "bgp_peers": [], "ibgp_peers": [], "paths": {}}
+        assert compute_content_digest(**args, node={"own_ipv6": "fd42::1"}) != compute_content_digest(**args)
+
+    def test_block_contents_distinguished(self) -> None:
+        args = {"node_id": NODE_A, "bgp_peers": [], "ibgp_peers": [], "paths": {}}
+        a = compute_content_digest(**args, node={"own_ipv6": "fd42::1"})
+        b = compute_content_digest(**args, node={"own_ipv6": "fd42::2"})
+        assert a != b
+
+
+class TestNodeBlockInDesiredState:
+    @staticmethod
+    def _set_addresses(db_path: Path, **kwargs: object) -> None:
+        db = Database.open(db_path)
+        try:
+            store = ManagedNodeStore(db.connection)
+            if store.get(NODE_A) is None:
+                store.add(NODE_A, "alpha")
+            store.set_addresses(NODE_A, **kwargs)  # type: ignore[arg-type]
+        finally:
+            db.close()
+
+    def test_absent_when_columns_null(self, db_path: Path) -> None:
+        _seed_node_with_peers(db_path)
+        state = build_desired_state(db_path=db_path, node_id=NODE_A)
+        assert state.node == {}
+        assert "node" not in state.to_dict()
+
+    def test_present_when_columns_set(self, db_path: Path) -> None:
+        _seed_node_with_peers(db_path)
+        self._set_addresses(db_path, own_ipv6="fd42:4242:1::1", router_id="172.20.1.1")
+        state = build_desired_state(db_path=db_path, node_id=NODE_A)
+        assert state.node == {"own_ipv6": "fd42:4242:1::1", "router_id": "172.20.1.1"}
+        assert state.to_dict()["node"] == state.node
+
+    def test_only_non_null_keys_appear(self, db_path: Path) -> None:
+        _seed_node_with_peers(db_path)
+        self._set_addresses(db_path, router_id="172.20.1.1")
+        assert build_desired_state(db_path=db_path, node_id=NODE_A).node == {"router_id": "172.20.1.1"}
+
+    def test_endpoint_host_is_never_pushed(self, db_path: Path) -> None:
+        """节点不会拨自己,apply 对 endpoint_host 无事可做。"""
+        _seed_node_with_peers(db_path)
+        self._set_addresses(db_path, endpoint_host="a.example.com")
+        assert build_desired_state(db_path=db_path, node_id=NODE_A).node == {}
+
+    def test_address_change_moves_fingerprint(self, db_path: Path) -> None:
+        _seed_node_with_peers(db_path)
+        before = compute_desired_fingerprint(db_path=db_path, node_id=NODE_A).content_hash
+        self._set_addresses(db_path, own_ipv6="fd42:4242:1::1")
+        after = compute_desired_fingerprint(db_path=db_path, node_id=NODE_A).content_hash
+        assert before != after
+
+    def test_old_pinned_payload_without_node_key(self, db_path: Path) -> None:
+        """老快照里没有 node 键,回放路径不能 KeyError。"""
+        _seed_node_with_peers(db_path)
+        db = Database.open(db_path)
+        try:
+            store = RevisionStore(db.connection)
+            store.record(
+                node_id=NODE_A,
+                revision="2026-01-01T00:00:00+00:00-deadbeef",
+                generated_at="2026-01-01T00:00:00+00:00",
+                payload={
+                    "node_id": NODE_A,
+                    "revision": "2026-01-01T00:00:00+00:00-deadbeef",
+                    "generated_at": "2026-01-01T00:00:00+00:00",
+                    "bgp_peers": [],
+                    "ibgp_peers": [],
+                    "paths": {},
+                },
+            )
+            store.pin(NODE_A, "2026-01-01T00:00:00+00:00-deadbeef")
+        finally:
+            db.close()
+
+        state = build_desired_state(db_path=db_path, node_id=NODE_A)
+        assert state.node == {}
+        fp = compute_desired_fingerprint(db_path=db_path, node_id=NODE_A)
+        assert fp.pinned_revision == "2026-01-01T00:00:00+00:00-deadbeef"
 
 
 class TestRequireManagedNodeExists:

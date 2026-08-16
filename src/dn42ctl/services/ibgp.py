@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from dn42ctl.config import AppConfig
+from dn42ctl.constants import UNSET, _Unset
 from dn42ctl.db import DatabaseError, IbgpPeerRecord
 from dn42ctl.render import render_bird_ibgp_peer_conf
 from dn42ctl.services.core import (
@@ -53,10 +54,14 @@ def create_ibgp_peer(
     node_id: str | None = None,
     render_files: bool = True,
     allowed_ips: list[str] | None = None,
+    remote_node_id: str | None = None,
 ) -> PeerResult:
     """Create an iBGP peer.
 
     See create_bgp_peer for `node_id` / `render_files` semantics.
+
+    `remote_node_id` 把这条记录关联到它所代表的受管节点,使节点地址变更能够传播过来;
+    None = 不关联。见 docs/architecture/node_addressing.md。
     """
     node_id = node_id or config.node_id
     db = open_db_and_ensure_node(db_path, node_id)
@@ -135,6 +140,7 @@ def create_ibgp_peer(
                 peer_ip=peer_ip,
                 has_wg=has_wg,
                 babel_type=babel_type,
+                remote_node_id=remote_node_id,
             )
         )
     except DatabaseError as exc:
@@ -257,6 +263,7 @@ def modify_ibgp_peer(
     node_id: str | None = None,
     render_files: bool = True,
     allowed_ips: list[str] | None = None,
+    remote_node_id: str | None | _Unset = UNSET,
 ) -> PeerResult:
     backend = normalize_net_backend(net_backend)
 
@@ -323,6 +330,7 @@ def modify_ibgp_peer(
             babel_rxcost=babel_rxcost,
             peer_ip=peer_ip,
             babel_type=babel_type,
+            remote_node_id=remote_node_id,
         )
     except DatabaseError as exc:
         raise Dn42CtlError(str(exc)) from exc

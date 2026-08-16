@@ -34,9 +34,12 @@ class DesiredState:
     bgp_peers: list[dict[str, Any]] = field(default_factory=list)
     ibgp_peers: list[dict[str, Any]] = field(default_factory=list)
     paths: dict[str, str] = field(default_factory=dict)
+    # 节点自身地址块(own_ipv6 / router_id)。列为 NULL 时对应的键省略,整块为空时
+    # 表示"该节点不由中心管理地址",apply 不会去动 config.toml / bird.conf。
+    node: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "node_id": self.node_id,
             "revision": self.revision,
             "generated_at": self.generated_at,
@@ -44,6 +47,34 @@ class DesiredState:
             "ibgp_peers": list(self.ibgp_peers),
             "paths": dict(self.paths),
         }
+        # 空 block 不出现在 payload 里 —— 见 compute_content_digest 的零抖动规则。
+        if self.node:
+            out["node"] = dict(self.node)
+        return out
+
+
+def _node_block(row: Any) -> dict[str, Any]:
+    """节点自身地址块。只放非 NULL 的字段。
+
+    NULL = "该字段不由中心管理":不下发,节点 config.toml 里的现有值原样保留。
+
+    endpoint_host 刻意不下发 —— 节点不会拨自己,apply 对它无事可做。desired state 里
+    每个字段都必须对 spoke 有定义明确的作用。
+    """
+    out: dict[str, Any] = {}
+    if row is None:
+        return out
+    if row.own_ipv6:
+        out["own_ipv6"] = row.own_ipv6
+    if row.router_id:
+        out["router_id"] = row.router_id
+    return out
+
+
+def _load_node_block(db: Database, node_id: str) -> dict[str, Any]:
+    from dn42ctl.db_managed import ManagedNodeStore
+
+    return _node_block(ManagedNodeStore(db.connection).get(node_id))
 
 
 def _bgp_row_to_dict(row: Any) -> dict[str, Any]:
@@ -92,23 +123,27 @@ def compute_content_digest(
     bgp_peers: list[dict[str, Any]],
     ibgp_peers: list[dict[str, Any]],
     paths: dict[str, str],
+    node: dict[str, Any] | None = None,
 ) -> str:
     """8-char hex digest of everything that makes a desired state distinct.
 
     Deliberately excludes `generated_at` — two builds of identical content produce
     the same digest even though their revision strings differ. This is what lets
     the hub answer "did anything actually change?" without writing to the DB.
+
+    零抖动规则:`node` 只在**非空**时才进 canonical JSON。这不是优化而是正确性 ——
+    无条件加这个键会让全网每个节点的内容哈希在升级瞬间全部改变,于是每个节点各收一次
+    无意义的推送、各写一行 config_revisions。加了条件,没启用该特性的机群逐字节不变。
     """
-    canon = json.dumps(
-        {
-            "node_id": node_id,
-            "bgp_peers": bgp_peers,
-            "ibgp_peers": ibgp_peers,
-            "paths": paths,
-        },
-        sort_keys=True,
-        ensure_ascii=False,
-    )
+    canon_obj: dict[str, Any] = {
+        "node_id": node_id,
+        "bgp_peers": bgp_peers,
+        "ibgp_peers": ibgp_peers,
+        "paths": paths,
+    }
+    if node:
+        canon_obj["node"] = node
+    canon = json.dumps(canon_obj, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(canon.encode("utf-8")).hexdigest()[:8]
 
 
@@ -159,6 +194,7 @@ def compute_desired_fingerprint(*, db_path: Path, node_id: str) -> DesiredFinger
     try:
         bgp_rows = db.list_bgp_peers(node_id)
         ibgp_rows = db.list_ibgp_peers(node_id)
+        node_block = _load_node_block(db, node_id)
         pin = RevisionStore(db.connection).get_pin(node_id)
     finally:
         db.close()
@@ -172,6 +208,8 @@ def compute_desired_fingerprint(*, db_path: Path, node_id: str) -> DesiredFinger
                 bgp_peers=payload.get("bgp_peers", []),
                 ibgp_peers=payload.get("ibgp_peers", []),
                 paths=payload.get("paths", {}),
+                # 老快照里没有这个键。
+                node=payload.get("node", {}),
             ),
             pinned_revision=pin.revision,
         )
@@ -183,6 +221,7 @@ def compute_desired_fingerprint(*, db_path: Path, node_id: str) -> DesiredFinger
             bgp_peers=[_bgp_row_to_dict(r) for r in bgp_rows],
             ibgp_peers=[_ibgp_row_to_dict(r) for r in ibgp_rows],
             paths=dict(DEFAULT_PATHS),
+            node=node_block,
         ),
         pinned_revision=None,
     )
@@ -210,6 +249,7 @@ def build_desired_state(
     try:
         bgp_rows = db.list_bgp_peers(node_id)
         ibgp_rows = db.list_ibgp_peers(node_id)
+        node_block = _load_node_block(db, node_id)
     finally:
         db.close()
 
@@ -217,12 +257,16 @@ def build_desired_state(
     ibgp_peers = [_ibgp_row_to_dict(r) for r in ibgp_rows]
     paths = dict(DEFAULT_PATHS)
     generated_at = _now_iso()
-    base = {
+    base: dict[str, Any] = {
         "node_id": node_id,
         "bgp_peers": bgp_peers,
         "ibgp_peers": ibgp_peers,
         "paths": paths,
     }
+    # 与 compute_content_digest 保持一致:空 block 不进 canonical JSON,否则升级瞬间
+    # 全网 revision 全变。
+    if node_block:
+        base["node"] = node_block
     revision = _compute_revision(base, generated_at)
 
     if record_revision:
@@ -241,18 +285,21 @@ def build_desired_state(
                     revision = existing.revision
                     generated_at = existing.generated_at
             else:
+                payload: dict[str, Any] = {
+                    "node_id": node_id,
+                    "revision": revision,
+                    "generated_at": generated_at,
+                    "bgp_peers": bgp_peers,
+                    "ibgp_peers": ibgp_peers,
+                    "paths": paths,
+                }
+                if node_block:
+                    payload["node"] = node_block
                 store.record(
                     node_id=node_id,
                     revision=revision,
                     generated_at=generated_at,
-                    payload={
-                        "node_id": node_id,
-                        "revision": revision,
-                        "generated_at": generated_at,
-                        "bgp_peers": bgp_peers,
-                        "ibgp_peers": ibgp_peers,
-                        "paths": paths,
-                    },
+                    payload=payload,
                 )
                 store.trim(node_id, keep_latest=keep_latest)
             pin = store.get_pin(node_id)
@@ -267,6 +314,8 @@ def build_desired_state(
                 bgp_peers=pin.payload.get("bgp_peers", []),
                 ibgp_peers=pin.payload.get("ibgp_peers", []),
                 paths=pin.payload.get("paths", {}),
+                # 老快照里没有这个键。
+                node=pin.payload.get("node", {}),
             )
 
     return DesiredState(
@@ -276,6 +325,7 @@ def build_desired_state(
         bgp_peers=bgp_peers,
         ibgp_peers=ibgp_peers,
         paths=paths,
+        node=node_block,
     )
 
 

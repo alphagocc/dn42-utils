@@ -90,9 +90,14 @@ def show_bgp_peers(
     config: AppConfig,
     db_path: Path,
     include_live: bool = True,
+    node_id: str | None = None,
 ) -> list[BgpPeerView]:
     db = open_db(db_path)
-    node_id = config.node_id
+    node_id = node_id or config.node_id
+    # 目标不是本机时,本地文件路径与 live 探测都没有意义:peer_files_for_backend 用的是
+    # **hub 的**目录,对远端节点显示成"缺失"会主动误导;wg/birdc 探的也是本机接口。
+    local = node_id == config.node_id
+    include_live = include_live and local
     try:
         rows = db.list_bgp_peers(node_id)
     except DatabaseError as exc:
@@ -110,7 +115,9 @@ def show_bgp_peers(
         ifname = str(row["ifname"])
         peer_asn = int(row["peer_asn"])
         net_backend = str(row["net_backend"])
-        files = peer_files_for_backend(config=config, ifname=ifname, net_backend=net_backend, kind="bgp")
+        files = (
+            peer_files_for_backend(config=config, ifname=ifname, net_backend=net_backend, kind="bgp") if local else []
+        )
         live_wg = wg_map.get(ifname) if include_live else None
         live_bird = bird_map.get(ifname) if include_live else None
 
@@ -139,9 +146,12 @@ def show_ibgp_peers(
     config: AppConfig,
     db_path: Path,
     include_live: bool = True,
+    node_id: str | None = None,
 ) -> list[IbgpPeerView]:
     db = open_db(db_path)
-    node_id = config.node_id
+    node_id = node_id or config.node_id
+    local = node_id == config.node_id
+    include_live = include_live and local
     try:
         rows = db.list_ibgp_peers(node_id)
     except DatabaseError as exc:
@@ -161,12 +171,16 @@ def show_ibgp_peers(
         ifname = str(row["ifname"])
         net_backend = str(row["net_backend"])
         row_has_wg = bool(row["has_wg"])
-        files = peer_files_for_backend(
-            config=config,
-            ifname=ifname,
-            net_backend=net_backend,
-            kind="ibgp",
-            ibgp_name=name,
+        files = (
+            peer_files_for_backend(
+                config=config,
+                ifname=ifname,
+                net_backend=net_backend,
+                kind="ibgp",
+                ibgp_name=name,
+            )
+            if local
+            else []
         )
         proto = f"ibgp_{name}"
         live_wg = wg_map.get(ifname) if (include_live and row_has_wg) else None
@@ -190,6 +204,7 @@ def show_ibgp_peers(
                 live_bird=live_bird,
                 peer_ip=row["peer_ip"],
                 has_wg=row_has_wg,
+                remote_node_id=row["remote_node_id"],
             )
         )
     return out
@@ -200,6 +215,7 @@ def show_wg_tunnels(
     config: AppConfig,
     db_path: Path,
     include_live: bool = True,
+    node_id: str | None = None,
 ) -> list[WgTunnelView]:
     tunnels: list[WgTunnelView] = []
 
@@ -223,9 +239,9 @@ def show_wg_tunnels(
             )
         )
 
-    for bgp in show_bgp_peers(config=config, db_path=db_path, include_live=include_live):
+    for bgp in show_bgp_peers(config=config, db_path=db_path, include_live=include_live, node_id=node_id):
         _show("bgp", bgp)
-    for ibgp in show_ibgp_peers(config=config, db_path=db_path, include_live=include_live):
+    for ibgp in show_ibgp_peers(config=config, db_path=db_path, include_live=include_live, node_id=node_id):
         if ibgp.has_wg:
             _show("ibgp", ibgp)
 

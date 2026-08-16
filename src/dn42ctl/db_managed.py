@@ -459,8 +459,11 @@ class ManagedNodeStore:
             raise DatabaseError(f"不可更新的列: {sorted(unknown)}")
         assignments = ", ".join(f"{col}=?" for col in fields)
         try:
+            # fields 可能为空(只有传播、节点自身字段没变)。此时仍然 UPDATE updated_at,
+            # 一来保持"节点存在"的 rowcount 检查有效,二来避免拼出 "SET , updated_at=?"。
+            set_clause = f"{assignments}, updated_at=?" if assignments else "updated_at=?"
             cur = self._conn.execute(
-                f"UPDATE managed_nodes SET {assignments}, updated_at=? WHERE node_id=?",  # noqa: S608
+                f"UPDATE managed_nodes SET {set_clause} WHERE node_id=?",  # noqa: S608
                 (*fields.values(), now, node_id),
             )
             if cur.rowcount == 0:

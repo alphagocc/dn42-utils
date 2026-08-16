@@ -288,3 +288,79 @@ class TestValidateAllowedIpsList:
 
         result = validate_allowed_ips_list(["fe80::/64", "fd00::/8"])
         assert result == ["fe80::/64", "fd00::/8"]
+
+
+class TestValidateEndpointHost:
+    @pytest.mark.parametrize(
+        "value",
+        ["example.com", "a.b.c.example.com", "node-1.dn42", "1.2.3.4", "2001:db8::1", "fd42:4242:1::1", "localhost"],
+    )
+    def test_accepts(self, value: str) -> None:
+        from dn42ctl.validators import validate_endpoint_host
+
+        assert validate_endpoint_host(value) == value
+
+    def test_strips_whitespace(self) -> None:
+        from dn42ctl.validators import validate_endpoint_host
+
+        assert validate_endpoint_host("  example.com  ") == "example.com"
+
+    @pytest.mark.parametrize(
+        "value",
+        ["example.com:51820", "1.2.3.4:51820", "[2001:db8::1]:51820", "[2001:db8::1]"],
+    )
+    def test_rejects_port_or_brackets(self, value: str) -> None:
+        """端口是每条隧道的 listen_port,不是节点属性。"""
+        from dn42ctl.validators import ValidationError, validate_endpoint_host
+
+        with pytest.raises(ValidationError):
+            validate_endpoint_host(value)
+
+    @pytest.mark.parametrize("value", ["", "   ", "bad_host!", "-leading.example.com", "a..b"])
+    def test_rejects_invalid(self, value: str) -> None:
+        from dn42ctl.validators import ValidationError, validate_endpoint_host
+
+        with pytest.raises(ValidationError):
+            validate_endpoint_host(value)
+
+
+class TestSplitAndFormatEndpoint:
+    @pytest.mark.parametrize(
+        ("endpoint", "expected"),
+        [
+            ("example.com:51820", ("example.com", 51820)),
+            ("1.2.3.4:51820", ("1.2.3.4", 51820)),
+            ("[2001:db8::1]:51820", ("2001:db8::1", 51820)),
+        ],
+    )
+    def test_split(self, endpoint: str, expected: tuple[str, int]) -> None:
+        from dn42ctl.validators import split_endpoint
+
+        assert split_endpoint(endpoint) == expected
+
+    def test_split_rejects_garbage(self) -> None:
+        from dn42ctl.validators import ValidationError, split_endpoint
+
+        with pytest.raises(ValidationError):
+            split_endpoint("no-port-here")
+
+    @pytest.mark.parametrize(
+        ("host", "port", "expected"),
+        [
+            ("example.com", 51820, "example.com:51820"),
+            ("1.2.3.4", 51820, "1.2.3.4:51820"),
+            ("2001:db8::1", 51820, "[2001:db8::1]:51820"),
+            ("[2001:db8::1]", 51820, "[2001:db8::1]:51820"),
+        ],
+    )
+    def test_format(self, host: str, port: int, expected: str) -> None:
+        from dn42ctl.validators import format_endpoint
+
+        assert format_endpoint(host, port) == expected
+
+    @pytest.mark.parametrize("endpoint", ["example.com:51820", "1.2.3.4:443", "[2001:db8::1]:51820"])
+    def test_round_trip(self, endpoint: str) -> None:
+        from dn42ctl.validators import format_endpoint, split_endpoint
+
+        host, port = split_endpoint(endpoint)
+        assert format_endpoint(host, port) == endpoint

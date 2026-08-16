@@ -144,3 +144,113 @@ class TestShowWgTunnels:
         )
         tunnels = show_wg_tunnels(config=sample_config, db_path=db_path, include_live=False)
         assert len(tunnels) == 0
+
+
+REMOTE_NODE = "99999999-9999-4999-8999-999999999999"
+
+
+class TestNodeScoping:
+    @pytest.mark.usefixtures("_mock_wg")
+    def test_peers_are_partitioned_by_node(self, sample_config, db_path: Path) -> None:
+        create_bgp_peer(
+            config=sample_config,
+            db_path=db_path,
+            peer_asn=4242421234,
+            peer_public_key=VALID_PUBKEY,
+            endpoint=VALID_ENDPOINT,
+            peer_lla=VALID_PEER_LLA,
+            net_backend="networkd",
+        )
+        create_bgp_peer(
+            config=sample_config,
+            db_path=db_path,
+            peer_asn=4242425678,
+            peer_public_key=VALID_PUBKEY,
+            endpoint=VALID_ENDPOINT,
+            peer_lla=VALID_PEER_LLA,
+            net_backend="networkd",
+            node_id=REMOTE_NODE,
+            render_files=False,
+        )
+
+        own = show_bgp_peers(config=sample_config, db_path=db_path, include_live=False)
+        assert [p.peer_asn for p in own] == [4242421234]
+
+        remote = show_bgp_peers(config=sample_config, db_path=db_path, include_live=False, node_id=REMOTE_NODE)
+        assert [p.peer_asn for p in remote] == [4242425678]
+
+    @pytest.mark.usefixtures("_mock_wg")
+    def test_remote_node_reports_no_local_files(self, sample_config, db_path: Path) -> None:
+        """peer_files_for_backend 用的是 hub 的目录,对远端节点显示成'缺失'会主动误导。"""
+        create_bgp_peer(
+            config=sample_config,
+            db_path=db_path,
+            peer_asn=4242425678,
+            peer_public_key=VALID_PUBKEY,
+            endpoint=VALID_ENDPOINT,
+            peer_lla=VALID_PEER_LLA,
+            net_backend="networkd",
+            node_id=REMOTE_NODE,
+            render_files=False,
+        )
+        remote = show_bgp_peers(config=sample_config, db_path=db_path, include_live=False, node_id=REMOTE_NODE)
+        assert remote[0].files == []
+
+        own = show_bgp_peers(config=sample_config, db_path=db_path, include_live=False)
+        assert own == []
+
+    @pytest.mark.usefixtures("_mock_wg")
+    def test_remote_node_never_probes_live(self, sample_config, db_path: Path) -> None:
+        """live 探的是本机接口,对远端节点毫无意义,必须完全跳过。"""
+        create_ibgp_peer(
+            config=sample_config,
+            db_path=db_path,
+            name="remote-site",
+            peer_ip=VALID_PEER_IP,
+            peer_public_key=VALID_PUBKEY,
+            endpoint=VALID_ENDPOINT,
+            peer_lla=VALID_PEER_LLA,
+            net_backend="networkd",
+            node_id=REMOTE_NODE,
+            render_files=False,
+        )
+        with patch("dn42ctl.services.show._run_live_probes") as probes:
+            peers = show_ibgp_peers(config=sample_config, db_path=db_path, include_live=True, node_id=REMOTE_NODE)
+        probes.assert_not_called()
+        assert peers[0].live_wg is None
+        assert peers[0].live_bird is None
+
+    @pytest.mark.usefixtures("_mock_wg")
+    def test_wg_tunnels_honour_node_id(self, sample_config, db_path: Path) -> None:
+        create_ibgp_peer(
+            config=sample_config,
+            db_path=db_path,
+            name="remote-site",
+            peer_ip=VALID_PEER_IP,
+            peer_public_key=VALID_PUBKEY,
+            endpoint=VALID_ENDPOINT,
+            peer_lla=VALID_PEER_LLA,
+            net_backend="networkd",
+            node_id=REMOTE_NODE,
+            render_files=False,
+        )
+        assert show_wg_tunnels(config=sample_config, db_path=db_path, include_live=False) == []
+        remote = show_wg_tunnels(config=sample_config, db_path=db_path, include_live=False, node_id=REMOTE_NODE)
+        # sanitize_name 会把 '-' 归一成 '_'
+        assert [t.name for t in remote] == ["remote_site"]
+
+    @pytest.mark.usefixtures("_mock_wg")
+    def test_remote_node_id_surfaced_in_view(self, sample_config, db_path: Path) -> None:
+        create_ibgp_peer(
+            config=sample_config,
+            db_path=db_path,
+            name="linked",
+            peer_ip=VALID_PEER_IP,
+            peer_public_key=VALID_PUBKEY,
+            endpoint=VALID_ENDPOINT,
+            peer_lla=VALID_PEER_LLA,
+            net_backend="networkd",
+            remote_node_id=REMOTE_NODE,
+        )
+        peers = show_ibgp_peers(config=sample_config, db_path=db_path, include_live=False)
+        assert peers[0].remote_node_id == REMOTE_NODE
