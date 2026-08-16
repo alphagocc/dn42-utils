@@ -22,6 +22,12 @@ SYNC_EVENTS_TRIM_EVERY = 256
 # SQLite busy timeout(毫秒)。hub 上 server 进程与 CLI 进程会并发访问同一个库文件。
 SQLITE_BUSY_TIMEOUT_MS = 5000
 
+# node apply 之后是否 reload networkd/bird。放在 constants 而不是 services.reload,
+# 是因为 node_config 要用它,而 services 包的 __init__ 会反向 import node_config。
+RELOAD_POLICY_AUTO = "auto"
+RELOAD_POLICY_NEVER = "never"
+VALID_RELOAD_POLICIES = (RELOAD_POLICY_AUTO, RELOAD_POLICY_NEVER)
+
 
 class _Unset:
     """区分"字段没出现在 PATCH body 里"(保持不变)与"显式传了 null"(清除/取消管理)。

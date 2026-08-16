@@ -318,3 +318,268 @@ class TestSummary:
         text = apply_summary(result)
         assert "create=" in text
         assert result.revision in text
+
+
+# --- 节点自身地址下发 (desired state 的 node 块) ---
+
+
+def _app_config_toml(tmp_path: Path, *, own_ipv6: str = "fd42:4242:1234::1", router_id: str = "172.23.0.1") -> Path:
+    """写一份最小可用的本机 config.toml。"""
+    from dn42ctl.config import AppConfig, save_config
+
+    path = tmp_path / "etc" / "config.toml"
+    save_config(
+        path,
+        AppConfig(
+            node_id=NODE_ID,
+            own_asn=4242421234,
+            router_id=router_id,
+            own_ipv6=own_ipv6,
+            ownnet_v6="fd42:4242:1234::/48",
+            ownnetset_v6="[fd42:4242:1234::/48+]",
+            bird_conf_path=str(tmp_path / "bird/bird.conf"),
+            bird_peers_dir=str(tmp_path / "bird/peers"),
+            bird_babel_conf_path=str(tmp_path / "bird/babel.conf"),
+            bird_roa_v6_conf_path=str(tmp_path / "bird/roa_dn42_v6.conf"),
+            networkd_dir=str(tmp_path / "networkd"),
+            nm_system_connections_dir=str(tmp_path / "nm"),
+            dummy_backend="networkd",
+        ),
+    )
+    return path
+
+
+def _cfg_with_config_path(tmp_path: Path, config_path: Path) -> NodeConfig:
+    return NodeConfig(
+        server="http://x",
+        node_id=NODE_ID,
+        token="t",
+        cache_db_path=tmp_path / "node-cache.sqlite3",
+        apply_overrides={"config_path": str(config_path)},
+    )
+
+
+class TestNodeBlockCompatibility:
+    """兼容铰链:没有 node 块时,写入的文件集与本特性引入之前逐字节一致。"""
+
+    def test_no_node_block_touches_nothing_extra(self, tmp_path: Path) -> None:
+        cfg = _cfg(tmp_path)
+        payload = _make_payload(tmp_path, bgp=[_bgp_peer()], ibgp=[_ibgp_peer()])
+        _seed_cache(cfg.cache_db_path, payload)
+        result = apply(node_config=cfg)
+
+        written = {p.name for p in result.written}
+        assert written == {
+            "dn42_1234.conf",
+            "dn42_1234.netdev",
+            "dn42_1234.network",
+            "ibgp_alpha.conf",
+            "wg_alpha.netdev",
+            "wg_alpha.network",
+            "babel.conf",
+        }
+        assert not (tmp_path / "bird" / "bird.conf").exists()
+        assert not (tmp_path / "networkd" / "dn42-dummy.network").exists()
+        assert result.warnings == []
+
+    def test_empty_node_block_is_same_as_absent(self, tmp_path: Path) -> None:
+        cfg = _cfg(tmp_path)
+        payload = _make_payload(tmp_path, bgp=[_bgp_peer()])
+        payload["node"] = {}
+        _seed_cache(cfg.cache_db_path, payload)
+        result = apply(node_config=cfg)
+        assert not (tmp_path / "bird" / "bird.conf").exists()
+        assert result.warnings == []
+
+
+class TestNodeBlockApplied:
+    def test_renders_bird_conf_and_dummy(self, tmp_path: Path) -> None:
+        config_path = _app_config_toml(tmp_path)
+        cfg = _cfg_with_config_path(tmp_path, config_path)
+        payload = _make_payload(tmp_path)
+        payload["node"] = {"own_ipv6": "fd42:4242:1234::9", "router_id": "172.23.0.9"}
+        _seed_cache(cfg.cache_db_path, payload)
+
+        result = apply(node_config=cfg)
+        assert result.warnings == []
+
+        bird_conf = (tmp_path / "bird" / "bird.conf").read_text()
+        assert "fd42:4242:1234::9" in bird_conf
+        assert "172.23.0.9" in bird_conf
+
+        dummy = (tmp_path / "networkd" / "dn42-dummy.network").read_text()
+        assert "fd42:4242:1234::9/128" in dummy
+        assert (tmp_path / "networkd" / "dn42-dummy.netdev").exists()
+
+    def test_rewrites_config_toml(self, tmp_path: Path) -> None:
+        from dn42ctl.config import load_config
+
+        config_path = _app_config_toml(tmp_path)
+        cfg = _cfg_with_config_path(tmp_path, config_path)
+        payload = _make_payload(tmp_path)
+        payload["node"] = {"own_ipv6": "fd42:4242:1234::9"}
+        _seed_cache(cfg.cache_db_path, payload)
+
+        apply(node_config=cfg)
+        assert load_config(config_path).own_ipv6 == "fd42:4242:1234::9"
+        # 未下发的字段保持本地值
+        assert load_config(config_path).router_id == "172.23.0.1"
+
+    def test_unchanged_values_do_not_rewrite_config_toml(self, tmp_path: Path) -> None:
+        """先比较、有差异才写:save_config 会丢注释与未知键,常规路径不该碰这个文件。"""
+        config_path = _app_config_toml(tmp_path, own_ipv6="fd42:4242:1234::1")
+        cfg = _cfg_with_config_path(tmp_path, config_path)
+        payload = _make_payload(tmp_path)
+        payload["node"] = {"own_ipv6": "fd42:4242:1234::1"}
+        _seed_cache(cfg.cache_db_path, payload)
+
+        result = apply(node_config=cfg)
+        assert config_path not in result.written
+
+    def test_only_non_null_keys_applied(self, tmp_path: Path) -> None:
+        from dn42ctl.config import load_config
+
+        config_path = _app_config_toml(tmp_path)
+        cfg = _cfg_with_config_path(tmp_path, config_path)
+        payload = _make_payload(tmp_path)
+        payload["node"] = {"router_id": "172.23.0.9"}
+        _seed_cache(cfg.cache_db_path, payload)
+
+        apply(node_config=cfg)
+        merged = load_config(config_path)
+        assert merged.router_id == "172.23.0.9"
+        assert merged.own_ipv6 == "fd42:4242:1234::1"
+
+    def test_missing_config_toml_warns_and_skips(self, tmp_path: Path) -> None:
+        """纯 spoke 可能从没有过 config.toml。bird.conf 还需要 own_asn 等 AS 级字段,
+        缺了就渲染不出来 —— 只能跳过并告警,绝不伪造。"""
+        cfg = _cfg_with_config_path(tmp_path, tmp_path / "etc" / "nope.toml")
+        payload = _make_payload(tmp_path)
+        payload["node"] = {"own_ipv6": "fd42:4242:1234::9"}
+        _seed_cache(cfg.cache_db_path, payload)
+
+        result = apply(node_config=cfg)
+        assert len(result.warnings) == 1
+        assert "config.toml 不可用" in result.warnings[0]
+        assert not (tmp_path / "bird" / "bird.conf").exists()
+        assert not (tmp_path / "networkd" / "dn42-dummy.network").exists()
+
+    def test_broken_config_toml_warns_and_skips(self, tmp_path: Path) -> None:
+        bad = tmp_path / "etc" / "config.toml"
+        bad.parent.mkdir(parents=True, exist_ok=True)
+        bad.write_text("this is not valid toml {{{")
+        cfg = _cfg_with_config_path(tmp_path, bad)
+        payload = _make_payload(tmp_path)
+        payload["node"] = {"own_ipv6": "fd42:4242:1234::9"}
+        _seed_cache(cfg.cache_db_path, payload)
+
+        result = apply(node_config=cfg)
+        assert len(result.warnings) == 1
+        assert not (tmp_path / "bird" / "bird.conf").exists()
+
+    def test_dry_run_writes_nothing(self, tmp_path: Path) -> None:
+        config_path = _app_config_toml(tmp_path)
+        cfg = _cfg_with_config_path(tmp_path, config_path)
+        payload = _make_payload(tmp_path)
+        payload["node"] = {"own_ipv6": "fd42:4242:1234::9"}
+        _seed_cache(cfg.cache_db_path, payload)
+
+        result = apply(node_config=cfg, dry_run=True)
+        assert result.written == []
+        assert not (tmp_path / "bird" / "bird.conf").exists()
+        assert "fd42:4242:1234::9" not in config_path.read_text()
+        assert any(d.path == tmp_path / "bird" / "bird.conf" for d in result.diffs)
+
+
+class TestEmptyPeerIpIsSkipped:
+    def test_missing_peer_ip_does_not_fail_whole_apply(self, tmp_path: Path) -> None:
+        """空 peer_ip 只跳过这一个 bird 文件,不能让整个 apply 炸掉。"""
+        cfg = _cfg(tmp_path)
+        peer = _ibgp_peer()
+        peer["peer_ip"] = ""
+        payload = _make_payload(tmp_path, bgp=[_bgp_peer()], ibgp=[peer])
+        _seed_cache(cfg.cache_db_path, payload)
+
+        result = apply(node_config=cfg)
+        names = {p.name for p in result.written}
+        assert "ibgp_alpha.conf" not in names
+        # 其它文件照常写
+        assert {"wg_alpha.netdev", "dn42_1234.conf", "babel.conf"} <= names
+
+
+class TestReload:
+    @staticmethod
+    def _recording_runner(seen: list[list[str]]):
+        from dn42ctl.services.reload import ReloadAction
+
+        def runner(cmd: list[str]) -> ReloadAction:
+            seen.append(cmd)
+            return ReloadAction(cmd=cmd, ok=True, output="")
+
+        return runner
+
+    def test_runs_both_when_both_dirs_touched(self, tmp_path: Path) -> None:
+        cfg = _cfg(tmp_path)
+        payload = _make_payload(tmp_path, bgp=[_bgp_peer()])
+        _seed_cache(cfg.cache_db_path, payload)
+        seen: list[list[str]] = []
+
+        apply(node_config=cfg, runner=self._recording_runner(seen))
+        assert seen == [["networkctl", "reload"], ["birdc", "configure"]]
+
+    def test_second_apply_with_no_changes_runs_nothing(self, tmp_path: Path) -> None:
+        """agent 每 900 秒 reconcile 一次,无变更就 reload 会让每节点每天空跑 96 次。"""
+        cfg = _cfg(tmp_path)
+        payload = _make_payload(tmp_path, bgp=[_bgp_peer()])
+        _seed_cache(cfg.cache_db_path, payload)
+        apply(node_config=cfg, runner=self._recording_runner([]))
+
+        seen: list[list[str]] = []
+        result = apply(node_config=cfg, runner=self._recording_runner(seen))
+        assert seen == []
+        assert result.reloads == []
+
+    def test_dry_run_never_reloads(self, tmp_path: Path) -> None:
+        cfg = _cfg(tmp_path)
+        payload = _make_payload(tmp_path, bgp=[_bgp_peer()])
+        _seed_cache(cfg.cache_db_path, payload)
+        seen: list[list[str]] = []
+        apply(node_config=cfg, dry_run=True, runner=self._recording_runner(seen))
+        assert seen == []
+
+    def test_no_reload_flag(self, tmp_path: Path) -> None:
+        cfg = _cfg(tmp_path)
+        payload = _make_payload(tmp_path, bgp=[_bgp_peer()])
+        _seed_cache(cfg.cache_db_path, payload)
+        seen: list[list[str]] = []
+        apply(node_config=cfg, no_reload=True, runner=self._recording_runner(seen))
+        assert seen == []
+
+    def test_reload_policy_never(self, tmp_path: Path) -> None:
+        cfg = NodeConfig(
+            server="http://x",
+            node_id=NODE_ID,
+            token="t",
+            cache_db_path=tmp_path / "node-cache.sqlite3",
+            reload_policy="never",
+        )
+        payload = _make_payload(tmp_path, bgp=[_bgp_peer()])
+        _seed_cache(cfg.cache_db_path, payload)
+        seen: list[list[str]] = []
+        apply(node_config=cfg, runner=self._recording_runner(seen))
+        assert seen == []
+
+    def test_failure_becomes_warning_not_exception(self, tmp_path: Path) -> None:
+        from dn42ctl.services.reload import ReloadAction
+
+        def failing(cmd: list[str]) -> ReloadAction:
+            return ReloadAction(cmd=cmd, ok=False, error="boom")
+
+        cfg = _cfg(tmp_path)
+        payload = _make_payload(tmp_path, bgp=[_bgp_peer()])
+        _seed_cache(cfg.cache_db_path, payload)
+
+        result = apply(node_config=cfg, runner=failing)
+        assert len(result.warnings) == 2
+        assert all("失败" in w for w in result.warnings)
+        assert [a.ok for a in result.reloads] == [False, False]

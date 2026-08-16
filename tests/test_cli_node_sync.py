@@ -123,6 +123,28 @@ class TestNodeApply:
         # In dry-run nothing should be written
         assert not babel.exists()
 
+    def test_no_reload_flag(
+        self, runner: CliRunner, base_args: list[str], node_toml_path: Path, tmp_path: Path
+    ) -> None:
+        cache_db = tmp_path / "node-cache.sqlite3"
+        babel = tmp_path / "babel.conf"
+        node_toml_path.write_text(
+            f'server = "{SERVER}"\nnode_id = "{NODE_A}"\ntoken = "tok"\n'
+            f'[apply]\nbabel_conf_path = "{babel}"\npeers_dir = "{tmp_path / "peers"}"\n'
+            f'networkd_dir = "{tmp_path / "networkd"}"\n'
+            f'[cache]\ndb_path = "{cache_db}"\n',
+            encoding="utf-8",
+        )
+        with respx.mock(base_url=SERVER) as router:
+            router.get(f"/api/v1/nodes/{NODE_A}/desired").mock(return_value=httpx.Response(200, json=_desired()))
+            runner.invoke(app, [*base_args, "node", "pull", "--node-config-path", str(node_toml_path)])
+        result = runner.invoke(
+            app,
+            [*base_args, "node", "apply", "--no-reload", "--node-config-path", str(node_toml_path)],
+        )
+        assert result.exit_code == 0, result.output
+        assert babel.exists()
+
 
 class TestNodeOnce:
     def test_pull_then_apply(

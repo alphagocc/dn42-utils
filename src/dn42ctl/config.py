@@ -126,9 +126,14 @@ def load_config(path: Path) -> AppConfig:
     )
 
 
-def save_config(path: Path, config: AppConfig) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def dumps_config(config: AppConfig) -> str:
+    """Serialize an AppConfig to TOML text.
 
+    Split out from `save_config` so callers that need to route the content through
+    their own write pipeline (diff / atomic write, e.g. `node apply`) share exactly
+    one serialization. Note this rewrites the whole document — comments and
+    unrecognized keys in an existing file are lost.
+    """
     data: dict[str, Any] = {
         "node_id": config.node_id,
         "own_asn": config.own_asn,
@@ -148,8 +153,10 @@ def save_config(path: Path, config: AppConfig) -> None:
     }
     if config.dn42_registry_path is not None:
         data["dn42_registry_path"] = config.dn42_registry_path
+    return tomli_w.dumps(data)
 
-    with path.open("wb") as f:
-        tomli_w.dump(data, f)
 
+def save_config(path: Path, config: AppConfig) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(dumps_config(config), encoding="utf-8")
     chmod_best_effort(path, FILE_MODE_PRIVATE)

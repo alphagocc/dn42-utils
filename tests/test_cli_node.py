@@ -103,3 +103,86 @@ class TestNodePolicySet:
             [*base_args, "node", "policy", "set", NODE_A, "--peer-modify", "auto_accept"],
         )
         assert result.exit_code != 0
+
+
+class TestNodeSetAddress:
+    def test_sets_all_three(self, runner: CliRunner, base_args: list[str]) -> None:
+        runner.invoke(app, [*base_args, "node", "add", NODE_A, "--name", "alpha"])
+        result = runner.invoke(
+            app,
+            [
+                *base_args,
+                "node",
+                "set-address",
+                NODE_A,
+                "--endpoint-host",
+                "a.example.com",
+                "--own-ipv6",
+                "fd42:4242:1::1",
+                "--router-id",
+                "172.20.1.1",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "a.example.com" in result.output
+        assert "fd42:4242:1::1" in result.output
+        assert "172.20.1.1" in result.output
+
+    def test_requires_at_least_one_option(self, runner: CliRunner, base_args: list[str]) -> None:
+        runner.invoke(app, [*base_args, "node", "add", NODE_A, "--name", "alpha"])
+        result = runner.invoke(app, [*base_args, "node", "set-address", NODE_A])
+        assert result.exit_code != 0
+
+    def test_clear_flag(self, runner: CliRunner, base_args: list[str]) -> None:
+        runner.invoke(app, [*base_args, "node", "add", NODE_A, "--name", "alpha"])
+        runner.invoke(app, [*base_args, "node", "set-address", NODE_A, "--own-ipv6", "fd42:4242:1::1"])
+        result = runner.invoke(app, [*base_args, "node", "set-address", NODE_A, "--clear-own-ipv6"])
+        assert result.exit_code == 0, result.output
+        assert "own_ipv6:      -" in result.output
+
+    def test_value_and_clear_conflict(self, runner: CliRunner, base_args: list[str]) -> None:
+        runner.invoke(app, [*base_args, "node", "add", NODE_A, "--name", "alpha"])
+        result = runner.invoke(
+            app,
+            [*base_args, "node", "set-address", NODE_A, "--own-ipv6", "fd42::1", "--clear-own-ipv6"],
+        )
+        assert result.exit_code != 0
+
+    def test_invalid_value_rejected(self, runner: CliRunner, base_args: list[str]) -> None:
+        runner.invoke(app, [*base_args, "node", "add", NODE_A, "--name", "alpha"])
+        result = runner.invoke(app, [*base_args, "node", "set-address", NODE_A, "--own-ipv6", "not-an-ip"])
+        assert result.exit_code != 0
+
+    def test_endpoint_host_with_port_rejected(self, runner: CliRunner, base_args: list[str]) -> None:
+        runner.invoke(app, [*base_args, "node", "add", NODE_A, "--name", "alpha"])
+        result = runner.invoke(
+            app, [*base_args, "node", "set-address", NODE_A, "--endpoint-host", "a.example.com:51820"]
+        )
+        assert result.exit_code != 0
+
+    def test_unknown_node_rejected(self, runner: CliRunner, base_args: list[str]) -> None:
+        result = runner.invoke(app, [*base_args, "node", "set-address", NODE_A, "--own-ipv6", "fd42::1"])
+        assert result.exit_code != 0
+
+    def test_dry_run_does_not_write(self, runner: CliRunner, base_args: list[str]) -> None:
+        runner.invoke(app, [*base_args, "node", "add", NODE_A, "--name", "alpha"])
+        runner.invoke(app, [*base_args, "node", "set-address", NODE_A, "--own-ipv6", "fd42:4242:1::1", "--dry-run"])
+        shown = runner.invoke(app, [*base_args, "node", "show", NODE_A])
+        assert "own_ipv6:      -" in shown.output
+
+    def test_warnings_go_to_output(self, runner: CliRunner, base_args: list[str]) -> None:
+        runner.invoke(app, [*base_args, "node", "add", NODE_A, "--name", "alpha"])
+        result = runner.invoke(app, [*base_args, "node", "set-address", NODE_A, "--own-ipv6", "fd42:4242:1::1"])
+        assert "没有任何 iBGP peer 行" in result.output
+
+
+class TestNodeMeshBackfill:
+    def test_reports_when_nothing_to_do(self, runner: CliRunner, base_args: list[str]) -> None:
+        result = runner.invoke(app, [*base_args, "node", "mesh-backfill"])
+        assert result.exit_code == 0, result.output
+        assert "已关联" in result.output
+
+    def test_dry_run_flag_accepted(self, runner: CliRunner, base_args: list[str]) -> None:
+        result = runner.invoke(app, [*base_args, "node", "mesh-backfill", "--dry-run"])
+        assert result.exit_code == 0, result.output
+        assert "dry-run" in result.output

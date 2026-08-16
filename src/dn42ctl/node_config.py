@@ -12,6 +12,11 @@ The schema:
     babel_conf_path = "..."
     networkd_dir = "..."
     nm_dir = "..."
+    config_path = "..."            # 本机 /etc/dn42ctl/config.toml,仅在中心下发
+                                   # own_ipv6/router_id 时才会被读写
+    reload = "auto"                # "auto" | "never" —— apply 后是否 reload
+                                   # networkd/bird。不是路径,单独解析到
+                                   # NodeConfig.reload_policy。
 
     [cache]
     db_path = "/var/lib/dn42ctl/node-cache.sqlite3"
@@ -33,7 +38,7 @@ from typing import Any
 
 import tomli_w
 
-from dn42ctl.constants import FILE_MODE_PRIVATE
+from dn42ctl.constants import FILE_MODE_PRIVATE, RELOAD_POLICY_AUTO, VALID_RELOAD_POLICIES
 from dn42ctl.fs import chmod_best_effort
 from dn42ctl.paths import NODE_CACHE_DB_PATH
 
@@ -72,6 +77,8 @@ class NodeConfig:
     apply_overrides: dict[str, str] = field(default_factory=dict)
     cache_db_path: Path = field(default_factory=lambda: NODE_CACHE_DB_PATH)
     agent: AgentOptions = field(default_factory=AgentOptions)
+    # apply 之后是否 reload networkd/bird。reload 是**节点本地决策**,hub 侧不设开关。
+    reload_policy: str = RELOAD_POLICY_AUTO
 
 
 def _require_str(data: dict[str, Any], key: str, *, file: Path) -> str:
@@ -114,6 +121,7 @@ def load_node_config(path: Path) -> NodeConfig:
     token = _require_str(raw, "token", file=path)
 
     apply_overrides: dict[str, str] = {}
+    reload_policy = RELOAD_POLICY_AUTO
     apply_block = raw.get("apply")
     if apply_block is not None:
         if not isinstance(apply_block, dict):
@@ -121,6 +129,13 @@ def load_node_config(path: Path) -> NodeConfig:
         for k, v in apply_block.items():
             if not isinstance(v, str):
                 raise NodeConfigError(f"{path}: [apply].{k} 必须是字符串")
+            if k == "reload":
+                # reload 不是路径覆盖,不能混进 apply_overrides(那是 _resolve_paths
+                # 消费的 dict[str, str] 路径表)。
+                if v not in VALID_RELOAD_POLICIES:
+                    raise NodeConfigError(f"{path}: [apply].reload 必须是 {' 或 '.join(VALID_RELOAD_POLICIES)}")
+                reload_policy = v
+                continue
             apply_overrides[k] = v
 
     cache_db_path = NODE_CACHE_DB_PATH
@@ -146,6 +161,7 @@ def load_node_config(path: Path) -> NodeConfig:
         apply_overrides=apply_overrides,
         cache_db_path=cache_db_path,
         agent=agent,
+        reload_policy=reload_policy,
     )
 
 
@@ -158,6 +174,8 @@ def save_node_config(path: Path, config: NodeConfig) -> None:
     }
     if config.apply_overrides:
         data["apply"] = dict(config.apply_overrides)
+    if config.reload_policy != RELOAD_POLICY_AUTO:
+        data.setdefault("apply", {})["reload"] = config.reload_policy
     if config.cache_db_path != NODE_CACHE_DB_PATH:
         data["cache"] = {"db_path": str(config.cache_db_path)}
     if config.agent != DEFAULT_AGENT_OPTIONS:

@@ -13,15 +13,13 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from dn42ctl.constants import RELOAD_POLICY_AUTO, RELOAD_POLICY_NEVER, VALID_RELOAD_POLICIES
+
 RELOAD_TIMEOUT = 15
 
 NETWORKCTL_RELOAD = ["networkctl", "reload"]
 # 用 configure 而非 configure soft —— soft 不能正确加载新增的 protocol。
 BIRDC_CONFIGURE = ["birdc", "configure"]
-
-RELOAD_POLICY_AUTO = "auto"
-RELOAD_POLICY_NEVER = "never"
-VALID_RELOAD_POLICIES = (RELOAD_POLICY_AUTO, RELOAD_POLICY_NEVER)
 
 
 @dataclass(frozen=True)

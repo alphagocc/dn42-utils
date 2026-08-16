@@ -1,16 +1,20 @@
 """Spoke-side `dn42ctl node apply`: turn a cached desired-state into actual
 files under /etc/bird, /etc/systemd/network.
 
-Reuses the existing Jinja renderers. Does NOT generate the top-level bird.conf
-(which depends on local AppConfig fields like own_asn/router_id and is the
-responsibility of `dn42ctl genconf`); apply only touches per-peer files plus
+Reuses the existing Jinja renderers. Normally only touches per-peer files plus
 babel.conf.
 
+**当且仅当** desired state 带非空 `node` 块时，apply 还会重写 `config.toml`、重渲
+`bird.conf`、重写 `dn42-dummy.*`。没有该块的节点，写入的文件集与本特性引入之前
+逐字节一致。语义见 `docs/architecture/node_addressing.md`。
+
 Atomic writes (tmp + rename) ensure we never leave a half-written file behind.
+写盘之后按实际变更的路径 reload networkd/bird（best-effort，失败只记 warning）。
 """
 
 from __future__ import annotations
 
+import dataclasses
 import difflib
 import os
 import tempfile
@@ -18,17 +22,29 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from dn42ctl.constants import FILE_MODE_NETDEV, FILE_MODE_PRIVATE
+from dn42ctl.config import ConfigError, dumps_config, load_config
+from dn42ctl.constants import FILE_MODE_NETDEV, FILE_MODE_PRIVATE, RELOAD_POLICY_NEVER
 from dn42ctl.fs import chmod_best_effort
 from dn42ctl.node_config import NodeConfig
+from dn42ctl.paths import DEFAULT_CONFIG_PATH
 from dn42ctl.render import (
     render_babel_conf,
     render_bird_bgp_peer_conf,
     render_bird_ibgp_peer_conf,
+    render_bird_main_conf,
+    render_dummy_netdev,
+    render_dummy_network,
     render_networkd_netdev,
     render_networkd_network,
 )
 from dn42ctl.services.core import Dn42CtlError
+from dn42ctl.services.dummy import DUMMY_IFNAME
+from dn42ctl.services.reload import (
+    ReloadAction,
+    Runner,
+    plan_reloads,
+    run_reloads,
+)
 
 
 @dataclass(frozen=True)
@@ -37,6 +53,8 @@ class ResolvedPaths:
     babel_conf_path: Path
     networkd_dir: Path
     nm_dir: Path  # kept for stale-file cleanup of legacy .nmconnection files
+    bird_conf_path: Path
+    config_path: Path
 
 
 @dataclass(frozen=True)
@@ -53,6 +71,8 @@ class ApplyResult:
     written: list[Path] = field(default_factory=list)
     deleted: list[Path] = field(default_factory=list)
     dry_run: bool = False
+    warnings: list[str] = field(default_factory=list)
+    reloads: list[ReloadAction] = field(default_factory=list)
 
 
 def _resolve_paths(payload: dict[str, Any], node_config: NodeConfig) -> ResolvedPaths:
@@ -60,7 +80,7 @@ def _resolve_paths(payload: dict[str, Any], node_config: NodeConfig) -> Resolved
 
     Override key names (in node.toml [apply]) shadow the server's defaults.
     Recognized keys: bird_peers_dir, babel_conf_path, networkd_dir, nm_dir,
-    bird_conf_path (accepted but currently unused by apply).
+    bird_conf_path, config_path.
     """
     defaults = payload.get("paths") or {}
     overrides = node_config.apply_overrides
@@ -76,6 +96,8 @@ def _resolve_paths(payload: dict[str, Any], node_config: NodeConfig) -> Resolved
         babel_conf_path=Path(pick("babel_conf_path", "/etc/bird/babel.conf")),
         networkd_dir=Path(pick("networkd_dir", "/etc/systemd/network/")),
         nm_dir=Path(pick("nm_dir", "/etc/NetworkManager/system-connections/")),
+        bird_conf_path=Path(pick("bird_conf_path", "/etc/bird/bird.conf")),
+        config_path=Path(pick("config_path", str(DEFAULT_CONFIG_PATH))),
     )
 
 
@@ -157,13 +179,16 @@ def _render_ibgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths, node_id:
     name = peer["name"]
     ifname = peer["ifname"]
     out: list[tuple[Path, str, int]] = []
-    out.append(
-        (
-            paths.bird_peers_dir / f"ibgp_{name}.conf",
-            render_bird_ibgp_peer_conf(name=name, ifname=ifname, peer_ip=peer["peer_ip"]),
-            FILE_MODE_PRIVATE,
+    # peer_ip 为空时 render_bird_ibgp_peer_conf 会抛异常。跳过这一个文件而不是让
+    # **整个** apply 失败 —— genconf 也是这么处理的。
+    if peer.get("peer_ip"):
+        out.append(
+            (
+                paths.bird_peers_dir / f"ibgp_{name}.conf",
+                render_bird_ibgp_peer_conf(name=name, ifname=ifname, peer_ip=peer["peer_ip"]),
+                FILE_MODE_PRIVATE,
+            )
         )
-    )
     if not peer["has_wg"]:
         return out
     out.append(
@@ -192,6 +217,99 @@ def _render_ibgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths, node_id:
         )
     )
     return out
+
+
+def _render_node_config_files(
+    node_block: dict[str, Any],
+    paths: ResolvedPaths,
+) -> tuple[list[tuple[Path, str, int]], list[str]]:
+    """中心下发的节点自身地址 -> config.toml / bird.conf / dn42-dummy.*。
+
+    本地没有 config.toml（或读不出来）时**跳过全部三步并告警**，绝不伪造一份：
+    `bird.conf` 还需要 own_asn / ownnet_v6 / ownnetset_v6 这些不在下发范围内的
+    AS 级字段，缺了就渲染不出来（模板跑在 StrictUndefined 下）。纯 spoke 完全可能
+    只跑过 `node init` 而从没有过 config.toml。
+    """
+    files: list[tuple[Path, str, int]] = []
+    warnings: list[str] = []
+
+    try:
+        app_config = load_config(paths.config_path)
+    except ConfigError as exc:
+        warnings.append(f"中心下发了节点地址,但本机 config.toml 不可用,已跳过 config.toml/bird.conf/dummy: {exc}")
+        return files, warnings
+
+    updates: dict[str, str] = {}
+    for key in ("own_ipv6", "router_id"):
+        value = node_block.get(key)
+        if value:
+            updates[key] = str(value)
+    if not updates:
+        return files, warnings
+
+    merged = dataclasses.replace(app_config, **updates)
+    # 先比较,有差异才写。save_config 用 tomli_w 整体重写,注释与未知键会丢 ——
+    # 常规路径因此根本不碰这个文件。
+    if merged != app_config:
+        files.append((paths.config_path, dumps_config(merged), FILE_MODE_PRIVATE))
+
+    files.append(
+        (
+            paths.bird_conf_path,
+            render_bird_main_conf(
+                own_asn=merged.own_asn,
+                router_id=merged.router_id,
+                own_ipv6=merged.own_ipv6,
+                ownnet_v6=merged.ownnet_v6,
+                ownnetset_v6=merged.ownnetset_v6,
+                bird_babel_conf_path=Path(merged.bird_babel_conf_path),
+                bird_peers_dir=Path(merged.bird_peers_dir),
+                bird_roa_v6_conf_path=Path(merged.bird_roa_v6_conf_path),
+            ),
+            FILE_MODE_PRIVATE,
+        )
+    )
+    # dn42-dummy 当作普通文件条目进列表,不调 ensure_dummy_interface —— 那个函数自己
+    # shell out 到 networkctl/nmcli,会绕过 diff/dry-run 机制。生效交给 reload 步骤。
+    files.append((paths.networkd_dir / f"{DUMMY_IFNAME}.netdev", render_dummy_netdev(), FILE_MODE_NETDEV))
+    files.append(
+        (
+            paths.networkd_dir / f"{DUMMY_IFNAME}.network",
+            render_dummy_network(own_ipv6=merged.own_ipv6),
+            FILE_MODE_NETDEV,
+        )
+    )
+    return files, warnings
+
+
+def _render_config_toml(config: Any) -> str:  # noqa: ANN401 — AppConfig
+    """把 AppConfig 渲染成 TOML 文本，好让它走与其它文件相同的原子写 + diff 管线。"""
+    import io
+
+    import tomli_w
+
+    data: dict[str, Any] = {
+        "node_id": config.node_id,
+        "own_asn": config.own_asn,
+        "router_id": config.router_id,
+        "own_ipv6": config.own_ipv6,
+        "ownnet_v6": config.ownnet_v6,
+        "ownnetset_v6": config.ownnetset_v6,
+        "dummy_backend": config.dummy_backend,
+        "paths": {
+            "bird_conf": config.bird_conf_path,
+            "bird_peers_dir": config.bird_peers_dir,
+            "bird_babel_conf": config.bird_babel_conf_path,
+            "bird_roa_v6_conf": config.bird_roa_v6_conf_path,
+            "networkd_dir": config.networkd_dir,
+            "nm_system_connections_dir": config.nm_system_connections_dir,
+        },
+    }
+    if config.dn42_registry_path is not None:
+        data["dn42_registry_path"] = config.dn42_registry_path
+    buf = io.BytesIO()
+    tomli_w.dump(data, buf)
+    return buf.getvalue().decode("utf-8")
 
 
 def _render_babel(payload: dict[str, Any], paths: ResolvedPaths) -> tuple[Path, str, int]:
@@ -265,6 +383,8 @@ def apply(
     *,
     node_config: NodeConfig,
     dry_run: bool = False,
+    no_reload: bool = False,
+    runner: Runner | None = None,
 ) -> ApplyResult:
     """Apply the cached desired state. Errors if no cache exists."""
     from dn42ctl.services.node_agent import read_cache
@@ -276,6 +396,7 @@ def apply(
     payload = cached.payload
     paths = _resolve_paths(payload, node_config)
     node_id = node_config.node_id
+    warnings: list[str] = []
 
     files: list[tuple[Path, str, int]] = []
     for peer in payload.get("bgp_peers", []):
@@ -283,6 +404,13 @@ def apply(
     for peer in payload.get("ibgp_peers", []):
         files.extend(_render_ibgp_peer_files(peer, paths, node_id))
     files.append(_render_babel(payload, paths))
+
+    # 兼容铰链:没有 node 块的节点,写入的文件集与本特性引入之前逐字节一致。
+    node_block = payload.get("node") or {}
+    if node_block:
+        node_files, node_warnings = _render_node_config_files(node_block, paths)
+        files.extend(node_files)
+        warnings.extend(node_warnings)
 
     expected_paths: set[Path] = {path for path, _content, _mode in files}
     stale = _collect_stale(expected_paths, paths)
@@ -293,7 +421,9 @@ def apply(
 
     written: list[Path] = []
     deleted: list[Path] = []
+    reloads: list[ReloadAction] = []
     if not dry_run:
+        changed_actions = {d.path for d in diffs if d.action in {"create", "update"}}
         for path, content, mode in files:
             _atomic_write(path, content, mode=mode)
             written.append(path)
@@ -304,12 +434,32 @@ def apply(
             except FileNotFoundError:
                 pass
 
+        if no_reload or node_config.reload_policy == RELOAD_POLICY_NEVER:
+            pass
+        else:
+            # 按**实际发生变化**的路径决定,而不是"写过就 reload":agent 每 900 秒
+            # reconcile 一次,无脑 reload 会让每个节点每天无谓 birdc configure 96 次。
+            touched = sorted(changed_actions | set(deleted))
+            result = run_reloads(
+                plan_reloads(
+                    touched=touched,
+                    networkd_dir=paths.networkd_dir,
+                    bird_peers_dir=paths.bird_peers_dir,
+                    bird_files=[paths.babel_conf_path, paths.bird_conf_path],
+                ),
+                runner=runner,
+            )
+            reloads = result.actions
+            warnings.extend(result.warnings)
+
     return ApplyResult(
         revision=cached.revision,
         diffs=diffs,
         written=written,
         deleted=deleted,
         dry_run=dry_run,
+        warnings=warnings,
+        reloads=reloads,
     )
 
 
@@ -319,11 +469,16 @@ def apply_summary(result: ApplyResult) -> str:
     for d in result.diffs:
         by_action[d.action] = by_action.get(d.action, 0) + 1
     suffix = " (dry-run)" if result.dry_run else ""
-    return (
+    parts = [
         f"revision={result.revision}{suffix}: "
         f"create={by_action['create']} update={by_action['update']} "
         f"unchanged={by_action['unchanged']} delete={by_action['delete']}"
-    )
+    ]
+    if result.reloads:
+        parts.append("reload=" + ",".join(f"{' '.join(a.cmd)}{'' if a.ok else '(失败)'}" for a in result.reloads))
+    if result.warnings:
+        parts.append(f"warnings={len(result.warnings)}")
+    return " ".join(parts)
 
 
 def apply_diff_text(result: ApplyResult) -> str:

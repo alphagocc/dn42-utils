@@ -17,6 +17,26 @@ FAKE_WG_PRIVKEY = "cFYxMU1qZEdOcUI3RHBOS0FRUUVMVmR3aFNTa1F3VT0="
 FAKE_WG_PUBKEY = "dGVzdHB1YmxpY2tleWZvcnVuaXR0ZXN0aW5nMTIzNA=="
 
 
+@pytest.fixture(autouse=True)
+def _no_real_reload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """测试里绝不真的执行 networkctl / birdc。
+
+    `node apply` 写盘后会按变更路径 reload，那在测试机上是真实的 subprocess 调用：
+    慢，而且是对测试宿主机的副作用。这里把 `run_reloads` 的默认 runner 换成记录用的
+    假实现。
+
+    `run_reloads` 在调用时才查模块全局 `default_runner`，而
+    `test_services_reload.py` 用 `from ... import default_runner` 在导入期就绑定了
+    原始函数——所以那个文件里针对真实 runner 的用例不受影响，仍然覆盖真实行为。
+    """
+    from dn42ctl.services import reload as reload_mod
+
+    def _fake(cmd: list[str]) -> reload_mod.ReloadAction:
+        return reload_mod.ReloadAction(cmd=cmd, ok=True, output="(fake)")
+
+    monkeypatch.setattr(reload_mod, "default_runner", _fake)
+
+
 @pytest.fixture
 def sample_config(tmp_path: Path) -> AppConfig:
     bird_dir = tmp_path / "bird"

@@ -151,3 +151,49 @@ class TestAgentOptions:
         )
         save_node_config(path, NodeConfig(server="s", node_id="x", token="y", agent=opts))
         assert load_node_config(path).agent == opts
+
+
+class TestReloadPolicy:
+    def test_defaults_to_auto(self, tmp_path: Path) -> None:
+        path = tmp_path / "node.toml"
+        path.write_text('server = "http://x"\nnode_id = "n"\ntoken = "t"\n')
+        assert load_node_config(path).reload_policy == "auto"
+
+    @pytest.mark.parametrize("policy", ["auto", "never"])
+    def test_accepts_valid(self, tmp_path: Path, policy: str) -> None:
+        path = tmp_path / "node.toml"
+        path.write_text(f'server = "http://x"\nnode_id = "n"\ntoken = "t"\n\n[apply]\nreload = "{policy}"\n')
+        assert load_node_config(path).reload_policy == policy
+
+    def test_rejects_invalid(self, tmp_path: Path) -> None:
+        path = tmp_path / "node.toml"
+        path.write_text('server = "http://x"\nnode_id = "n"\ntoken = "t"\n\n[apply]\nreload = "sometimes"\n')
+        with pytest.raises(NodeConfigError, match="reload"):
+            load_node_config(path)
+
+    def test_does_not_leak_into_apply_overrides(self, tmp_path: Path) -> None:
+        """apply_overrides 是 _resolve_paths 消费的路径表,reload 不是路径。"""
+        path = tmp_path / "node.toml"
+        path.write_text(
+            'server = "http://x"\nnode_id = "n"\ntoken = "t"\n\n'
+            '[apply]\nreload = "never"\npeers_dir = "/etc/bird/peers"\n'
+        )
+        cfg = load_node_config(path)
+        assert cfg.apply_overrides == {"peers_dir": "/etc/bird/peers"}
+        assert "reload" not in cfg.apply_overrides
+
+    def test_round_trips_through_save(self, tmp_path: Path) -> None:
+        path = tmp_path / "node.toml"
+        save_node_config(path, NodeConfig(server="http://x", node_id="n", token="t", reload_policy="never"))
+        assert load_node_config(path).reload_policy == "never"
+
+    def test_auto_is_not_written(self, tmp_path: Path) -> None:
+        """默认值不写盘,保持 node init / 自注册产出的文件与以前一样精简。"""
+        path = tmp_path / "node.toml"
+        save_node_config(path, NodeConfig(server="http://x", node_id="n", token="t"))
+        assert "reload" not in path.read_text()
+
+    def test_config_path_is_a_normal_override(self, tmp_path: Path) -> None:
+        path = tmp_path / "node.toml"
+        path.write_text('server = "http://x"\nnode_id = "n"\ntoken = "t"\n\n[apply]\nconfig_path = "/etc/x.toml"\n')
+        assert load_node_config(path).apply_overrides["config_path"] == "/etc/x.toml"

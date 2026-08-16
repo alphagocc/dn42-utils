@@ -1176,6 +1176,7 @@ def cmd_serve(
                 self_node_id_path=SELF_NODE_ID_PATH,
                 node_toml_path=NODE_CONFIG_PATH,
                 server_url=f"http://[{host}]:{port}" if ":" in host else f"http://{host}:{port}",
+                app_config=config,
             )
         except (PermissionError, OSError) as exc:
             typer.echo(f"警告: self node 自动注册失败: {exc}", err=True)
@@ -1185,9 +1186,21 @@ def cmd_serve(
                 note.append("生成新 self_node_id")
             if result.rotated_token:
                 note.append("签发新 self token")
+            if result.seeded_addresses:
+                note.append(f"从 config.toml 回填 {', '.join(result.seeded_addresses)}")
             if note:
                 typer.echo(f"self node 自动注册: {result.node_id} ({'; '.join(note)})")
                 typer.echo(f"  node.toml -> {result.node_toml_path}")
+            if result.config_node_id_mismatch:
+                # 分叉时 admin 写入的 peer 会落在 desired-state 读不到的分区里,而且
+                # 不会有任何报错 —— 必须在启动时就喊出来。
+                typer.echo(
+                    "警告: config.toml 的 node_id 与 self 节点 id 不一致\n"
+                    f"  config.toml : {config.node_id}\n"
+                    f"  self node   : {result.node_id}\n"
+                    "  admin API 默认按 self 节点作用域读写；用 dn42ctl node adopt-self --dry-run 查看修复方案",
+                    err=True,
+                )
 
     import uvicorn
 
@@ -1204,6 +1217,9 @@ def _print_managed_node(node) -> None:
     has_token = "yes" if node.api_token_hash else "no"
     typer.echo(f"node_id={node.node_id}{flag} name={node.name} enabled={node.enabled} token={has_token}")
     typer.echo(f"  write_policy: {json.dumps(node.write_policy, ensure_ascii=False)}")
+    typer.echo(f"  endpoint_host: {node.endpoint_host or '-'}")
+    typer.echo(f"  own_ipv6:      {node.own_ipv6 or '-'}")
+    typer.echo(f"  router_id:     {node.router_id or '-'}")
     typer.echo(f"  last_seen_at: {node.last_seen_at or '-'}")
     typer.echo(f"  created_at:   {node.created_at}")
     typer.echo(f"  updated_at:   {node.updated_at}")
@@ -1367,6 +1383,92 @@ def cmd_node_policy_set(
 node_app.add_typer(policy_app, name="policy")
 
 
+@node_app.command("set-address")
+def cmd_node_set_address(
+    ctx: typer.Context,
+    node_id: str = typer.Argument(..., help="UUIDv4 node id"),
+    endpoint_host: str = typer.Option(None, "--endpoint-host", help="公网可达主机名/IP (不含端口)"),
+    own_ipv6: str = typer.Option(None, "--own-ipv6", help="节点 DN42 ULA 地址"),
+    router_id: str = typer.Option(None, "--router-id", help="bird router id (IPv4)"),
+    clear_endpoint_host: bool = typer.Option(False, "--clear-endpoint-host", help="清除 endpoint_host"),
+    clear_own_ipv6: bool = typer.Option(False, "--clear-own-ipv6", help="清除 own_ipv6"),
+    clear_router_id: bool = typer.Option(False, "--clear-router-id", help="清除 router_id"),
+    no_propagate: bool = typer.Option(False, "--no-propagate", help="不改写其他节点的 ibgp_peers 行"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="只打印将发生的改动,不写库"),
+) -> None:
+    """修改节点地址并按需传播到 mesh。
+
+    未指定的字段保持不变；--clear-* 表示取消中心管理、交还节点本地。
+    """
+    appctx: AppContext = ctx.obj
+    from dn42ctl.constants import UNSET
+    from dn42ctl.services.node_address import set_node_addresses
+
+    def _pick(value: str | None, clear: bool, flag: str):  # noqa: ANN202
+        if clear and value is not None:
+            raise typer.BadParameter(f"--{flag} 与 --clear-{flag} 不能同时指定")
+        if clear:
+            return None
+        return UNSET if value is None else value
+
+    host = _pick(endpoint_host, clear_endpoint_host, "endpoint-host")
+    ipv6 = _pick(own_ipv6, clear_own_ipv6, "own-ipv6")
+    rid = _pick(router_id, clear_router_id, "router-id")
+    if host is UNSET and ipv6 is UNSET and rid is UNSET:
+        raise typer.BadParameter("至少指定一个 --endpoint-host / --own-ipv6 / --router-id 或对应的 --clear-*")
+
+    try:
+        result = set_node_addresses(
+            db_path=appctx.db_path,
+            node_id=node_id,
+            endpoint_host=host,
+            own_ipv6=ipv6,
+            router_id=rid,
+            propagate=not no_propagate,
+            dry_run=dry_run,
+        )
+    except Dn42CtlError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except DatabaseError as exc:
+        typer.echo(_db_open_hint(appctx.db_path), err=True)
+        raise typer.Exit(code=1) from exc
+
+    _print_managed_node(result.node)
+    if result.changes:
+        typer.echo(f"  传播{' (dry-run)' if result.dry_run else ''}: {len(result.changes)} 处")
+        for change in result.changes:
+            typer.echo(f"    {change.node_id}/{change.name} {change.field}: {change.old or '-'} -> {change.new}")
+    for warning in result.warnings:
+        typer.echo(f"  警告: {warning}", err=True)
+
+
+@node_app.command("mesh-backfill")
+def cmd_node_mesh_backfill(
+    ctx: typer.Context,
+    dry_run: bool = typer.Option(False, "--dry-run", help="只打印将建立的关联,不写库"),
+) -> None:
+    """按 own_ipv6 == peer_ip 唯一匹配回填 ibgp_peers.remote_node_id。"""
+    appctx: AppContext = ctx.obj
+    from dn42ctl.services.node_address import backfill_remote_node_ids
+
+    try:
+        linked, skipped = backfill_remote_node_ids(db_path=appctx.db_path, dry_run=dry_run)
+    except Dn42CtlError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except DatabaseError as exc:
+        typer.echo(_db_open_hint(appctx.db_path), err=True)
+        raise typer.Exit(code=1) from exc
+
+    suffix = " (dry-run)" if dry_run else ""
+    typer.echo(f"已关联{suffix}: {len(linked)}")
+    for item in linked:
+        typer.echo(f"  {item}")
+    if skipped:
+        typer.echo(f"跳过: {len(skipped)}")
+        for item in skipped:
+            typer.echo(f"  {item}")
+
+
 app.add_typer(node_app, name="node")
 
 
@@ -1427,6 +1529,7 @@ def cmd_node_apply(
     ctx: typer.Context,
     dry_run: bool = typer.Option(False, "--dry-run", help="不写文件,仅输出 diff"),
     from_server: bool = typer.Option(False, "--from-server", help="apply 前先 pull"),
+    no_reload: bool = typer.Option(False, "--no-reload", help="写盘后不执行 networkctl reload / birdc configure"),
     node_config_path: Path = typer.Option(None, "--node-config-path"),
 ) -> None:
     appctx: AppContext = ctx.obj
@@ -1449,7 +1552,7 @@ def cmd_node_apply(
             raise typer.Exit(1) from exc
 
     try:
-        result = apply(node_config=node_cfg, dry_run=dry_run)
+        result = apply(node_config=node_cfg, dry_run=dry_run, no_reload=no_reload)
     except Dn42CtlError as exc:
         typer.echo(f"错误 (apply): {exc}", err=True)
         raise typer.Exit(1) from exc
@@ -1461,6 +1564,8 @@ def cmd_node_apply(
         typer.echo(apply_diff_text(result))
     else:
         typer.echo(apply_summary(result))
+    for warning in result.warnings:
+        typer.echo(f"警告: {warning}", err=True)
 
 
 @node_app.command("once")
@@ -1500,6 +1605,9 @@ def cmd_node_once(
                         "update": sum(1 for d in apply_res.diffs if d.action == "update"),
                         "unchanged": sum(1 for d in apply_res.diffs if d.action == "unchanged"),
                         "delete": sum(1 for d in apply_res.diffs if d.action == "delete"),
+                        # reload 是 best-effort 的:失败不影响 ok,但中心要看得到。
+                        "reloads": [{"cmd": " ".join(a.cmd), "ok": a.ok} for a in apply_res.reloads],
+                        "warnings": list(apply_res.warnings),
                     },
                 )
             except Exception as exc:  # noqa: BLE001

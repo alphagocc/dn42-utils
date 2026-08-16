@@ -152,6 +152,8 @@ class _FakeDiff:
 class _FakeApplyResult:
     revision = "rev-1"
     diffs = (_FakeDiff("create"), _FakeDiff("unchanged"))
+    reloads = ()
+    warnings = ()
 
 
 def _desired_push(revision: str = "rev-1") -> str:
@@ -254,6 +256,8 @@ class TestDesiredPush:
             "update": 0,
             "unchanged": 1,
             "delete": 0,
+            "reloads": [],
+            "warnings": [],
         }
 
     def test_malformed_push_reports_error_and_survives(self, node_toml: Path) -> None:
