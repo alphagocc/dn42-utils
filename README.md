@@ -59,8 +59,9 @@ sudo uv run dn42ctl scan
 ### 巡检与删除
 
 ```bash
-dn42ctl show --help
-dn42ctl del --help
+dn42ctl show --help            # show wg / bgp / ibgp / all
+dn42ctl bgp peer del --help
+dn42ctl ibgp peer del --help
 ```
 
 ## REST API 与 Web UI
@@ -73,12 +74,18 @@ sudo DN42CTL_API_TOKEN=<token> uv run dn42ctl serve --host ::1 --port 4242
 - 启动时自动注册 self 节点（`--no-self-register` 可关闭）。
 - 三类鉴权主体：**admin**（全局管理）、**node**（节点同步）、**peer-session**（auto-peer 向导）。
 
-`web/` 目录下包含两个纯静态站点（HTML + Vanilla JS + Tailwind CDN）：
+`web/` 是一个 Vite 多页应用（React 19 + TypeScript + Tailwind CSS v4），构建产物由 nginx 托管，
+FastAPI 始终只回 JSON：
 
-- **`web/admin/`** — 管理后台：节点/peer 管理、提案审批、配置快照回滚。
-- **`web/peer/`** — 公共 auto-peer 向导：4 步完成 peering 请求。
+- **`web/src/admin/`** — 管理后台：节点/peer 管理、提案审批、配置快照回滚。
+- **`web/src/peer/`** — 公共 auto-peer 向导：4 步完成 peering 请求。
 
-> 路由表见 `docs/architecture/rest_api.md`，部署见 `docs/architecture/deployment.md`。
+```bash
+cd web && pnpm install && pnpm build   # 产物在 web/dist/
+```
+
+> 路由表见 `docs/architecture/rest_api.md`，前端设计见 `docs/architecture/web_ui.md`，
+> 部署见 `docs/architecture/deployment.md`。
 
 ## 多节点管理（Hub-Spoke）
 
@@ -104,6 +111,7 @@ sudo systemctl enable --now dn42ctl-node-agent   # 常驻同步 agent
 
 ## 文档
 
-- 规格说明：`docs/spec.md`
-- 架构文档：`docs/architecture/`
+- spec 索引与核心约束：`docs/spec.md`
+- 架构文档：`docs/architecture/`（默认路径、数据库、网络后端、同步协议、部署……）
 - 命令参考：`docs/commands/`
+- 已废弃功能：`docs/deprecated.md`

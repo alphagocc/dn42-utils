@@ -1,5 +1,17 @@
 # 命令：ibgp peer
 
+## 设计要点
+
+iBGP 互联与 eBGP（`bgp peer`）在几处刻意不同，修改前请先理解原因：
+
+- **使用网内 IP 而非 LLA 作为 neighbor 地址**：iBGP peer 以 `--peer-ip`（网内 IPv6）作为 Bird   neighbor 地址，而不是 link-local 地址。因为 iBGP 内网已有 babel 路由协议，无需依赖 LLA 互联。
+- **支持无 WireGuard 模式**（`--no-wg`）：仅生成 Bird peer conf，不创建 WG 隧道、不修改 `babel.conf`。适用于对端已通过其他方式（物理网络、已有隧道）可达的场景。
+- **`endpoint` 可选**：对端可能在防火墙后，无需填写。
+- **AllowedIPs 默认值更宽**：iBGP 隧道默认 `fe80::/64, fd00::/8, ff02::/16`——iBGP 对端均为可信任  的自有机器，默认放行 link-local、DN42 和组播流量；eBGP peer 默认为 `fe80::/64, fd00::/8`。
+  两者均可通过 `--allowed-ips` 覆盖。
+
+> `rxcost` / `type` 如何写入 `babel.conf`，见 [`../architecture/babel.md`](../architecture/babel.md)。
+
 ## `dn42ctl ibgp peer`（等价于 `dn42ctl ibgp peer add`）
 
 用途：创建内网 iBGP peer。可选择是否同时创建 WireGuard 隧道。

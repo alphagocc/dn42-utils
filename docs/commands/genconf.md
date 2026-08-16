@@ -12,7 +12,7 @@
 
 - 渲染并写入：
   - Bird 主配置（从内置模板渲染、替换 include 路径与 define）。
-  - `babel.conf`：从数据库读取该节点所有 iBGP peer 的接口列表与各自的 `rxcost`，确定性、幂等地生成。
+  - `babel.conf`：从数据库读取该节点所有 iBGP peer 的接口列表与各自的 `rxcost` / `type`，确定性、幂等地生成（详见 [`../architecture/babel.md`](../architecture/babel.md)）。
 - 确保 Bird peers 目录存在（若不存在则创建）。
 - 当指定 `--all` 时，额外生成：
   - 每个 BGP peer 的 Bird peer conf（`{bird_peers_dir}/{ifname}.conf`）和 WG 配置。

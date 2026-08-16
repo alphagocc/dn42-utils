@@ -87,8 +87,11 @@ uv run python -m compileall -q src
 
 - Spec / constraints: [`docs/spec.md`](docs/spec.md)
 - Architecture:
+  - Default paths & privileges: [`docs/architecture/paths.md`](docs/architecture/paths.md)
   - DB: [`docs/architecture/database.md`](docs/architecture/database.md)
   - Network backends: [`docs/architecture/network_backends.md`](docs/architecture/network_backends.md)
+  - Babel (rxcost / interface type): [`docs/architecture/babel.md`](docs/architecture/babel.md)
   - Testing: [`docs/architecture/testing.md`](docs/architecture/testing.md)
 - Command docs: [`docs/commands/`](docs/commands/)
+- Removed features & their replacements: [`docs/deprecated.md`](docs/deprecated.md)
 - End-user walkthrough & defaults: [`README.md`](README.md)

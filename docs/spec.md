@@ -1,123 +1,80 @@
 # dn42ctl 规格说明（Index）
 
-本文件是 `dn42ctl` 的“总索引（Index）”。详细的命令与架构规范拆分在 `docs/commands/` 与 `docs/architecture/`。
+本文件是 `dn42ctl` 的**总索引**，只保留全局目标与必须长期保持的核心约束。
+详细的命令与架构规范拆分在 [`docs/commands/`](commands/) 与 [`docs/architecture/`](architecture/)。
+
+> 新增功能时：为其创建专门的文档文件，完整规格写入该文件，并在本文件中添加**一行**引用。
 
 ## 目标
 
 `dn42ctl` 是一个用于生成/维护 DN42 相关配置的 Python CLI 工具，核心目标：
 
 - 可复现环境：使用 `uv` 锁定依赖与运行环境。
-- CLI 功能：支持 `init`、`genconf`、`bgp peer [add|modify|del]`、`ibgp peer [add|modify|del]`、`show`、`scan`。
+- CLI 功能：`init`、`genconf`、`bgp peer [add|modify|del]`、`ibgp peer [add|modify|del]`、
+  `show`、`scan`、`serve`、`node`、`system`、`deploy`。
 - 网络后端：peer WireGuard 配置仅支持 `systemd-networkd`；`dummy_backend` 仍支持 `networkd` 与 `nm`。
 - 强制约束：WireGuard 的 AllowedIPs **必须写入**，但**禁止自动修改路由表**。
 - 数据落库：所有状态写入 SQLite，便于多端/多节点集中管理；以 `node_id` 区分节点。
-- 多节点中心化同步：hub-spoke 架构，详见 `docs/architecture/sync_hub_spoke.md`；节点侧常驻 agent 通过 WebSocket 长连接接收中心推送，详见 `docs/architecture/sync_ws_protocol.md`。
-- 分层：CLI/Service/Render/DB 解耦，便于未来接入 RESTful API。
-
-## 运行环境与安装
-
-- Python：3.11+（使用标准库 `tomllib` 读取 TOML）。
-- 依赖管理：`uv`。
-
-常用命令：
-
-- 创建虚拟环境：`uv venv`
-- 安装（可编辑模式）：`uv pip install -e .`
-- 运行：`uv run dn42ctl --help`
-
-> `bgp peer`/`ibgp peer`/`scan` 会调用系统 `wg` 命令（生成密钥或从私钥推导公钥），需要安装 wireguard-tools。
-
-## 默认路径与提权
-
-默认情况下会写入系统目录，因此通常需要 root（例如 `sudo`）权限。
-
-- 配置文件：`/etc/dn42ctl/config.toml`（可用 `--config-path` 覆盖）
-- SQLite：`/var/lib/dn42ctl/dn42.sqlite3`（可用 `--db-path` 覆盖）
-- dn42 registry（可选）：在 `config.toml` 中通过 `dn42_registry_path = "/var/lib/dn42-registry"` 配置；启用 auto-peer 公共 API 时必需，未配置时 `/api/public/auto-peer/*` 返回 503。
-- Bird：
-  - 主配置：`/etc/bird/bird.conf`（部分发行版也可能是 `/etc/bird.conf`）
-  - peers 目录：`/etc/bird/peers/`
-  - babel：`/etc/bird/babel.conf`
-  - ROA v6 include：`/etc/bird/roa_dn42_v6.conf`
-- systemd-networkd：`/etc/systemd/network/`
-- NetworkManager（仅 dummy_backend 使用）：`/etc/NetworkManager/system-connections/`
-
-当权限不足时，程序应提示：以 root 运行或通过参数覆盖到可写路径。
+- 多节点中心化同步：hub-spoke 架构；节点侧常驻 agent 通过 WebSocket 长连接接收中心推送。
+- 分层：CLI / Service / Render / DB 解耦，Service 层可被 REST API 直接复用。
 
 ## 核心设计约束（必须保持）
 
-- 禁止自动改路由表：
+这些约束是本项目的身份，修改前必须有充分理由：
+
+- **禁止自动改路由表**：`AllowedIPs` 必须写入以保证配置完整性，但工具不得因此改动系统路由表。
   - networkd：`RouteTable=off`
   - NetworkManager（仅 dummy_backend）：`peer-routes=false`
-- `scan` 仅支持 `systemd-networkd`（不支持 wg-quick `/etc/wireguard` 或 NetworkManager 扫描）。
-- 渲染引擎使用 Jinja2；验收以“语义一致”为准（允许空白差异）。
+  - 工具不负责添加任何 DN42 路由策略；如需路由，由用户在系统层面自行管理。
+- **`scan` 仅支持 `systemd-networkd`**：不支持 wg-quick（`/etc/wireguard`）或 NetworkManager 扫描。
+- **渲染引擎使用 Jinja2**，且启用 `StrictUndefined`——缺失上下文变量视为 bug。
+  验收以"语义一致"为准（允许空白差异）。
+- **所有节点运行统一版本**：节点间协议不做版本协商与向后兼容，中心与节点需同步升级。
 
-## Babel rxcost 设计
+## 运行环境
 
-- `babel.conf` 的 `rxcost` 按 **iBGP peer 粒度**配置并存储在 SQLite（`ibgp_peers.babel_rxcost`）。
-- 创建 iBGP peer 时必须提供 `rxcost`（命令行参数或交互提示）——仅在有 WG 隧道时需要。
-- 修改 iBGP peer 的 `rxcost` 后应重生成 `babel.conf`（幂等）。
-- `scan` 会从现有 `babel.conf` 中尽力解析各接口的 `rxcost` 并导入 SQLite；解析失败会给出 warning 并回退到默认值（保持原来行为）。
+- Python 3.11+（使用标准库 `tomllib` 读取 TOML），依赖管理使用 `uv`。
+- `bgp peer` / `ibgp peer` / `scan` 会调用系统 `wg` 命令，需要安装 wireguard-tools。
 
-## iBGP 互联设计
-
-- iBGP peer 使用**网内 IP**（`peer_ip`）作为 Bird neighbor 地址，而非 link-local 地址（LLA）。这是因为 iBGP 内网有 babel 路由协议，无需依赖 LLA 互联。
-- iBGP peer 支持**无 WireGuard 模式**（`--no-wg`）：仅生成 Bird peer conf，不创建 WG 隧道、不修改 babel.conf。适用于对端已通过其他方式（如物理网络、已有隧道）可达的场景。
-- iBGP peer 的 `endpoint` 为可选：对端可能在防火墙后，无需填写。
-- iBGP WireGuard 隧道的 `AllowedIPs` 默认为 `fe80::/64, fd00::/8, ff02::/16`：iBGP 对端均为可信任的自有机器，默认放行 link-local、DN42 和组播流量。BGP（eBGP）peer 默认使用 `fe80::/64, fd00::/8`。两者均可通过 `--allowed-ips` 自定义覆盖。
-
-## dn42-dummy 接口
-
-- `init` 和 `genconf` 均会尝试创建 `dn42-dummy` 接口并绑定 `OWNIPv6/128` 地址（幂等操作）。
-- 若接口已存在且地址已绑定，则跳过。
-- 网络管理后端通过 `config.toml` 的 `dummy_backend` 字段配置（`networkd` 或 `nm`），`init --dummy-backend` 指定。
-  - `networkd`：写入 `/etc/systemd/network/dn42-dummy.netdev` + `.network`，然后 `networkctl reload`。
-  - `nm`：`nmcli connection add type dummy ifname dn42-dummy ipv6.method manual ipv6.addresses <OWNIPv6>/128`。
-- 创建失败不应阻断 init/genconf 流程，仅输出警告。
-
-## Babel interface type 设计
-
-- `babel.conf` 的 `type` 按 **iBGP peer 粒度**配置并存储在 SQLite（`ibgp_peers.babel_type`）。
-- 取值范围：`wired`、`wireless`、`tunnel`。默认值为 `tunnel`。
-- 创建 iBGP peer 时可通过 `--type` 指定（默认 `tunnel`）。
-- 修改 iBGP peer 时可通过 `--type` 修改。
-- `scan` 会从现有 `babel.conf` 中尽力解析各接口的 `type` 并导入 SQLite；解析失败回退到默认值 `tunnel`。
+> 安装与上手步骤见 [`../README.md`](../README.md)；
+> 默认路径与提权要求见 [`architecture/paths.md`](architecture/paths.md)。
 
 ## 详细规范索引
 
 ### 架构
 
-- 数据库：`docs/architecture/database.md`
-- 网络后端：`docs/architecture/network_backends.md`
-- REST API：`docs/architecture/rest_api.md`
-- 多节点中心化同步：`docs/architecture/sync_hub_spoke.md`
-- 节点同步 WebSocket 协议：`docs/architecture/sync_ws_protocol.md`
-- 部署（systemd + nginx）：`docs/architecture/deployment.md`
-- 输入校验：`docs/architecture/validation.md`
-- 测试基础设施：`docs/architecture/testing.md`
-- Web UI（admin + peer — React + Vite）：`docs/architecture/web_ui.md`
-- Auto-peer 公共 API：`docs/architecture/auto_peer.md`
-
-## 已废弃/删除的功能
-
-以下功能已在 2026-05-31 的清理中移除：
-
-- **旧版 API 路由** (`/api/bgp/peers`, `/api/ibgp/peers`, `/api/wg/tunnels`, `/api/genconf`)：已被 `/api/admin/bgp/peers`、`/api/admin/ibgp/peers`、`/api/admin/wg/tunnels`、`/api/admin/genconf` 端点取代。
-- **旧版 NetworkManager inline peers 格式**：scan 命令不再解析 `peers=` inline 格式，仅支持 `[wireguard-peer.<PUBLIC_KEY>]` section 格式。
-- **增量数据库迁移 (v1-v7)**：合并为单个建表语句（single consolidated migration）。
-- **payload 字段兼容默认值**：节点间 API 的 `has_wg`、`babel_rxcost`、`babel_type` 字段不再提供缺失时的默认值，所有节点需运行统一版本。缺失时返回 400/422 错误。
-- **create_peer.py** (独立脚本)：功能已被 `dn42ctl bgp peer add` 完全替代。
-- **peer 级 NetworkManager 后端**：`bgp peer` / `ibgp peer` 的 `--net nm` 选项与 `.nmconnection` 输出已移除，peer WireGuard 配置统一使用 `systemd-networkd`。`dummy_backend` 的 NM 支持不受影响。
-- **节点侧轮询同步 (`dn42ctl-node-once.timer`)**：每 10 分钟跑一次 `dn42ctl node once` 的 systemd timer 已删除，改为常驻 `dn42ctl node agent` + WebSocket 长连接（`dn42ctl-node-agent.service`）。CLI 命令 `dn42ctl node once` / `pull` / `push` / `report` / `status` **保留**，用于人工排障；对应的 HTTP 路由也保留。详见 `docs/architecture/sync_ws_protocol.md`。
+| 文档 | 内容 |
+| --- | --- |
+| [`architecture/paths.md`](architecture/paths.md) | 默认路径与提权 |
+| [`architecture/database.md`](architecture/database.md) | 数据库 |
+| [`architecture/network_backends.md`](architecture/network_backends.md) | 网络后端（networkd / NetworkManager） |
+| [`architecture/babel.md`](architecture/babel.md) | Babel 配置生成（rxcost / interface type） |
+| [`architecture/rest_api.md`](architecture/rest_api.md) | REST API 路由表 |
+| [`architecture/sync_hub_spoke.md`](architecture/sync_hub_spoke.md) | 多节点中心化同步 |
+| [`architecture/sync_ws_protocol.md`](architecture/sync_ws_protocol.md) | 节点同步 WebSocket 协议 |
+| [`architecture/deployment.md`](architecture/deployment.md) | 部署（systemd + nginx） |
+| [`architecture/validation.md`](architecture/validation.md) | 输入校验 |
+| [`architecture/testing.md`](architecture/testing.md) | 测试基础设施 |
+| [`architecture/web_ui.md`](architecture/web_ui.md) | Web UI（admin + peer — React + Vite） |
+| [`architecture/auto_peer.md`](architecture/auto_peer.md) | Auto-peer 公共 API |
 
 ### 命令
 
-- init：`docs/commands/init.md`
-- genconf：`docs/commands/genconf.md`
-- bgp peer (add/modify/del)：`docs/commands/bgp_peer.md`
-- ibgp peer (add/modify/del)：`docs/commands/ibgp_peer.md`
-- show：`docs/commands/show.md`
-- scan：`docs/commands/scan.md`
-- node (admin + 节点同步)：`docs/commands/node.md`
-- system (系统组件安装/卸载)：`docs/commands/system.md`
-- deploy (web / daemon 部署)：`docs/commands/web.md`
+| 文档 | 命令 |
+| --- | --- |
+| [`commands/init.md`](commands/init.md) | `init`（含 dn42-dummy 接口） |
+| [`commands/genconf.md`](commands/genconf.md) | `genconf` |
+| [`commands/bgp_peer.md`](commands/bgp_peer.md) | `bgp peer [add\|modify\|del]` |
+| [`commands/ibgp_peer.md`](commands/ibgp_peer.md) | `ibgp peer [add\|modify\|del]` |
+| [`commands/show.md`](commands/show.md) | `show` |
+| [`commands/scan.md`](commands/scan.md) | `scan` |
+| [`commands/node.md`](commands/node.md) | `node`（admin + 节点同步） |
+| [`commands/system.md`](commands/system.md) | `system`（系统组件安装/卸载） |
+| [`commands/web.md`](commands/web.md) | `deploy`（web / daemon 部署） |
+
+### 其他
+
+[`deprecated.md`](deprecated.md) 记录已废弃、已删除的功能及其替代品。
+
+[`reviews/`](reviews/) 存放历史代码审计报告。每份报告均为特定时间点的快照，其中的判断应以报告
+所对应的 commit 为准，当前代码状态需另行核实。
