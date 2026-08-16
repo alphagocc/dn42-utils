@@ -1,6 +1,47 @@
 from __future__ import annotations
 
-MIGRATIONS: list[tuple[int, str]] = [
+import sqlite3
+from collections.abc import Callable
+
+# 迁移步骤要么是一段 SQL(走 executescript,必须幂等),要么是一个可调用对象。
+#
+# ALTER TABLE ADD COLUMN **只能**走可调用分支:SQLite 没有 ADD COLUMN IF NOT EXISTS,
+# 而 executescript 会在执行前隐式 COMMIT —— 脚本中途失败会留下"前几列已提交、版本号
+# 没写、rollback() 对它们无效"的状态,重跑直接 duplicate column,库永久卡死。
+# 可调用分支跑在连接的隐式事务里,与 schema_migrations 插入真正原子。
+MigrationStep = str | Callable[[sqlite3.Connection], None]
+
+
+def ensure_column(conn: sqlite3.Connection, table: str, column: str, decl: str) -> None:
+    """幂等的 ADD COLUMN。表名/列名全部是本模块的字面量,不来自任何外部输入。"""
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}  # noqa: S608
+    if column in existing:
+        return
+    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")  # noqa: S608
+
+
+def _migration_10(conn: sqlite3.Connection) -> None:
+    """节点地址集中管理 + iBGP mesh 反向链接。
+
+    四列全部可空且**不给 DEFAULT**。NULL 的语义是"该字段未纳入中心管理":desired state
+    不下发它,节点 config.toml 里的现有值原样保留。这是升级瞬间不砸掉一台正在正常工作的
+    节点的唯一安全默认值。
+
+    endpoint_host 只存主机、不含端口 —— 端口是对端每条隧道的 listen_port,存不进节点级字段。
+
+    remote_node_id 刻意不加 FOREIGN KEY:删除节点 A 不能级联删掉节点 B 指向 A 的 peer 行
+    (那是 B 的配置,不是 A 的)。悬空引用无害,传播时查不到地址就跳过并告警。
+
+    语义与传播规则详见 docs/architecture/node_addressing.md。
+    """
+    ensure_column(conn, "managed_nodes", "endpoint_host", "TEXT")
+    ensure_column(conn, "managed_nodes", "own_ipv6", "TEXT")
+    ensure_column(conn, "managed_nodes", "router_id", "TEXT")
+    ensure_column(conn, "ibgp_peers", "remote_node_id", "TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ibgp_peers_remote ON ibgp_peers(remote_node_id)")
+
+
+MIGRATIONS: list[tuple[int, MigrationStep]] = [
     (
         1,
         """
@@ -148,4 +189,5 @@ MIGRATIONS: list[tuple[int, str]] = [
         CREATE INDEX IF NOT EXISTS idx_sync_events_node ON sync_events(node_id, id);
         """.strip(),
     ),
+    (10, _migration_10),
 ]

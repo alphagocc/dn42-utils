@@ -25,17 +25,36 @@ class TestMigrations:
         # v9 change-notification queue
         assert "sync_events" in tables
 
+    def test_v10_address_columns_exist(self, mem_db: Database) -> None:
+        conn = mem_db._conn
+        node_cols = {row[1] for row in conn.execute("PRAGMA table_info(managed_nodes)")}
+        assert {"endpoint_host", "own_ipv6", "router_id"} <= node_cols
+        ibgp_cols = {row[1] for row in conn.execute("PRAGMA table_info(ibgp_peers)")}
+        assert "remote_node_id" in ibgp_cols
+
     def test_all_versions_applied(self, mem_db: Database) -> None:
         rows = mem_db._conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
         versions = [row[0] for row in rows]
-        assert versions == [1, 8, 9]
+        assert versions == [1, 8, 9, 10]
 
     def test_migrate_idempotent(self, mem_db: Database) -> None:
         mem_db.migrate()
         mem_db.migrate()
         rows = mem_db._conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
-        assert len(rows) == 3
-        assert [r[0] for r in rows] == [1, 8, 9]
+        assert len(rows) == 4
+        assert [r[0] for r in rows] == [1, 8, 9, 10]
+
+    def test_migrate_reruns_on_partially_applied_db(self, mem_db: Database) -> None:
+        """v10 的列已存在但版本号缺失时,重跑不能因 duplicate column 而炸。
+
+        这正是 ALTER TABLE 必须走 callable 分支的理由:executescript 会隐式提交,一旦
+        脚本中途失败就会留下"列已加、版本号没写"的状态,裸 ALTER 重跑会把库永久卡死。
+        """
+        mem_db._conn.execute("DELETE FROM schema_migrations WHERE version=10")
+        mem_db._conn.commit()
+        mem_db.migrate()  # 不应抛异常
+        versions = [r[0] for r in mem_db._conn.execute("SELECT version FROM schema_migrations ORDER BY version")]
+        assert versions == [1, 8, 9, 10]
 
     def test_v2_converts_nm_to_networkd(self) -> None:
         """Migration v8 must convert existing net_backend='nm' rows to 'networkd'.
@@ -253,6 +272,77 @@ class TestIbgpPeerCrud:
         assert row["babel_rxcost"] == 256
         assert row["babel_type"] == "wired"
         assert row["peer_ip"] == "fd42:4242:9999::1"
+
+    def test_remote_node_id_round_trips(self, mem_db_with_node: Database) -> None:
+        mem_db_with_node.insert_ibgp_peer(_make_ibgp_record(remote_node_id="node-a"))
+        row = mem_db_with_node.get_ibgp_peer("test-node", "mynode")
+        assert row is not None
+        assert row["remote_node_id"] == "node-a"
+
+    def test_remote_node_id_defaults_to_null(self, mem_db_with_node: Database) -> None:
+        mem_db_with_node.insert_ibgp_peer(_make_ibgp_record())
+        row = mem_db_with_node.get_ibgp_peer("test-node", "mynode")
+        assert row is not None
+        assert row["remote_node_id"] is None
+
+    def test_update_leaves_remote_node_id_alone_by_default(self, mem_db_with_node: Database) -> None:
+        """不传 remote_node_id 时整列不进 SET —— proposal 接受/上报导入不知道这个关联,
+        不能让它们静默把链接抹掉。"""
+        mem_db_with_node.insert_ibgp_peer(_make_ibgp_record(remote_node_id="node-a"))
+        mem_db_with_node.update_ibgp_peer(
+            node_id="test-node",
+            name="mynode",
+            peer_public_key="newpubkey",
+            endpoint="new.example.com:51821",
+            peer_lla="fe80::99",
+            listen_port=60001,
+            allowed_ips=["::/0"],
+            net_backend="networkd",
+            babel_rxcost=256,
+            peer_ip="fd42:4242:9999::1",
+            babel_type="wired",
+        )
+        row = mem_db_with_node.get_ibgp_peer("test-node", "mynode")
+        assert row is not None
+        assert row["remote_node_id"] == "node-a"
+
+    def test_update_can_set_and_clear_remote_node_id(self, mem_db_with_node: Database) -> None:
+        mem_db_with_node.insert_ibgp_peer(_make_ibgp_record())
+        common = {
+            "node_id": "test-node",
+            "name": "mynode",
+            "peer_public_key": "pk",
+            "endpoint": "e.example.com:51821",
+            "peer_lla": "fe80::99",
+            "listen_port": 60001,
+            "allowed_ips": ["::/0"],
+            "net_backend": "networkd",
+            "babel_rxcost": 120,
+            "peer_ip": "fd42:4242:9999::1",
+            "babel_type": "tunnel",
+        }
+        mem_db_with_node.update_ibgp_peer(**common, remote_node_id="node-b")  # type: ignore[arg-type]
+        row = mem_db_with_node.get_ibgp_peer("test-node", "mynode")
+        assert row is not None and row["remote_node_id"] == "node-b"
+
+        mem_db_with_node.update_ibgp_peer(**common, remote_node_id=None)  # type: ignore[arg-type]
+        row = mem_db_with_node.get_ibgp_peer("test-node", "mynode")
+        assert row is not None and row["remote_node_id"] is None
+
+    def test_list_by_remote_spans_node_partitions(self, mem_db_with_node: Database) -> None:
+        """传播要改写的是**其他节点**的行,所以查询必须跨 node_id 分区。"""
+        mem_db_with_node.ensure_node("node-b")
+        mem_db_with_node.insert_ibgp_peer(_make_ibgp_record(name="from-self", remote_node_id="node-a"))
+        mem_db_with_node.insert_ibgp_peer(
+            _make_ibgp_record(node_id="node-b", name="from-b", ifname="wg_fromb", remote_node_id="node-a")
+        )
+        mem_db_with_node.insert_ibgp_peer(_make_ibgp_record(name="unlinked", ifname="wg_unlinked"))
+
+        rows = mem_db_with_node.list_ibgp_peers_by_remote("node-a")
+        assert [(r["node_id"], r["name"]) for r in rows] == [
+            ("node-b", "from-b"),
+            ("test-node", "from-self"),
+        ]
 
     def test_update_nonexistent_raises(self, mem_db_with_node: Database) -> None:
         with pytest.raises(DatabaseError, match="not found"):

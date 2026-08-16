@@ -21,3 +21,22 @@ SYNC_EVENTS_TRIM_EVERY = 256
 
 # SQLite busy timeout(毫秒)。hub 上 server 进程与 CLI 进程会并发访问同一个库文件。
 SQLITE_BUSY_TIMEOUT_MS = 5000
+
+
+class _Unset:
+    """区分"字段没出现在 PATCH body 里"(保持不变)与"显式传了 null"(清除/取消管理)。
+
+    `None` 在这两处都是合法值,所以不能用它当哨兵。放在 constants 里是为了让 db 层与
+    service 层共用同一个单例而不引入循环依赖。
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "UNSET"
+
+    def __bool__(self) -> bool:
+        return False
+
+
+UNSET = _Unset()

@@ -13,6 +13,8 @@ from dn42ctl.constants import (
     SYNC_EVENT_DESIRED,
     SYNC_EVENTS_KEEP,
     SYNC_EVENTS_TRIM_EVERY,
+    UNSET,
+    _Unset,
 )
 from dn42ctl.fs import chmod_best_effort
 from dn42ctl.migrations import MIGRATIONS
@@ -76,6 +78,9 @@ class IbgpPeerRecord(_PeerRecordBase):
     peer_ip: str | None = None
     has_wg: bool = True
     babel_type: str = "tunnel"
+    # 这条 peer 记录所代表的受管节点。用于把节点地址变更传播到 mesh;
+    # None 表示未关联,传播看不见这行。见 docs/architecture/node_addressing.md。
+    remote_node_id: str | None = None
 
 
 class Database:
@@ -116,11 +121,14 @@ class Database:
             for row in self._conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
         }
 
-        for version, sql in MIGRATIONS:
+        for version, step in MIGRATIONS:
             if version in applied:
                 continue
             try:
-                self._conn.executescript(sql)
+                if callable(step):
+                    step(self._conn)
+                else:
+                    self._conn.executescript(step)
                 self._conn.execute("INSERT INTO schema_migrations(version) VALUES (?)", (version,))
                 self._conn.commit()
             except sqlite3.Error as exc:
@@ -261,6 +269,21 @@ class Database:
         except sqlite3.Error as exc:
             raise DatabaseError("Failed to list iBGP peers") from exc
 
+    def list_ibgp_peers_by_remote(self, remote_node_id: str) -> list[sqlite3.Row]:
+        """所有指向该受管节点的 iBGP peer 行,**跨全部 node_id 分区**。
+
+        这些行属于其他节点(它们是"从 B 看向 A"的记录),节点地址传播要改写的正是它们。
+        """
+        try:
+            return list(
+                self._conn.execute(
+                    "SELECT * FROM ibgp_peers WHERE remote_node_id=? ORDER BY node_id, name",
+                    (remote_node_id,),
+                ).fetchall()
+            )
+        except sqlite3.Error as exc:
+            raise DatabaseError("Failed to list iBGP peers by remote node") from exc
+
     def get_ibgp_peer(self, node_id: str, name: str) -> sqlite3.Row | None:
         try:
             return self._conn.execute(
@@ -326,9 +349,9 @@ class Database:
                     local_lla, peer_lla, listen_port,
                     allowed_ips_json, net_backend,
                     babel_rxcost, peer_ip, has_wg,
-                    babel_type,
+                    babel_type, remote_node_id,
                     created_at, updated_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """.strip(),
                 (
                     record.node_id,
@@ -347,6 +370,7 @@ class Database:
                     record.peer_ip,
                     1 if record.has_wg else 0,
                     record.babel_type,
+                    record.remote_node_id,
                     now,
                     now,
                 ),
@@ -374,17 +398,25 @@ class Database:
         babel_rxcost: int,
         peer_ip: str | None,
         babel_type: str,
+        remote_node_id: str | None | _Unset = UNSET,
     ) -> None:
         now = _now_iso()
+        # remote_node_id 默认 UNSET,整列不进 SET 子句。调用方(proposal 接受、
+        # 上报导入)并不知道这个关联的存在,不能让它们静默把链接抹掉。
+        extra_set = ""
+        extra_params: tuple[object, ...] = ()
+        if not isinstance(remote_node_id, _Unset):
+            extra_set = " remote_node_id=?,"
+            extra_params = (remote_node_id,)
         try:
             cur = self._conn.execute(
-                """
+                f"""
                 UPDATE ibgp_peers
                 SET peer_public_key=?, endpoint=?, peer_lla=?,
                     listen_port=?, allowed_ips_json=?, net_backend=?,
-                    babel_rxcost=?, peer_ip=?, babel_type=?, updated_at=?
+                    babel_rxcost=?, peer_ip=?, babel_type=?,{extra_set} updated_at=?
                 WHERE node_id=? AND name=?
-                """.strip(),
+                """.strip(),  # noqa: S608 — extra_set 是本方法的字面量,不含外部输入
                 (
                     peer_public_key,
                     endpoint,
@@ -395,6 +427,7 @@ class Database:
                     babel_rxcost,
                     peer_ip,
                     babel_type,
+                    *extra_params,
                     now,
                     node_id,
                     name,

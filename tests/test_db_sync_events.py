@@ -6,7 +6,7 @@ import pytest
 
 from dn42ctl.constants import SYNC_EVENT_ACCESS_REVOKED, SYNC_EVENT_DESIRED, SYNC_EVENTS_KEEP
 from dn42ctl.db import BgpPeerRecord, Database, DatabaseError, IbgpPeerRecord, emit_sync_event
-from dn42ctl.db_managed import ManagedNodeStore, RevisionStore, SyncEventStore
+from dn42ctl.db_managed import ManagedNodeStore, PropagatedChange, RevisionStore, SyncEventStore
 
 NODE_A = "11111111-1111-4111-8111-111111111111"
 NODE_B = "22222222-2222-4222-8222-222222222222"
@@ -189,6 +189,123 @@ class TestManagedNodeMutationsEmit:
         ManagedNodeStore(mem_db.connection).add(NODE_A, "alpha")
         with pytest.raises(DatabaseError):
             RevisionStore(mem_db.connection).pin(NODE_A, "no-such-revision")
+        assert _events(mem_db) == []
+
+    def test_disable_revokes_access(self, mem_db: Database) -> None:
+        """禁用节点必须撤销它**已经建立**的连接。
+
+        authenticate 过滤 enabled=1,但 WS 握手只验一次 argon2、之后整条连接吃缓存
+        principal —— 不发事件的话被禁用的节点会无限期保持授权。
+        """
+        store = ManagedNodeStore(mem_db.connection)
+        store.add(NODE_A, "alpha")
+        store.set_enabled(NODE_A, enabled=False)
+        assert _events(mem_db) == [(NODE_A, SYNC_EVENT_ACCESS_REVOKED)]
+
+    def test_enable_emits_nothing(self, mem_db: Database) -> None:
+        store = ManagedNodeStore(mem_db.connection)
+        store.add(NODE_A, "alpha")
+        store.set_enabled(NODE_A, enabled=True)
+        assert _events(mem_db) == []
+
+    def test_set_name_emits_nothing(self, mem_db: Database) -> None:
+        store = ManagedNodeStore(mem_db.connection)
+        store.add(NODE_A, "alpha")
+        store.set_name(NODE_A, "renamed")
+        assert _events(mem_db) == []
+
+
+class TestNodeAddressEvents:
+    """own_ipv6 / router_id 进 desired state,改了就得推;endpoint_host 不下发。"""
+
+    def test_own_ipv6_emits_desired(self, mem_db: Database) -> None:
+        store = ManagedNodeStore(mem_db.connection)
+        store.add(NODE_A, "alpha")
+        store.set_addresses(NODE_A, own_ipv6="fd42:4242:1::1")
+        assert _events(mem_db) == [(NODE_A, SYNC_EVENT_DESIRED)]
+
+    def test_router_id_emits_desired(self, mem_db: Database) -> None:
+        store = ManagedNodeStore(mem_db.connection)
+        store.add(NODE_A, "alpha")
+        store.set_addresses(NODE_A, router_id="172.20.1.1")
+        assert _events(mem_db) == [(NODE_A, SYNC_EVENT_DESIRED)]
+
+    def test_endpoint_host_alone_emits_nothing(self, mem_db: Database) -> None:
+        store = ManagedNodeStore(mem_db.connection)
+        store.add(NODE_A, "alpha")
+        store.set_addresses(NODE_A, endpoint_host="a.example.com")
+        assert _events(mem_db) == []
+
+    def test_propagation_emits_one_event_per_affected_node(self, mem_db: Database) -> None:
+        store = ManagedNodeStore(mem_db.connection)
+        store.add(NODE_A, "alpha")
+        store.add(NODE_B, "beta")
+        mem_db.ensure_node("test-node")
+        mem_db.insert_ibgp_peer(_ibgp(node_id=NODE_B, name="to-a"))
+        mem_db.insert_ibgp_peer(_ibgp(node_id="test-node", name="to-a"))
+        mem_db.connection.execute("DELETE FROM sync_events")
+        mem_db.connection.commit()
+
+        node = store.apply_address_update(
+            NODE_A,
+            own_ipv6="fd42:4242:1::9",
+            changes=[
+                PropagatedChange(NODE_B, "to-a", "peer_ip", None, "fd42:4242:1::9"),
+                PropagatedChange("test-node", "to-a", "peer_ip", None, "fd42:4242:1::9"),
+            ],
+        )
+        assert node.own_ipv6 == "fd42:4242:1::9"
+        # A 自己(地址块变了)+ 每个被传播到的节点各一条
+        assert _events(mem_db) == [
+            (NODE_A, SYNC_EVENT_DESIRED),
+            (NODE_B, SYNC_EVENT_DESIRED),
+            ("test-node", SYNC_EVENT_DESIRED),
+        ]
+        assert mem_db.get_ibgp_peer(NODE_B, "to-a")["peer_ip"] == "fd42:4242:1::9"
+        assert mem_db.get_ibgp_peer("test-node", "to-a")["peer_ip"] == "fd42:4242:1::9"
+
+    def test_propagation_dedups_self(self, mem_db: Database) -> None:
+        """被编辑的节点自己也有一条指向自己的行时,不能发两条 desired。"""
+        store = ManagedNodeStore(mem_db.connection)
+        store.add(NODE_A, "alpha")
+        mem_db.insert_ibgp_peer(_ibgp(node_id=NODE_A, name="loop"))
+        mem_db.connection.execute("DELETE FROM sync_events")
+        mem_db.connection.commit()
+
+        store.apply_address_update(
+            NODE_A,
+            own_ipv6="fd42:4242:1::9",
+            changes=[PropagatedChange(NODE_A, "loop", "peer_ip", None, "fd42:4242:1::9")],
+        )
+        assert _events(mem_db) == [(NODE_A, SYNC_EVENT_DESIRED)]
+
+    def test_endpoint_host_only_still_emits_for_propagated_nodes(self, mem_db: Database) -> None:
+        """endpoint_host 自己不下发,但被它改写的那些行属于别的节点,那些节点要收推送。"""
+        store = ManagedNodeStore(mem_db.connection)
+        store.add(NODE_A, "alpha")
+        store.add(NODE_B, "beta")
+        mem_db.insert_ibgp_peer(_ibgp(node_id=NODE_B, name="to-a"))
+        mem_db.connection.execute("DELETE FROM sync_events")
+        mem_db.connection.commit()
+
+        store.apply_address_update(
+            NODE_A,
+            endpoint_host="new.example.com",
+            changes=[PropagatedChange(NODE_B, "to-a", "endpoint", "old:51821", "new.example.com:51821")],
+        )
+        assert _events(mem_db) == [(NODE_B, SYNC_EVENT_DESIRED)]
+        assert mem_db.get_ibgp_peer(NODE_B, "to-a")["endpoint"] == "new.example.com:51821"
+
+    def test_disable_via_apply_address_update_revokes(self, mem_db: Database) -> None:
+        store = ManagedNodeStore(mem_db.connection)
+        store.add(NODE_A, "alpha")
+        store.apply_address_update(NODE_A, enabled=False)
+        assert _events(mem_db) == [(NODE_A, SYNC_EVENT_ACCESS_REVOKED)]
+
+    def test_failed_update_emits_nothing(self, mem_db: Database) -> None:
+        store = ManagedNodeStore(mem_db.connection)
+        with pytest.raises(DatabaseError, match="节点不存在"):
+            store.apply_address_update(NODE_A, own_ipv6="fd42:4242:1::9")
         assert _events(mem_db) == []
 
 

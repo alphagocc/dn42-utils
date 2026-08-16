@@ -2,18 +2,56 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 
-from dn42ctl.constants import SYNC_EVENT_ACCESS_REVOKED, SYNC_EVENT_DESIRED
+from dn42ctl.constants import SYNC_EVENT_ACCESS_REVOKED, SYNC_EVENT_DESIRED, UNSET, _Unset
 from dn42ctl.db import DatabaseError, emit_sync_event
 
 
 def _now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
+
+
+@dataclass(frozen=True)
+class PropagatedChange:
+    """一条因节点地址变更而被改写的 iBGP peer 行。
+
+    `node_id` 是**被改写行所属的节点**(从 B 看向 A 的那条记录里的 B),不是被编辑地址
+    的那个节点。传播的计算在 services/node_address.py,这里只描述结果。
+    """
+
+    node_id: str
+    name: str
+    field: str  # "peer_ip" | "endpoint"
+    old: str | None
+    new: str
+
+
+# 允许 _update_fields 写的列。列名拼进 SQL,必须是白名单,不能来自外部输入。
+_UPDATABLE_NODE_COLUMNS = frozenset({"name", "enabled", "endpoint_host", "own_ipv6", "router_id"})
+_PROPAGATABLE_PEER_COLUMNS = frozenset({"peer_ip", "endpoint"})
+
+
+def _address_fields(
+    *,
+    endpoint_host: str | None | _Unset,
+    own_ipv6: str | None | _Unset,
+    router_id: str | None | _Unset,
+) -> dict[str, object]:
+    """把 UNSET 过滤掉,只留下真正要写的列。"""
+    fields: dict[str, object] = {}
+    if not isinstance(endpoint_host, _Unset):
+        fields["endpoint_host"] = endpoint_host
+    if not isinstance(own_ipv6, _Unset):
+        fields["own_ipv6"] = own_ipv6
+    if not isinstance(router_id, _Unset):
+        fields["router_id"] = router_id
+    return fields
 
 
 DEFAULT_WRITE_POLICY: dict[str, str] = {
@@ -60,6 +98,11 @@ class ManagedNode:
     last_seen_at: str | None
     created_at: str
     updated_at: str
+    # 节点地址(v10)。None 表示"该字段不由中心管理":不下发,节点本地值原样保留。
+    # 见 docs/architecture/node_addressing.md。
+    endpoint_host: str | None = None
+    own_ipv6: str | None = None
+    router_id: str | None = None
 
 
 def _row_to_managed_node(row: sqlite3.Row) -> ManagedNode:
@@ -73,6 +116,9 @@ def _row_to_managed_node(row: sqlite3.Row) -> ManagedNode:
         last_seen_at=row["last_seen_at"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        endpoint_host=row["endpoint_host"],
+        own_ipv6=row["own_ipv6"],
+        router_id=row["router_id"],
     )
 
 
@@ -321,6 +367,121 @@ class ManagedNodeStore:
         except sqlite3.Error as exc:
             self._conn.rollback()
             raise DatabaseError("更新 last_seen_at 失败") from exc
+
+    # ---- 名称 / 启用状态 / 地址 ----
+
+    def set_name(self, node_id: str, name: str) -> ManagedNode:
+        return self._update_fields(node_id, {"name": name}, events=())
+
+    def set_enabled(self, node_id: str, enabled: bool) -> ManagedNode:
+        """启用/禁用节点。
+
+        **禁用必须发 access_revoked。** `authenticate` 虽然过滤 enabled=1,但 WS 握手
+        只验一次 argon2、之后整条连接吃缓存 principal —— 不发事件的话,禁用一个节点不会
+        影响它**已经建立**的连接,该连接将无限期保持授权。
+        """
+        events: tuple[tuple[str, str], ...] = ()
+        if not enabled:
+            events = ((node_id, SYNC_EVENT_ACCESS_REVOKED),)
+        return self._update_fields(node_id, {"enabled": 1 if enabled else 0}, events=events)
+
+    def set_addresses(
+        self,
+        node_id: str,
+        *,
+        endpoint_host: str | None | _Unset = UNSET,
+        own_ipv6: str | None | _Unset = UNSET,
+        router_id: str | None | _Unset = UNSET,
+    ) -> ManagedNode:
+        """局部更新地址列。UNSET = 不改动;None = 清除(交还节点本地管理)。"""
+        fields = _address_fields(endpoint_host=endpoint_host, own_ipv6=own_ipv6, router_id=router_id)
+        if not fields:
+            node = self.get(node_id)
+            if node is None:
+                raise DatabaseError(f"节点不存在: {node_id}")
+            return node
+        # own_ipv6 / router_id 进 desired state,改了就得推给该节点。endpoint_host 不下发,
+        # 但它会经由传播改到别的节点行上 —— 那些事件由 apply_address_update 负责。
+        events: tuple[tuple[str, str], ...] = ()
+        if "own_ipv6" in fields or "router_id" in fields:
+            events = ((node_id, SYNC_EVENT_DESIRED),)
+        return self._update_fields(node_id, fields, events=events)
+
+    def apply_address_update(
+        self,
+        node_id: str,
+        *,
+        name: str | _Unset = UNSET,
+        enabled: bool | _Unset = UNSET,
+        endpoint_host: str | None | _Unset = UNSET,
+        own_ipv6: str | None | _Unset = UNSET,
+        router_id: str | None | _Unset = UNSET,
+        changes: Sequence[PropagatedChange] = (),
+    ) -> ManagedNode:
+        """在**一个事务**里写完 managed_nodes 的字段与所有被传播的 ibgp_peers 行。
+
+        事件:被改地址的节点发 desired(它的 config.toml / bird.conf 要重渲),每个被传播到
+        的节点各发一条 desired(它的 peer 行变了),去重。禁用则额外发 access_revoked。
+
+        传播规则见 docs/architecture/node_addressing.md。
+        """
+        fields = _address_fields(endpoint_host=endpoint_host, own_ipv6=own_ipv6, router_id=router_id)
+        if not isinstance(name, _Unset):
+            fields["name"] = name
+        if not isinstance(enabled, _Unset):
+            fields["enabled"] = 1 if enabled else 0
+
+        events: list[tuple[str, str]] = []
+        if "own_ipv6" in fields or "router_id" in fields:
+            events.append((node_id, SYNC_EVENT_DESIRED))
+        seen = {node_id}
+        for change in changes:
+            if change.node_id not in seen:
+                seen.add(change.node_id)
+                events.append((change.node_id, SYNC_EVENT_DESIRED))
+        if not isinstance(enabled, _Unset) and not enabled:
+            events.append((node_id, SYNC_EVENT_ACCESS_REVOKED))
+
+        return self._update_fields(node_id, fields, events=tuple(events), changes=changes)
+
+    def _update_fields(
+        self,
+        node_id: str,
+        fields: dict[str, object],
+        *,
+        events: tuple[tuple[str, str], ...],
+        changes: Sequence[PropagatedChange] = (),
+    ) -> ManagedNode:
+        now = _now_iso()
+        # 列名全部来自本模块的字面量集合,不含外部输入。
+        unknown = set(fields) - _UPDATABLE_NODE_COLUMNS
+        if unknown:  # pragma: no cover — 防御性,调用方都是本模块内的字面量
+            raise DatabaseError(f"不可更新的列: {sorted(unknown)}")
+        assignments = ", ".join(f"{col}=?" for col in fields)
+        try:
+            cur = self._conn.execute(
+                f"UPDATE managed_nodes SET {assignments}, updated_at=? WHERE node_id=?",  # noqa: S608
+                (*fields.values(), now, node_id),
+            )
+            if cur.rowcount == 0:
+                raise DatabaseError(f"节点不存在: {node_id}")
+            for change in changes:
+                if change.field not in _PROPAGATABLE_PEER_COLUMNS:  # pragma: no cover — 防御性
+                    raise DatabaseError(f"不可传播的列: {change.field}")
+                self._conn.execute(
+                    f"UPDATE ibgp_peers SET {change.field}=?, updated_at=? WHERE node_id=? AND name=?",  # noqa: S608
+                    (change.new, now, change.node_id, change.name),
+                )
+            for target, kind in events:
+                emit_sync_event(self._conn, node_id=target, kind=kind)
+            self._conn.commit()
+        except sqlite3.Error as exc:
+            self._conn.rollback()
+            raise DatabaseError("更新 managed_node 失败") from exc
+        node = self.get(node_id)
+        if node is None:  # pragma: no cover — 上面已检查 rowcount
+            raise DatabaseError("更新后无法读取 managed_node")
+        return node
 
 
 # --- config_proposals ---

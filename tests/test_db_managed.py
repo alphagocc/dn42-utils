@@ -201,6 +201,47 @@ class TestPolicy:
             store.set_write_policy(NODE_A, {})
 
 
+class TestNodeAddresses:
+    def test_defaults_are_null(self, store: ManagedNodeStore) -> None:
+        node = store.add(NODE_A, "alpha")
+        assert node.endpoint_host is None
+        assert node.own_ipv6 is None
+        assert node.router_id is None
+
+    def test_set_addresses_partial(self, store: ManagedNodeStore) -> None:
+        store.add(NODE_A, "alpha")
+        node = store.set_addresses(NODE_A, own_ipv6="fd42:4242:1::1")
+        assert node.own_ipv6 == "fd42:4242:1::1"
+        # 未传的列保持不变
+        assert node.endpoint_host is None
+        assert node.router_id is None
+
+    def test_set_addresses_explicit_none_clears(self, store: ManagedNodeStore) -> None:
+        store.add(NODE_A, "alpha")
+        store.set_addresses(NODE_A, endpoint_host="a.example.com", own_ipv6="fd42:4242:1::1")
+        node = store.set_addresses(NODE_A, endpoint_host=None)
+        assert node.endpoint_host is None
+        assert node.own_ipv6 == "fd42:4242:1::1"
+
+    def test_set_addresses_noop_when_all_unset(self, store: ManagedNodeStore) -> None:
+        store.add(NODE_A, "alpha")
+        node = store.set_addresses(NODE_A)
+        assert node.node_id == NODE_A
+
+    def test_set_addresses_unknown_node_raises(self, store: ManagedNodeStore) -> None:
+        with pytest.raises(DatabaseError, match="节点不存在"):
+            store.set_addresses(NODE_A, own_ipv6="fd42:4242:1::1")
+
+    def test_set_name(self, store: ManagedNodeStore) -> None:
+        store.add(NODE_A, "alpha")
+        assert store.set_name(NODE_A, "renamed").name == "renamed"
+
+    def test_set_enabled(self, store: ManagedNodeStore) -> None:
+        store.add(NODE_A, "alpha")
+        assert store.set_enabled(NODE_A, enabled=False).enabled is False
+        assert store.set_enabled(NODE_A, enabled=True).enabled is True
+
+
 class TestTouchLastSeen:
     def test_updates(self, store: ManagedNodeStore, mem_db: Database) -> None:
         store.add(NODE_A, "alpha")
