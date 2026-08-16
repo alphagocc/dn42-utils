@@ -1,6 +1,8 @@
 import { useCallback, useState } from "react";
 import { ThemeToggle } from "../shared/components/ThemeToggle";
 import { VersionFooter } from "../shared/components/VersionFooter";
+import { NodeSelector } from "../shared/components/NodeSelector";
+import { NodeProvider, useNodeScope } from "./NodeContext";
 import { Overview } from "./tabs/Overview";
 import { Bgp } from "./tabs/Bgp";
 import { Ibgp } from "./tabs/Ibgp";
@@ -9,11 +11,12 @@ import { Nodes } from "./tabs/Nodes";
 import { Proposals } from "./tabs/Proposals";
 import { Reports } from "./tabs/Reports";
 import { Revisions } from "./tabs/Revisions";
+import { Database } from "./tabs/Database";
 import { Genconf } from "./tabs/Genconf";
 
 const TAB_NAMES = [
   "overview", "bgp", "ibgp", "wg", "nodes",
-  "proposals", "reports", "revisions", "genconf",
+  "proposals", "reports", "revisions", "database", "genconf",
 ] as const;
 
 type TabName = (typeof TAB_NAMES)[number];
@@ -27,18 +30,37 @@ const TAB_LABELS: Record<TabName, string> = {
   proposals: "Proposals",
   reports: "Reports",
   revisions: "Revisions",
+  database: "Database",
   genconf: "Genconf",
 };
+
+/** Tabs whose data is per-node. The rest are hub-global views. */
+const NODE_SCOPED_TABS = new Set<TabName>([
+  "overview", "bgp", "ibgp", "wg", "proposals", "reports", "revisions",
+]);
 
 interface Props {
   onLogout: () => void;
 }
 
 export function Dashboard({ onLogout }: Props) {
+  // NodeProvider must wrap the keyed subtree, not live inside it — see NodeContext.
+  return (
+    <NodeProvider>
+      <DashboardInner onLogout={onLogout} />
+    </NodeProvider>
+  );
+}
+
+function DashboardInner({ onLogout }: Props) {
   const [activeTab, setActiveTab] = useState<TabName>("overview");
   const [refreshKey, setRefreshKey] = useState(0);
+  const { nodes, nodeId, setNodeId, reload } = useNodeScope();
 
-  const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
+  const refresh = useCallback(() => {
+    reload();
+    setRefreshKey((k) => k + 1);
+  }, [reload]);
 
   const tabComponents: Record<TabName, React.ReactNode> = {
     overview: <Overview key={refreshKey} />,
@@ -49,6 +71,7 @@ export function Dashboard({ onLogout }: Props) {
     proposals: <Proposals key={refreshKey} />,
     reports: <Reports key={refreshKey} />,
     revisions: <Revisions key={refreshKey} />,
+    database: <Database key={refreshKey} />,
     genconf: <Genconf key={refreshKey} />,
   };
 
@@ -75,6 +98,9 @@ export function Dashboard({ onLogout }: Props) {
             </nav>
           </div>
           <div className="flex items-center gap-2">
+            {NODE_SCOPED_TABS.has(activeTab) && nodes.length > 0 && (
+              <NodeSelector nodes={nodes} value={nodeId} onChange={setNodeId} />
+            )}
             <button
               onClick={refresh}
               className="rounded-md border border-zinc-200 dark:border-zinc-800 px-3 py-1.5 text-xs uppercase tracking-wider hover:bg-zinc-100 dark:hover:bg-zinc-900"

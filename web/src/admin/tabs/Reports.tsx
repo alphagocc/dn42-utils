@@ -2,11 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, API_PATHS } from "../../shared/api";
 import { Table, type Column } from "../../shared/components/Table";
 import { useToast } from "../../shared/components/Toast";
-
-interface Node {
-  node_id: string;
-  name: string;
-}
+import { useNodeScope } from "../NodeContext";
 
 interface Report {
   id: number;
@@ -25,18 +21,10 @@ const columns: Column<Report>[] = [
 ];
 
 export function Reports() {
-  const [nodes, setNodes] = useState<Node[]>([]);
-  const [nodeId, setNodeId] = useState("");
+  const { nodes, nodeId } = useNodeScope();
   const [rows, setRows] = useState<Report[]>([]);
   const [error, setError] = useState("");
   const toast = useToast();
-
-  useEffect(() => {
-    api<Node[]>(API_PATHS.nodes).then((ns) => {
-      setNodes(ns);
-      if (ns.length) setNodeId(ns[0].node_id);
-    }).catch((e) => setError(e.message));
-  }, []);
 
   const loadReports = useCallback(async (nid: string) => {
     if (!nid) return;
@@ -61,17 +49,6 @@ export function Reports() {
 
   return (
     <>
-      <select
-        value={nodeId}
-        onChange={(e) => setNodeId(e.target.value)}
-        className="mb-3 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-black px-2 py-1 text-sm"
-      >
-        {nodes.map((n) => (
-          <option key={n.node_id} value={n.node_id}>
-            {n.name} ({n.node_id.slice(0, 8)})
-          </option>
-        ))}
-      </select>
       <Table
         columns={columns}
         rows={rows}

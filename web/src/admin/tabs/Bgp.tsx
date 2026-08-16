@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, API_PATHS } from "../../shared/api";
+import { api, API_PATHS, withNode } from "../../shared/api";
 import { Table, type Column } from "../../shared/components/Table";
 import { FormModal, type FieldDef } from "../../shared/components/Modal";
 import { ConfirmModal } from "../../shared/components/Modal";
 import { useToast } from "../../shared/components/Toast";
+import { useNodeScope } from "../NodeContext";
 
 interface BgpPeer {
   peer_asn: number;
@@ -13,6 +14,7 @@ interface BgpPeer {
   listen_port: number;
   net_backend: string;
   peer_public_key: string;
+  allowed_ips: string[];
 }
 
 const columns: Column<BgpPeer>[] = [
@@ -21,10 +23,18 @@ const columns: Column<BgpPeer>[] = [
   { label: "Endpoint", get: (r) => r.endpoint || "—" },
   { label: "Peer LLA", get: (r) => r.peer_lla },
   { label: "Port", get: (r) => r.listen_port },
+  { label: "AllowedIPs", get: (r) => (r.allowed_ips || []).join(", ") },
   { label: "Backend", get: (r) => r.net_backend },
 ];
 
+/** Blank stays absent from the body so the server keeps the existing list. */
+function parseAllowedIps(raw: string): string[] | undefined {
+  const items = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  return items.length ? items : undefined;
+}
+
 export function Bgp() {
+  const { nodeId } = useNodeScope();
   const [rows, setRows] = useState<BgpPeer[]>([]);
   const [error, setError] = useState("");
   const [modal, setModal] = useState<"add" | "edit" | "delete" | null>(null);
@@ -33,12 +43,12 @@ export function Bgp() {
 
   const load = useCallback(async () => {
     try {
-      setRows(await api<BgpPeer[]>(`${API_PATHS.bgpPeers}?live=false`));
+      setRows(await api<BgpPeer[]>(withNode(`${API_PATHS.bgpPeers}?live=false`, nodeId)));
       setError("");
     } catch (e) {
       setError((e as Error).message);
     }
-  }, []);
+  }, [nodeId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -49,7 +59,7 @@ export function Bgp() {
     { name: "peer_public_key", label: "WG Public Key", required: true },
     { name: "endpoint", label: "Endpoint (host:port)" },
     { name: "peer_lla", label: "Peer LLA (IPv6)", required: true },
-    { name: "net_backend", label: "Backend", type: "select", options: [{ value: "networkd", label: "networkd", selected: true }, { value: "nm", label: "NetworkManager" }] },
+    { name: "allowed_ips", label: "AllowedIPs (comma separated, blank=default)" },
     { name: "listen_port", label: "Listen port (blank=auto)", type: "number" },
   ];
 
@@ -57,7 +67,7 @@ export function Bgp() {
     { name: "peer_public_key", label: "WG Public Key", value: p.peer_public_key, required: true },
     { name: "endpoint", label: "Endpoint", value: p.endpoint || "" },
     { name: "peer_lla", label: "Peer LLA", value: p.peer_lla, required: true },
-    { name: "net_backend", label: "Backend", type: "select", options: [{ value: "networkd", label: "networkd", selected: p.net_backend === "networkd" }, { value: "nm", label: "NetworkManager", selected: p.net_backend === "nm" }] },
+    { name: "allowed_ips", label: "AllowedIPs (comma separated)", value: (p.allowed_ips || []).join(", ") },
     { name: "listen_port", label: "Listen port", type: "number", value: p.listen_port },
   ];
 
@@ -102,10 +112,11 @@ export function Bgp() {
               peer_public_key: d.peer_public_key,
               endpoint: d.endpoint || "",
               peer_lla: d.peer_lla,
-              net_backend: d.net_backend,
             };
             if (d.listen_port) body.listen_port = Number(d.listen_port);
-            await api(API_PATHS.bgpPeers, { method: "POST", body: JSON.stringify(body) });
+            const allowed = parseAllowedIps(d.allowed_ips || "");
+            if (allowed) body.allowed_ips = allowed;
+            await api(withNode(API_PATHS.bgpPeers, nodeId), { method: "POST", body: JSON.stringify(body) });
             toast("BGP peer created");
             setModal(null);
             load();
@@ -123,10 +134,14 @@ export function Bgp() {
               peer_public_key: d.peer_public_key,
               endpoint: d.endpoint || "",
               peer_lla: d.peer_lla,
-              net_backend: d.net_backend,
             };
             if (d.listen_port) body.listen_port = Number(d.listen_port);
-            await api(`${API_PATHS.bgpPeers}/${selected.peer_asn}`, { method: "PUT", body: JSON.stringify(body) });
+            const allowed = parseAllowedIps(d.allowed_ips || "");
+            if (allowed) body.allowed_ips = allowed;
+            await api(withNode(API_PATHS.bgpPeer(selected.peer_asn), nodeId), {
+              method: "PUT",
+              body: JSON.stringify(body),
+            });
             toast("BGP peer updated");
             setModal(null);
             load();
@@ -139,7 +154,7 @@ export function Bgp() {
           message={`Delete BGP peer AS${selected.peer_asn}?`}
           onClose={() => setModal(null)}
           onConfirm={async () => {
-            await api(`${API_PATHS.bgpPeers}/${selected.peer_asn}`, { method: "DELETE" });
+            await api(withNode(API_PATHS.bgpPeer(selected.peer_asn), nodeId), { method: "DELETE" });
             toast("Deleted");
             setModal(null);
             load();

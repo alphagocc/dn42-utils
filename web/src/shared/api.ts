@@ -6,10 +6,15 @@ const ADMIN = "/api/admin";
 
 export const API_PATHS = {
   bgpPeers: `${ADMIN}/bgp/peers`,
+  bgpPeer: (asn: number) => `${ADMIN}/bgp/peers/${asn}`,
   ibgpPeers: `${ADMIN}/ibgp/peers`,
+  ibgpPeer: (name: string) => `${ADMIN}/ibgp/peers/${encodeURIComponent(name)}`,
   wgTunnels: `${ADMIN}/wg/tunnels`,
   genconf: `${ADMIN}/genconf`,
   nodes: `${ADMIN}/nodes`,
+  node: (nodeId: string) => `${ADMIN}/nodes/${nodeId}`,
+  nodePolicy: (nodeId: string) => `${ADMIN}/nodes/${nodeId}/policy`,
+  nodeStatus: (nodeId: string) => `/api/v1/nodes/${nodeId}/status`,
   proposals: (nodeId: string) => `${ADMIN}/nodes/${nodeId}/proposals`,
   proposalAccept: (id: number) => `${ADMIN}/proposals/${id}/accept`,
   proposalReject: (id: number) => `${ADMIN}/proposals/${id}/reject`,
@@ -19,9 +24,22 @@ export const API_PATHS = {
   rollback: (nodeId: string) => `${ADMIN}/nodes/${nodeId}/rollback`,
   nodeToken: (nodeId: string) => `${ADMIN}/nodes/${nodeId}/token`,
   nodeDelete: (nodeId: string) => `${ADMIN}/nodes/${nodeId}`,
+  dbTables: `${ADMIN}/db/tables`,
+  dbTable: (table: string) => `${ADMIN}/db/tables/${encodeURIComponent(table)}`,
   showAll: "/api/show/all",
   version: "/api/version",
 } as const;
+
+/**
+ * Append `node_id` to a path, preserving any query string it already has
+ * (the peer/show routes are always called with `?live=false`).
+ * An empty nodeId means "let the server resolve the default scope".
+ */
+export function withNode(path: string, nodeId?: string): string {
+  if (!nodeId) return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}node_id=${encodeURIComponent(nodeId)}`;
+}
 
 export function getToken(): string {
   return sessionStorage.getItem("dn42ctl_admin_token") || "";

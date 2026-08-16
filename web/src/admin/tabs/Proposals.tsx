@@ -3,11 +3,7 @@ import { api, API_PATHS } from "../../shared/api";
 import { Table, type Column } from "../../shared/components/Table";
 import { FormModal } from "../../shared/components/Modal";
 import { useToast } from "../../shared/components/Toast";
-
-interface Node {
-  node_id: string;
-  name: string;
-}
+import { useNodeScope } from "../NodeContext";
 
 interface Proposal {
   id: number;
@@ -28,19 +24,11 @@ const columns: Column<Proposal>[] = [
 ];
 
 export function Proposals() {
-  const [nodes, setNodes] = useState<Node[]>([]);
-  const [nodeId, setNodeId] = useState("");
+  const { nodes, nodeId } = useNodeScope();
   const [rows, setRows] = useState<Proposal[]>([]);
   const [error, setError] = useState("");
   const [rejectId, setRejectId] = useState<number | null>(null);
   const toast = useToast();
-
-  useEffect(() => {
-    api<Node[]>(API_PATHS.nodes).then((ns) => {
-      setNodes(ns);
-      if (ns.length) setNodeId(ns[0].node_id);
-    }).catch((e) => setError(e.message));
-  }, []);
 
   const loadProposals = useCallback(async (nid: string) => {
     if (!nid) return;
@@ -65,7 +53,6 @@ export function Proposals() {
 
   return (
     <>
-      <NodeSelector nodes={nodes} value={nodeId} onChange={setNodeId} />
       <Table
         columns={columns}
         rows={rows}
@@ -103,21 +90,5 @@ export function Proposals() {
         />
       )}
     </>
-  );
-}
-
-function NodeSelector({ nodes, value, onChange }: { nodes: Node[]; value: string; onChange: (v: string) => void }) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="mb-3 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-black px-2 py-1 text-sm"
-    >
-      {nodes.map((n) => (
-        <option key={n.node_id} value={n.node_id}>
-          {n.name} ({n.node_id.slice(0, 8)})
-        </option>
-      ))}
-    </select>
   );
 }

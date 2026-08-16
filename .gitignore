@@ -18,6 +18,7 @@ src/dn42ctl/_build_commit.txt
 
 # Node
 node_modules/
+*.tsbuildinfo
 
 # Editors
 .vscode/

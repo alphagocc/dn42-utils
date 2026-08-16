@@ -19,7 +19,6 @@ export function Step4Submit({ asn, challenge, session, onResult }: Props) {
       wg_public_key: fd.wg_public_key,
       endpoint: fd.endpoint || "",
       peer_lla: fd.peer_lla,
-      net_backend: fd.net_backend,
     };
     if (fd.listen_port) body.listen_port = Number(fd.listen_port);
 
@@ -80,18 +79,6 @@ export function Step4Submit({ asn, challenge, session, onResult }: Props) {
             placeholder="e.g. fe80::1234:5678"
             className="block w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-black px-3 py-2 text-sm"
           />
-        </label>
-        <label className="block">
-          <span className="block text-xs uppercase tracking-wider text-zinc-500 mb-1">
-            Network Backend
-          </span>
-          <select
-            name="net_backend"
-            className="block w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-black px-3 py-2 text-sm"
-          >
-            <option value="networkd">systemd-networkd</option>
-            <option value="nm">NetworkManager</option>
-          </select>
         </label>
         <label className="block">
           <span className="block text-xs uppercase tracking-wider text-zinc-500 mb-1">
