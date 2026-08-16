@@ -2,7 +2,8 @@
 
 <task>
 
-- [x] 修改多节点中心化同步过程，使用 websocket 长连接保持同步而不是轮询。
+- [x] web admin 前端展示并支持修改数据库。
+- [x] web admin 前端支持修改 node ip。
 
 </task>
 
