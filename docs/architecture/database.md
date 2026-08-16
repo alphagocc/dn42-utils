@@ -10,8 +10,9 @@
 
 - 使用 `schema_migrations(version)` 记录迁移版本。
 - 启动/初始化时应自动执行迁移，保证旧库可直接升级。
-- 迁移是 `(version, sql)` 列表，逐版本 `executescript` + commit；SQL 必须**幂等**（`IF NOT EXISTS` / 条件 UPDATE）。
-- **版本号不连续是有意的。** v1 是合并后的建表脚本，v2–v7 已在 2026-05-31 的清理中并入 v1；v8 是 `nm` → `networkd` 的数据回填（编号跳到 8 是为了避开生产库里已应用的旧 v2）。**当前最大版本是 v9**（`sync_events` 表），新迁移从 v10 开始。
+- 迁移是 `(version, step)` 列表，逐版本执行 + commit。`step` 可以是 **SQL 字符串**（走 `executescript`，SQL 必须**幂等**：`IF NOT EXISTS` / 条件 UPDATE），也可以是 **`Callable[[sqlite3.Connection], None]`**。
+- **`ALTER TABLE ... ADD COLUMN` 必须走 callable 分支。** SQLite 没有 `ADD COLUMN IF NOT EXISTS`，而 `executescript` 在执行前**隐式 COMMIT**、语句不在调用方事务内：脚本中途失败会留下"前几列已提交、版本号没写、`rollback()` 对它们无效"的状态，重跑直接 duplicate column，**库永久卡死**。callable 分支跑在连接的隐式事务里，与 `schema_migrations` 插入真正原子。用 `migrations.ensure_column()`（先查 `PRAGMA table_info` 再决定是否 ALTER）。
+- **版本号不连续是有意的。** v1 是合并后的建表脚本，v2–v7 已在 2026-05-31 的清理中并入 v1；v8 是 `nm` → `networkd` 的数据回填（编号跳到 8 是为了避开生产库里已应用的旧 v2）。**当前最大版本是 v10**（节点地址列 + `ibgp_peers.remote_node_id`），新迁移从 v11 开始。
 
 ## 连接 PRAGMA
 
@@ -59,6 +60,7 @@
 - `has_wg`（是否创建 WireGuard 隧道，默认 1）
 - `babel_rxcost`（生成 `babel.conf` 时写入对应 `interface` 段的 `rxcost`，默认 20）
 - `babel_type`（`wired` / `wireless` / `tunnel`，默认 `tunnel`）
+- `remote_node_id`（v10 新增，可空）：这条 peer 记录所代表的受管节点。用于把节点地址变更传播到 mesh，详见 [`node_addressing.md`](node_addressing.md)。**刻意不加外键**——删除节点 A 不能级联删掉节点 B 指向 A 的 peer 行（那是 B 的配置）；悬空引用无害，传播时跳过并告警。索引 `idx_ibgp_peers_remote(remote_node_id)`。
 
 约束：
 
@@ -90,10 +92,15 @@ CREATE TABLE managed_nodes (
     last_seen_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    -- v10 新增,三列全部可空且无 DEFAULT
+    endpoint_host TEXT,
+    own_ipv6 TEXT,
+    router_id TEXT,
     FOREIGN KEY(node_id) REFERENCES nodes(node_id) ON DELETE CASCADE
 );
 ```
 
+- `endpoint_host` / `own_ipv6` / `router_id`：节点地址，**`NULL` 表示该字段不由中心管理**（不下发，节点本地值原样保留）。语义、传播规则与下发机制见 [`node_addressing.md`](node_addressing.md)。`endpoint_host` 只存主机、不含端口——端口是对端每条隧道的 `listen_port`，存不进节点级字段。
 - `api_token_hash`：argon2id hash；`NULL` 表示尚未签发 node token。
 - `write_policy`：JSON 字符串，按 4 类动作分别配置：
   - `peer_add` ∈ {`review`, `auto_accept`}：节点 push 新增 peer 时的处理。
@@ -194,7 +201,10 @@ CREATE INDEX idx_sync_events_node ON sync_events(node_id, id);
 |------|------|------|
 | `db.py` | `insert_bgp_peer` / `update_bgp_peer` / `insert_ibgp_peer` / `update_ibgp_peer` / `_delete_peer` | `desired` |
 | `db_managed.py` | `RevisionStore.pin` / `unpin` | `desired` |
-| `db_managed.py` | `ManagedNodeStore.set_token_hash` / `delete` | `access_revoked` |
+| `db_managed.py` | `ManagedNodeStore.set_addresses` / `apply_address_update` | `desired`（被改地址的节点 + 每个被传播到的节点，去重） |
+| `db_managed.py` | `ManagedNodeStore.set_token_hash` / `delete` / `set_enabled(False)` | `access_revoked` |
+
+> **`set_enabled(False)` 必须发 `access_revoked`。** `authenticate` 虽然过滤 `enabled=1`，但 WebSocket 握手只验一次 argon2，之后整条连接吃缓存 principal——不发事件的话，禁用一个节点不会影响它**已经建立**的连接，该连接将无限期保持授权。
 
 两个刻意的 schema 选择：
 

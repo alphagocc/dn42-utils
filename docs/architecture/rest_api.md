@@ -10,7 +10,7 @@ dn42ctl serve [--host ::1] [--port 4242] [--sync-poll-interval 1.0]
 ```
 
 - **默认绑定 `[::1]`**（IPv6 loopback），端口 `4242`。
-- **dn42ctl 不处理 TLS 证书。** 对外暴露与 HTTPS 终止由 nginx 反代承担。CLI 不接受 `--tls-cert` / `--tls-key`，且对非 loopback `--host` 会打 warning。
+- **dn42ctl 不处理 TLS 证书。** 对外暴露与 HTTPS 由 nginx 管理。CLI 不接受 `--tls-cert` / `--tls-key`，且对非 loopback `--host` 会打 warning。
 - `--sync-poll-interval`（环境变量 `DN42CTL_SYNC_POLL_INTERVAL`，默认 `1.0` 秒）：`sync_events` watcher 的轮询间隔，决定配置变更推送到节点的最大延迟。
 - 部署细节（systemd unit + nginx 反代示例）见 `docs/architecture/deployment.md`。
 
@@ -57,6 +57,14 @@ token hash 比对走恒定时间。self 节点的 token 由 `dn42ctl serve` 启�
 | `POST` | `/api/admin/genconf` | `genconf` | 重新生成 Bird/Babel/ROA 配置 |
 | `GET` | `/api/show/all` | `show all` | 聚合视图：node_id + wg/bgp/ibgp 列表 |
 
+#### 节点作用域（`?node_id=`）
+
+上表中的 peer / wg / show 路由全部接受可选的 **`?node_id=<uuid>` query 参数**，用于指定操作哪个受管节点的行。POST / PUT 也统一用 query 参数（FastAPI 支持 query 与 body model 并存），一条规则胜过"写操作放 body、删除放 query"。
+
+**省略时默认解析到 hub 的 self 节点（`managed_nodes.is_self = 1`），而不是 `config.toml` 的 `node_id`。** 这两个 UUID 互不校验，一旦分叉，admin 写入的 peer 会落在 desired state 读不到的分区里，且没有任何报错。默认对齐到 self 消除了这条静默失败路径；`/api/show/all` 额外返回 `self_node_id` / `config_node_id` / `node_id_mismatch` 供前端告警。详见 [`node_addressing.md`](node_addressing.md) §9。
+
+> 目标不是 hub 自身时，`show` 系列返回 `files: []` 与 `live_*: null`——本地文件路径对远端节点没有意义，把它们显示成"缺失"会主动误导。
+
 ### 节点路由（node token，`node_id` 必须匹配）
 
 | 方法 | 路径 | 对应 CLI | 说明 |
@@ -86,6 +94,7 @@ desired state JSON schema 详见 `docs/architecture/sync_hub_spoke.md`。
 | `GET` | `/api/admin/nodes` | `node list` | 列出所有 managed_nodes |
 | `POST` | `/api/admin/nodes` | `node add` | 注册新节点 |
 | `GET` | `/api/admin/nodes/{node_id}` | `node show` | 查看单节点详情 |
+| `PATCH` | `/api/admin/nodes/{node_id}` | `node set-address` | 修改 `name` / `enabled` / 三个地址字段，并按需传播到 mesh |
 | `DELETE` | `/api/admin/nodes/{node_id}` | `node remove` | 注销节点（self 节点需 `?force=true`） |
 | `POST` | `/api/admin/nodes/{node_id}/token` | `node token rotate` | 重签 node token，返回明文一次 |
 | `PATCH` | `/api/admin/nodes/{node_id}/policy` | `node policy set` | 修改 `write_policy` JSON |
@@ -96,6 +105,23 @@ desired state JSON schema 详见 `docs/architecture/sync_hub_spoke.md`。
 | `POST` | `/api/admin/reports/{report_id}/import` | `node import-report` | 从 scan_result 导入 peer |
 | `GET` | `/api/admin/nodes/{node_id}/revisions` | `node revisions` | 列出 desired state 历史快照（阶段 5） |
 | `POST` | `/api/admin/nodes/{node_id}/rollback` | `node rollback` | 切换当前 desired state 到指定 revision（阶段 5） |
+| `DELETE` | `/api/admin/nodes/{node_id}/rollback` | `node rollback-clear` | 取消回滚 pin，恢复跟随最新 desired state |
+| `GET` | `/api/admin/db/tables` | （无） | 列出可浏览的表及行数、脱敏列 |
+| `GET` | `/api/admin/db/tables/{table}` | （无） | 分页只读浏览单表（`?limit=&offset=&node_id=`） |
+
+#### `PATCH /api/admin/nodes/{node_id}`
+
+```json
+{"name": "...", "enabled": true,
+ "endpoint_host": "...", "own_ipv6": "...", "router_id": "...",
+ "propagate": true, "dry_run": false}
+```
+
+**字段缺席 = 不改动；显式传 `null` = 清除（交还本地管理）。** 这个区分靠 `model_fields_set` 实现，不能简化成 `is not None` 判断。响应在节点对象之外附带 `propagated[]`（被改写的其他节点的 peer 行）与 `warnings[]`（无法自动推导、需人工处理的行）。语义详见 [`node_addressing.md`](node_addressing.md)。
+
+#### `/api/admin/db/*`
+
+只读。表名走白名单，未命中 404；私钥与 token hash 一律脱敏。端点形状、白名单与脱敏规则详见 [`db_browse.md`](db_browse.md)。**不提供通用行编辑端点**——权威写入必须走 service 层，否则会绕过"变更通知与业务写入同事务发射"的不变量。
 
 ### 公共路由（无 bearer / peer-session bearer）
 

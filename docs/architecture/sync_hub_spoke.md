@@ -144,12 +144,18 @@ self token 轮换：`dn42ctl node token rotate <self-id>` 同时更新 hash 与 
     "babel_conf_path": "/etc/bird/babel.conf",
     "networkd_dir": "/etc/systemd/network/",
     "nm_dir": "/etc/NetworkManager/system-connections/"
+  },
+  "node": {
+    "own_ipv6": "fd42:4242:1234::1",
+    "router_id": "172.20.1.1"
   }
 }
 ```
 
 - `paths` 是中心返回的默认值；节点 `node.toml [apply]` 段可覆盖。
 - 字段语义与现有 `bgp_peers` / `ibgp_peers` 表一一对应。
+- `node` 是**节点自身地址块**，来自 `managed_nodes` 的 `own_ipv6` / `router_id`。列为 NULL 时对应的键整个省略；**整块为空时 `node` 键本身不出现，且不参与内容哈希**（否则升级瞬间全网每个节点都会收到一次无意义推送）。收到非空 `node` 块的节点才会重写 `config.toml` / `bird.conf` / `dn42-dummy.*`。完整语义见 [`node_addressing.md`](node_addressing.md)。
+- `endpoint_host` **不在**下发范围内——节点不会拨自己。
 
 ## 提案 / 上报 / 审核流程
 

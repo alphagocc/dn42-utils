@@ -32,21 +32,24 @@ web/
     │       ├── Table.tsx        # 通用数据表格
     │       ├── Modal.tsx        # 弹窗 (表单 + 确认)
     │       ├── Toast.tsx        # 通知 (React Context)
+    │       ├── NodeSelector.tsx # 节点下拉 (共享)
     │       └── ThemeToggle.tsx  # 主题切换按钮
     ├── admin/
     │   ├── main.tsx             # React 根
     │   ├── App.tsx              # 登录/仪表盘条件渲染
     │   ├── Login.tsx            # token 登录表单
+    │   ├── NodeContext.tsx      # 当前选中节点 (React Context)
     │   ├── Dashboard.tsx        # Tab 容器 + 标题栏
     │   └── tabs/
     │       ├── Overview.tsx
     │       ├── Bgp.tsx          # CRUD
     │       ├── Ibgp.tsx         # CRUD
     │       ├── Wg.tsx           # 只读
-    │       ├── Nodes.tsx        # CRUD + rotate token
-    │       ├── Proposals.tsx    # accept/reject + 节点选择器
-    │       ├── Reports.tsx      # import + 节点选择器
-    │       ├── Revisions.tsx    # pin/unpin + 节点选择器
+    │       ├── Nodes.tsx        # CRUD + rotate token + 地址编辑
+    │       ├── Proposals.tsx    # accept/reject
+    │       ├── Reports.tsx      # import
+    │       ├── Revisions.tsx    # pin/unpin
+    │       ├── Database.tsx     # 只读表浏览
     │       └── Genconf.tsx      # 触发按钮
     └── peer/
         ├── main.tsx
@@ -98,17 +101,28 @@ HTML `<head>` 内尽早执行的内联脚本（防 FOUC）：
 
 | Tab | 数据来源 (admin API) | 操作 |
 |-----|---------------------|------|
-| Overview | `GET /api/show/all?live=false` | 只读卡片：node_id + 三类 peer 数量 |
+| Overview | `GET /api/show/all?live=false` | 只读卡片：node_id + 三类 peer 数量；node_id 分叉时显示警告横幅 |
 | BGP peers | `GET /api/admin/bgp/peers?live=false` | + Add / row Edit / row Delete |
 | iBGP peers | `GET /api/admin/ibgp/peers?live=false` | + Add / row Edit / row Delete |
 | WG tunnels | `GET /api/admin/wg/tunnels?live=false` | 只读 |
-| Nodes | `GET /api/admin/nodes` | + Add / Rotate token (一次性明文) / Delete |
-| Proposals | `GET /api/admin/nodes/{id}/proposals` (按 node 切换) | Accept / Reject (带 reason) |
+| Nodes | `GET /api/admin/nodes` | + Add / Edit (name/enabled/地址) / Policy / Status / Rotate token (一次性明文) / Delete |
+| Proposals | `GET /api/admin/nodes/{id}/proposals` | Accept / Reject (带 reason) |
 | Reports | `GET /api/admin/nodes/{id}/reports` | Import |
 | Revisions | `GET /api/admin/nodes/{id}/revisions` | Pin (rollback) / Unpin |
+| Database | `GET /api/admin/db/tables[/{table}]` | 只读分页浏览，私钥/token hash 显示为 `***` |
 | Genconf | `POST /api/admin/genconf` | 触发按钮 + 显示返回的 warnings/paths |
 
 Tab 切换使用 React `useState`，刷新按钮递增 `refreshKey` 强制组件重新挂载重新请求。
+
+### 节点选择器
+
+标题栏有一个全局节点下拉（`NodeContext` + `NodeSelector`），决定当前浏览/编辑哪个受管节点的数据，对应 API 的 `?node_id=`。Nodes / Genconf / Database 是 hub 全局视图，不显示选择器。
+
+选中的 node_id 存在 `sessionStorage`（与 token 同生命周期）。
+
+> **`<NodeProvider>` 必须包在被 `refreshKey` 当作 React `key` 的子树之外**，否则每次点 "Refresh" 都会把节点选择重置回第一个。
+
+之前 Proposals / Reports / Revisions 各自复制了一份节点选择器与 nodes 拉取逻辑，现已统一到共享 context，只拉一次。
 
 设计原则：
 
@@ -116,6 +130,13 @@ Tab 切换使用 React `useState`，刷新按钮递增 `refreshKey` 强制组件
 - **没有 WebSocket**：tab 切换 / 手动 "Refresh" 按钮触发轮询，避免引入额外协议。
   > 注：`dn42ctl` 确实有一条 WebSocket 通道（`/api/v1/nodes/{id}/ws`），但它**只服务于节点常驻 agent**，浏览器不使用，详见 `docs/architecture/sync_ws_protocol.md`。本条决策未被推翻。
 - **错误展示**：所有非 2xx 响应弹一个顶部 toast (3.5 秒消失)，正文显示 `detail` 字段。
+
+### `FormModal` 的两个坑
+
+`Modal.tsx` 用 `Object.fromEntries(new FormData(...))` 取值，因此：
+
+- **未勾选的 checkbox 在 `FormData` 里是缺席而非 `false`**，取值要写 `!!d.enabled`。
+- **空文本框产出 `""` 而非缺席。** 涉及"可清除"语义的字段（节点的三个地址字段）必须显式把 `"" → null` 再序列化——`""` 是 UI 表达"取消中心管理"的方式，而 `null` 才是 API 的表达方式。
 
 ## peer: 4 步向导
 

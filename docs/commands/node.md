@@ -55,6 +55,29 @@
 
 未指定的字段不变。
 
+### `dn42ctl node set-address <node-id> [选项]`
+
+修改节点地址并按需传播到 mesh。选项：
+
+- `--endpoint-host HOST`：公网可达主机名/IP，**不含端口**
+- `--own-ipv6 ADDR`：DN42 ULA 地址
+- `--router-id IPV4`：bird `router id`
+- `--clear-endpoint-host` / `--clear-own-ipv6` / `--clear-router-id`：清除该字段，交还节点本地管理
+- `--no-propagate`：只改 `managed_nodes`，不改写其他节点的 `ibgp_peers` 行
+- `--dry-run`：只打印将要发生的改动与告警，不写库
+
+未指定的字段不变。传播规则、无法自动推导的情形、以及为什么端口永不自动改写，见 [`../architecture/node_addressing.md`](../architecture/node_addressing.md)。
+
+### `dn42ctl node mesh backfill [--dry-run]`
+
+一次性回填 `ibgp_peers.remote_node_id`：按 `managed_nodes.own_ipv6 == ibgp_peers.peer_ip` 唯一匹配。匹配不唯一或匹配不到的行会被跳过并列出。
+
+> 这个动作**不放进数据库迁移**：迁移时所有 `own_ipv6` 都还是 NULL，匹配不到任何行。
+
+### `dn42ctl node adopt-self [--from <uuid>] [--dry-run]`
+
+修复 `config.toml` 的 `node_id` 与 self 节点 id 分叉的存量部署：在一个事务里把 peer 行从失效分区重新挂到 self 节点。目标分区非空时拒绝执行（会撞 `UNIQUE(node_id, ifname)`）。背景见 [`../architecture/node_addressing.md`](../architecture/node_addressing.md) §9。
+
 ### `dn42ctl node proposals <node-id> [--status pending|accepted|rejected]`
 
 列出该节点的配置提案。默认显示 `pending`。
@@ -134,6 +157,7 @@ node_id = "<id>"
 token   = "<token>"
 
 # [apply] / [cache] 段使用 paths.py 的默认值,可手工补充覆盖
+# [apply] 除路径覆盖外还认一个 reload = "auto" | "never"(默认 auto)
 ```
 
 - self 节点**不需要**手工 `init`，`dn42ctl serve` 启动时已经自动写好（`server = "http://[::1]:4242"`）。
@@ -143,13 +167,18 @@ token   = "<token>"
 
 从 server 拉 desired state，写到本地缓存 `/var/lib/dn42ctl/node-cache.sqlite3`。**不写**任何系统配置文件。
 
-### `dn42ctl node apply [--dry-run] [--from-server]`
+### `dn42ctl node apply [--dry-run] [--from-server] [--no-reload]`
 
 用本地缓存的 desired state 调现有 renderer 写入 `/etc/bird/...` / `/etc/systemd/network/...` 等。
 
-- `--dry-run`：打印 diff（现有文件 vs 即将生成的内容），不写盘。
+- `--dry-run`：打印 diff（现有文件 vs 即将生成的内容），不写盘，也不 reload。
 - `--from-server`：强制先 pull 再 apply（默认用最近一次缓存）。
+- `--no-reload`：写盘后不执行 `networkctl reload` / `birdc configure`。
 - 写盘使用 tmp+rename，失败不留半成品。
+
+**desired state 带非空 `node` 块时**，apply 还会重写 `config.toml`、重渲 `bird.conf`、重写 `dn42-dummy.*`；没有该块时行为与本特性引入前完全一致。本地 `config.toml` 缺失或损坏则跳过这三步并告警。
+
+**reload**：按实际写入/删除的路径决定——碰了 `networkd_dir` 就 `networkctl reload`，碰了 bird 相关文件就 `birdc configure`，什么都没变则一条都不跑。失败只记 warning，不中断 apply。也可用 `node.toml` 的 `[apply] reload = "never"` 永久关闭。完整规则见 [`../architecture/node_addressing.md`](../architecture/node_addressing.md) §8。
 
 ### `dn42ctl node push`
 
