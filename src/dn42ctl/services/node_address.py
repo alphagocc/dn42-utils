@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from dn42ctl.constants import UNSET, _Unset
-from dn42ctl.db import Database
+from dn42ctl.db import Database, emit_sync_event
 from dn42ctl.db_managed import ManagedNode, ManagedNodeStore, PropagatedChange
 from dn42ctl.services.core import Dn42CtlError
 from dn42ctl.validators import (
@@ -231,8 +231,78 @@ def backfill_remote_node_ids(*, db_path: Path, dry_run: bool = False) -> tuple[l
     return linked, skipped
 
 
+@dataclass(frozen=True)
+class AdoptSelfResult:
+    """把 peer 行从失效分区重新挂到 self 节点的结果。"""
+
+    from_node_id: str
+    to_node_id: str
+    bgp_moved: int
+    ibgp_moved: int
+    dry_run: bool = False
+
+
+def adopt_self_partition(
+    *,
+    db_path: Path,
+    config_node_id: str,
+    from_node_id: str | None = None,
+    dry_run: bool = False,
+) -> AdoptSelfResult:
+    """修复 `config.toml` 的 node_id 与 self 节点 id 分叉的存量部署。
+
+    分叉时 admin 曾把 peer 写在 `config.node_id` 分区下，而 desired state 是按
+    `managed_nodes.is_self` 读的——那些 peer 永远不会下发且没有任何报错。这里在一个
+    事务里把它们重新挂到 self 节点。
+
+    **目标分区非空时拒绝执行**：`UNIQUE(node_id, ifname)` 会让搬迁半途失败，而两边
+    都有行意味着已经有人在新分区下写过配置，合并策略只能由人来定。
+    """
+    db = Database.open(db_path)
+    try:
+        store = ManagedNodeStore(db.connection)
+        self_node = store.get_self()
+        if self_node is None:
+            raise Dn42CtlError("没有 self 节点(managed_nodes.is_self=1),无需也无法执行 adopt-self")
+        target = self_node.node_id
+        source = from_node_id or config_node_id
+        if source == target:
+            raise Dn42CtlError(f"源分区与 self 节点相同 ({target}),无需修复")
+
+        bgp_rows = db.list_bgp_peers(source)
+        ibgp_rows = db.list_ibgp_peers(source)
+        if not bgp_rows and not ibgp_rows:
+            raise Dn42CtlError(f"源分区 {source} 下没有任何 peer 行,无需修复")
+
+        if db.list_bgp_peers(target) or db.list_ibgp_peers(target):
+            raise Dn42CtlError(f"目标分区 {target} 非空,拒绝自动搬迁(会撞 UNIQUE(node_id, ifname));请人工合并")
+
+        if not dry_run:
+            try:
+                db.connection.execute("UPDATE bgp_peers SET node_id=? WHERE node_id=?", (target, source))
+                db.connection.execute("UPDATE ibgp_peers SET node_id=? WHERE node_id=?", (target, source))
+                # 搬迁后目标节点的 desired state 变了,必须推给它。
+                emit_sync_event(db.connection, node_id=target)
+                db.connection.commit()
+            except sqlite3.Error as exc:
+                db.connection.rollback()
+                raise Dn42CtlError("搬迁 peer 行失败") from exc
+    finally:
+        db.close()
+
+    return AdoptSelfResult(
+        from_node_id=source,
+        to_node_id=target,
+        bgp_moved=len(bgp_rows),
+        ibgp_moved=len(ibgp_rows),
+        dry_run=dry_run,
+    )
+
+
 __all__ = [
+    "AdoptSelfResult",
     "NodeAddressUpdate",
+    "adopt_self_partition",
     "backfill_remote_node_ids",
     "plan_propagation",
     "set_node_addresses",

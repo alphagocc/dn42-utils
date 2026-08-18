@@ -583,3 +583,88 @@ class TestReload:
         assert len(result.warnings) == 2
         assert all("失败" in w for w in result.warnings)
         assert [a.ok for a in result.reloads] == [False, False]
+
+
+class TestNodeBlockPathsAndBackend:
+    def test_bird_conf_uses_resolved_paths_not_config_toml(self, tmp_path: Path) -> None:
+        """peer 文件与 babel.conf 是按解析后的路径写出去的,bird.conf 必须 include 同一处。
+        用 config.toml 里的旧路径会让 bird 去 include 一个空目录。"""
+        from dn42ctl.config import AppConfig, save_config
+
+        stale = tmp_path / "stale"
+        config_path = tmp_path / "etc" / "config.toml"
+        save_config(
+            config_path,
+            AppConfig(
+                node_id=NODE_ID,
+                own_asn=4242421234,
+                router_id="172.23.0.1",
+                own_ipv6="fd42:4242:1234::1",
+                ownnet_v6="fd42:4242:1234::/48",
+                ownnetset_v6="[fd42:4242:1234::/48+]",
+                bird_conf_path=str(stale / "bird.conf"),
+                bird_peers_dir=str(stale / "peers"),
+                bird_babel_conf_path=str(stale / "babel.conf"),
+                bird_roa_v6_conf_path=str(stale / "roa.conf"),
+                networkd_dir=str(stale / "networkd"),
+                nm_system_connections_dir=str(stale / "nm"),
+                dummy_backend="networkd",
+            ),
+        )
+        cfg = _cfg_with_config_path(tmp_path, config_path)
+        payload = _make_payload(tmp_path)  # paths 指向 tmp_path/bird/...
+        payload["node"] = {"own_ipv6": "fd42:4242:1234::9"}
+        _seed_cache(cfg.cache_db_path, payload)
+
+        apply(node_config=cfg)
+        bird_conf = (tmp_path / "bird" / "bird.conf").read_text()
+        assert str(tmp_path / "bird" / "peers") in bird_conf
+        assert str(tmp_path / "bird" / "babel.conf") in bird_conf
+        assert str(stale / "peers") not in bird_conf
+        assert str(stale / "babel.conf") not in bird_conf
+
+    def test_nm_dummy_backend_skips_networkd_dummy_files(self, tmp_path: Path) -> None:
+        """dummy_backend=nm 时写 networkd 的 dn42-dummy.* 会造出与 NM 冲突的配置。"""
+        from dn42ctl.config import AppConfig, save_config
+
+        config_path = tmp_path / "etc" / "config.toml"
+        save_config(
+            config_path,
+            AppConfig(
+                node_id=NODE_ID,
+                own_asn=4242421234,
+                router_id="172.23.0.1",
+                own_ipv6="fd42:4242:1234::1",
+                ownnet_v6="fd42:4242:1234::/48",
+                ownnetset_v6="[fd42:4242:1234::/48+]",
+                bird_conf_path=str(tmp_path / "bird/bird.conf"),
+                bird_peers_dir=str(tmp_path / "bird/peers"),
+                bird_babel_conf_path=str(tmp_path / "bird/babel.conf"),
+                bird_roa_v6_conf_path=str(tmp_path / "bird/roa.conf"),
+                networkd_dir=str(tmp_path / "networkd"),
+                nm_system_connections_dir=str(tmp_path / "nm"),
+                dummy_backend="nm",
+            ),
+        )
+        cfg = _cfg_with_config_path(tmp_path, config_path)
+        payload = _make_payload(tmp_path)
+        payload["node"] = {"own_ipv6": "fd42:4242:1234::9"}
+        _seed_cache(cfg.cache_db_path, payload)
+
+        result = apply(node_config=cfg)
+        assert not (tmp_path / "networkd" / "dn42-dummy.netdev").exists()
+        assert not (tmp_path / "networkd" / "dn42-dummy.network").exists()
+        assert any("NetworkManager" in w for w in result.warnings)
+        # config.toml 与 bird.conf 仍然照常更新
+        assert "fd42:4242:1234::9" in (tmp_path / "bird" / "bird.conf").read_text()
+
+    def test_networkd_backend_still_writes_dummy(self, tmp_path: Path) -> None:
+        config_path = _app_config_toml(tmp_path)
+        cfg = _cfg_with_config_path(tmp_path, config_path)
+        payload = _make_payload(tmp_path)
+        payload["node"] = {"own_ipv6": "fd42:4242:1234::9"}
+        _seed_cache(cfg.cache_db_path, payload)
+
+        result = apply(node_config=cfg)
+        assert (tmp_path / "networkd" / "dn42-dummy.network").exists()
+        assert result.warnings == []

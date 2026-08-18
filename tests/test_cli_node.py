@@ -186,3 +186,80 @@ class TestNodeMeshBackfill:
         result = runner.invoke(app, [*base_args, "node", "mesh-backfill", "--dry-run"])
         assert result.exit_code == 0, result.output
         assert "dry-run" in result.output
+
+
+class TestNodeAdoptSelf:
+    def test_errors_without_self_node(self, runner: CliRunner, base_args: list[str]) -> None:
+        result = runner.invoke(app, [*base_args, "node", "adopt-self"])
+        assert result.exit_code != 0
+
+    def test_dry_run_reports_move(self, runner: CliRunner, db_path: Path, tmp_path: Path) -> None:
+        from dn42ctl.config import AppConfig, save_config
+        from dn42ctl.db import Database, IbgpPeerRecord
+        from dn42ctl.db_managed import ManagedNodeStore
+
+        stale = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+        cfg_path = tmp_path / "config.toml"
+        save_config(
+            cfg_path,
+            AppConfig(
+                node_id=stale,
+                own_asn=4242421234,
+                router_id="172.23.0.1",
+                own_ipv6="fd42:4242:1234::1",
+                ownnet_v6="fd42:4242:1234::/48",
+                ownnetset_v6="[fd42:4242:1234::/48+]",
+                bird_conf_path=str(tmp_path / "bird.conf"),
+                bird_peers_dir=str(tmp_path / "peers"),
+                bird_babel_conf_path=str(tmp_path / "babel.conf"),
+                bird_roa_v6_conf_path=str(tmp_path / "roa.conf"),
+                networkd_dir=str(tmp_path / "networkd"),
+                nm_system_connections_dir=str(tmp_path / "nm"),
+                dummy_backend="networkd",
+            ),
+        )
+        db = Database.open(db_path)
+        try:
+            ManagedNodeStore(db.connection).upsert_self(NODE_A, name="self")
+            db.ensure_node(stale)
+            db.insert_ibgp_peer(
+                IbgpPeerRecord(
+                    node_id=stale,
+                    name="orphan",
+                    ifname="wg_orphan",
+                    wg_private_key="priv",
+                    wg_public_key="pub",
+                    peer_public_key="peerpub",
+                    endpoint="a.example.com:51821",
+                    local_lla="fe80::1",
+                    peer_lla="fe80::2",
+                    listen_port=51821,
+                    allowed_ips=["::/0"],
+                    net_backend="networkd",
+                    babel_rxcost=20,
+                    peer_ip="fd42:4242:1::1",
+                )
+            )
+        finally:
+            db.close()
+
+        args = ["--db-path", str(db_path), "--config-path", str(cfg_path)]
+        result = runner.invoke(app, [*args, "node", "adopt-self", "--dry-run"])
+        assert result.exit_code == 0, result.output
+        assert "dry-run" in result.output
+        assert "ibgp_peers: 1" in result.output
+
+        # dry-run 之后行仍在原分区
+        db = Database.open(db_path)
+        try:
+            assert len(db.list_ibgp_peers(stale)) == 1
+        finally:
+            db.close()
+
+        assert runner.invoke(app, [*args, "node", "adopt-self"]).exit_code == 0
+        db = Database.open(db_path)
+        try:
+            assert len(db.list_ibgp_peers(NODE_A)) == 1
+            assert db.list_ibgp_peers(stale) == []
+        finally:
+            db.close()

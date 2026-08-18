@@ -101,7 +101,9 @@ B→A 的端口其实可以从 A 侧反向行的 `listen_port` 推出。**不做
 1. **重写 `config.toml`** —— 读本地 `AppConfig`，合并下发的字段，**先比较，有差异才写**。常规路径根本不碰文件。
    > `save_config` 用 `tomli_w` 整体重写，**注释和未知键会丢**。这正是"比较优先"的理由。
 2. **重渲 `bird.conf`** —— 走与 peer 文件同一条原子写 + diff 管线，所以 `--dry-run` 看得到。
+   > `include` 的 peers 目录与 babel 路径取自**解析后的路径**（desired-state `paths` + `node.toml [apply]` 覆盖），不是 `config.toml` 里的值——peer 文件正是按前者写出去的，用后者会让 bird 去 include 一个空目录。
 3. **重写 `dn42-dummy.netdev` / `.network`** —— 同样作为普通文件条目进列表。**不调用 `ensure_dummy_interface`**：它自己 shell out 到 `networkctl`/`nmcli`，会绕过 diff/dry-run 机制。生效交给 reload 步骤。
+   > **仅当 `dummy_backend = "networkd"`。** 该接口由 NetworkManager 管理时，写 networkd 的 `.netdev`/`.network` 会造出一份与 NM 冲突的配置；而 apply 刻意不 shell out（`nmcli` 是 `ensure_dummy_interface` 的事）。此时跳过并告警，该节点需要本机跑一次 `dn42ctl genconf` 让新 `own_ipv6` 落地。`config.toml` 与 `bird.conf` 仍照常更新。
 
 **本地 `config.toml` 缺失或损坏 → 记 warning 并跳过全部三步**，不伪造 `AppConfig`。纯 spoke 可能只跑过 `node init` 而从没有过 `config.toml`；而 `bird.conf` 还需要 `own_asn` / `ownnet_v6` / `ownnetset_v6` 这些不在下发范围内的 AS 级字段，缺了就渲染不出来（模板跑在 `StrictUndefined` 下）。
 
@@ -155,4 +157,4 @@ hub 上存在**两个互不校验的 UUID**：
 1. **admin 路由的默认作用域解析到 `is_self` 行**，而不是 `config.node_id`。这直接消除了静默失败路径。
 2. `run_self_registration` 返回 `config_node_id_mismatch`，`serve` 启动时打醒目 warning。
 3. `/api/show/all` 暴露该标志，web Overview 页渲染警告横幅。
-4. 可选修复工具 `dn42ctl node adopt-self --dry-run`：在一个事务里把 peer 行从失效分区重新挂到 self 节点；目标分区非空时拒绝执行（会撞 `UNIQUE(node_id, ifname)`）。
+4. 修复工具 `dn42ctl node adopt-self [--from <uuid>] [--dry-run]`：在一个事务里把 peer 行从失效分区重新挂到 self 节点，并对目标节点发一条 `desired`。目标分区非空时**拒绝执行**——那意味着已经有人在新分区下写过配置，合并策略只能由人来定，硬搬还会撞 `UNIQUE(node_id, ifname)`。

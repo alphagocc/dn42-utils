@@ -1469,6 +1469,41 @@ def cmd_node_mesh_backfill(
             typer.echo(f"  {item}")
 
 
+@node_app.command("adopt-self")
+def cmd_node_adopt_self(
+    ctx: typer.Context,
+    from_node_id: str = typer.Option(None, "--from", help="源分区 node_id (默认取 config.toml 的 node_id)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="只打印将搬迁的行数,不写库"),
+) -> None:
+    """把 peer 行从失效分区重新挂到 self 节点。
+
+    修复 config.toml 的 node_id 与 self 节点 id 分叉的存量部署：那种情况下 admin 写入的
+    peer 落在 desired-state 读不到的分区里，且没有任何报错。
+    """
+    appctx: AppContext = ctx.obj
+    config = _require_config_or_exit(appctx)
+    from dn42ctl.services.node_address import adopt_self_partition
+
+    try:
+        result = adopt_self_partition(
+            db_path=appctx.db_path,
+            config_node_id=config.node_id,
+            from_node_id=from_node_id,
+            dry_run=dry_run,
+        )
+    except Dn42CtlError as exc:
+        typer.echo(f"错误: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    except DatabaseError as exc:
+        typer.echo(_db_open_hint(appctx.db_path), err=True)
+        raise typer.Exit(code=1) from exc
+
+    suffix = " (dry-run)" if result.dry_run else ""
+    typer.echo(f"搬迁{suffix}: {result.from_node_id} -> {result.to_node_id}")
+    typer.echo(f"  bgp_peers:  {result.bgp_moved}")
+    typer.echo(f"  ibgp_peers: {result.ibgp_moved}")
+
+
 app.add_typer(node_app, name="node")
 
 

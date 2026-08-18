@@ -76,7 +76,12 @@
 
 ### `dn42ctl node adopt-self [--from <uuid>] [--dry-run]`
 
-修复 `config.toml` 的 `node_id` 与 self 节点 id 分叉的存量部署：在一个事务里把 peer 行从失效分区重新挂到 self 节点。目标分区非空时拒绝执行（会撞 `UNIQUE(node_id, ifname)`）。背景见 [`../architecture/node_addressing.md`](../architecture/node_addressing.md) §9。
+修复 `config.toml` 的 `node_id` 与 self 节点 id 分叉的存量部署：在一个事务里把 peer 行从失效分区重新挂到 self 节点，并对该节点发一条 `desired` 事件。
+
+- `--from`：源分区 node_id，默认取 `config.toml` 的 `node_id`。
+- 目标分区非空时**拒绝执行**——两边都有行意味着已经有人在新分区下写过配置，合并策略只能由人来定；硬搬还会撞 `UNIQUE(node_id, ifname)`。
+
+背景见 [`../architecture/node_addressing.md`](../architecture/node_addressing.md) §9。
 
 ### `dn42ctl node proposals <node-id> [--status pending|accepted|rejected]`
 
@@ -176,7 +181,7 @@ token   = "<token>"
 - `--no-reload`：写盘后不执行 `networkctl reload` / `birdc configure`。
 - 写盘使用 tmp+rename，失败不留半成品。
 
-**desired state 带非空 `node` 块时**，apply 还会重写 `config.toml`、重渲 `bird.conf`、重写 `dn42-dummy.*`；没有该块时行为与本特性引入前完全一致。本地 `config.toml` 缺失或损坏则跳过这三步并告警。
+**desired state 带非空 `node` 块时**，apply 还会重写 `config.toml`、重渲 `bird.conf`、重写 `dn42-dummy.*`；没有该块时行为与本特性引入前完全一致。本地 `config.toml` 缺失或损坏则跳过这三步并告警；`dummy_backend = "nm"` 时跳过 `dn42-dummy.*` 并告警（该接口由 NetworkManager 管理，需在该节点上跑 `dn42ctl genconf`）。
 
 **reload**：按实际写入/删除的路径决定——碰了 `networkd_dir` 就 `networkctl reload`，碰了 bird 相关文件就 `birdc configure`，什么都没变则一条都不跑。失败只记 warning，不中断 apply。也可用 `node.toml` 的 `[apply] reload = "never"` 永久关闭。完整规则见 [`../architecture/node_addressing.md`](../architecture/node_addressing.md) §8。
 

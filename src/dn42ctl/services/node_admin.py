@@ -6,6 +6,7 @@ input validation. Used by both CLI (`dn42ctl node ...`) and admin REST API
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import secrets
 import uuid
 from dataclasses import dataclass
@@ -13,7 +14,7 @@ from pathlib import Path
 
 from dn42ctl.db import Database, DatabaseError
 from dn42ctl.db_managed import ManagedNode, ManagedNodeStore
-from dn42ctl.node_config import NodeConfig, NodeConfigError, load_node_config, save_node_config
+from dn42ctl.node_config import NodeConfigError, load_node_config, save_node_config
 from dn42ctl.paths import NODE_CONFIG_PATH
 from dn42ctl.services.core import Dn42CtlError
 
@@ -38,20 +39,18 @@ def _resolve_self_toml(self_node_toml_path: Path | None) -> Path:
 def _rewrite_self_node_toml(*, path: Path, plaintext: str, node_id: str) -> bool:
     """Update token (and node_id) of an existing self node.toml.
 
+    Uses `dataclasses.replace` rather than rebuilding the dataclass field by field:
+    an explicit constructor call silently drops every field it forgets to name, and
+    that is exactly how `agent` and `reload_policy` got reset to their defaults on
+    every token rotation. Only the two fields we mean to change are named here.
+
     Returns True if the file existed and was rewritten, False if it was missing.
     """
     try:
         existing = load_node_config(path)
     except NodeConfigError:
         return False
-    new_cfg = NodeConfig(
-        server=existing.server,
-        node_id=node_id,
-        token=plaintext,
-        apply_overrides=existing.apply_overrides,
-        cache_db_path=existing.cache_db_path,
-    )
-    save_node_config(path, new_cfg)
+    save_node_config(path, dataclasses.replace(existing, node_id=node_id, token=plaintext))
     return True
 
 

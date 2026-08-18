@@ -389,3 +389,131 @@ class TestBackfillRemoteNodeIds:
         linked, skipped = backfill_remote_node_ids(db_path=path)
         assert linked == []
         assert any("没有匹配的受管节点" in s for s in skipped)
+
+
+class TestAdoptSelfPartition:
+    """修复 config.node_id 与 self 节点 id 分叉的存量部署。"""
+
+    @staticmethod
+    def _setup(tmp_path: Path, *, stale_peers: bool = True, target_peers: bool = False) -> Path:
+        from dn42ctl.db import BgpPeerRecord
+
+        path = tmp_path / "db.sqlite3"
+        db = Database.open(path)
+        try:
+            store = ManagedNodeStore(db.connection)
+            store.upsert_self(NODE_A, name="self")
+            db.ensure_node(NODE_C)
+            if stale_peers:
+                db.insert_bgp_peer(
+                    BgpPeerRecord(
+                        node_id=NODE_C,
+                        peer_asn=4242420001,
+                        ifname="dn42_0001",
+                        wg_private_key="priv",
+                        wg_public_key="pub",
+                        peer_public_key="peerpub",
+                        endpoint="a.example.com:51820",
+                        local_lla="fe80::1",
+                        peer_lla="fe80::2",
+                        listen_port=31000,
+                        allowed_ips=["::/0"],
+                        net_backend="networkd",
+                    )
+                )
+                db.insert_ibgp_peer(_ibgp(NODE_C, "stale"))
+            if target_peers:
+                db.insert_ibgp_peer(_ibgp(NODE_A, "already-here"))
+        finally:
+            db.close()
+        return path
+
+    def test_moves_rows_to_self(self, tmp_path: Path) -> None:
+        from dn42ctl.services.node_address import adopt_self_partition
+
+        path = self._setup(tmp_path)
+        result = adopt_self_partition(db_path=path, config_node_id=NODE_C)
+        assert (result.from_node_id, result.to_node_id) == (NODE_C, NODE_A)
+        assert (result.bgp_moved, result.ibgp_moved) == (1, 1)
+
+        db = Database.open(path)
+        try:
+            assert len(db.list_bgp_peers(NODE_A)) == 1
+            assert len(db.list_ibgp_peers(NODE_A)) == 1
+            assert db.list_bgp_peers(NODE_C) == []
+        finally:
+            db.close()
+
+    def test_emits_desired_for_target(self, tmp_path: Path) -> None:
+        from dn42ctl.db_managed import SyncEventStore
+        from dn42ctl.services.node_address import adopt_self_partition
+
+        path = self._setup(tmp_path)
+        db = Database.open(path)
+        try:
+            before = SyncEventStore(db.connection).latest_id()
+        finally:
+            db.close()
+
+        adopt_self_partition(db_path=path, config_node_id=NODE_C)
+
+        db = Database.open(path)
+        try:
+            kinds = [(e.node_id, e.kind) for e in SyncEventStore(db.connection).fetch_since(before)]
+        finally:
+            db.close()
+        assert (NODE_A, "desired") in kinds
+
+    def test_dry_run_writes_nothing(self, tmp_path: Path) -> None:
+        from dn42ctl.services.node_address import adopt_self_partition
+
+        path = self._setup(tmp_path)
+        result = adopt_self_partition(db_path=path, config_node_id=NODE_C, dry_run=True)
+        assert result.dry_run is True
+        assert (result.bgp_moved, result.ibgp_moved) == (1, 1)
+
+        db = Database.open(path)
+        try:
+            assert db.list_bgp_peers(NODE_A) == []
+            assert len(db.list_bgp_peers(NODE_C)) == 1
+        finally:
+            db.close()
+
+    def test_refuses_when_target_partition_non_empty(self, tmp_path: Path) -> None:
+        """两边都有行意味着有人已经在新分区写过配置,合并策略只能由人来定;
+        而且硬搬会撞 UNIQUE(node_id, ifname)。"""
+        from dn42ctl.services.node_address import adopt_self_partition
+
+        path = self._setup(tmp_path, target_peers=True)
+        with pytest.raises(Dn42CtlError, match="非空"):
+            adopt_self_partition(db_path=path, config_node_id=NODE_C)
+
+    def test_refuses_when_nothing_to_move(self, tmp_path: Path) -> None:
+        from dn42ctl.services.node_address import adopt_self_partition
+
+        path = self._setup(tmp_path, stale_peers=False)
+        with pytest.raises(Dn42CtlError, match="没有任何 peer 行"):
+            adopt_self_partition(db_path=path, config_node_id=NODE_C)
+
+    def test_refuses_when_already_aligned(self, tmp_path: Path) -> None:
+        from dn42ctl.services.node_address import adopt_self_partition
+
+        path = self._setup(tmp_path)
+        with pytest.raises(Dn42CtlError, match="无需修复"):
+            adopt_self_partition(db_path=path, config_node_id=NODE_A)
+
+    def test_requires_a_self_node(self, tmp_path: Path) -> None:
+        from dn42ctl.services.node_address import adopt_self_partition
+
+        path = tmp_path / "empty.sqlite3"
+        Database.open(path).close()
+        with pytest.raises(Dn42CtlError, match="没有 self 节点"):
+            adopt_self_partition(db_path=path, config_node_id=NODE_C)
+
+    def test_explicit_from_overrides_config(self, tmp_path: Path) -> None:
+        from dn42ctl.services.node_address import adopt_self_partition
+
+        path = self._setup(tmp_path)
+        result = adopt_self_partition(db_path=path, config_node_id=NODE_B, from_node_id=NODE_C)
+        assert result.from_node_id == NODE_C
+        assert (result.bgp_moved, result.ibgp_moved) == (1, 1)

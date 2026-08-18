@@ -132,3 +132,70 @@ class TestRemoveSelf:
             )
         # toml untouched.
         assert toml.exists()
+
+
+class TestRotatePreservesAllFields:
+    """重签 token 时不能顺手把 node.toml 的其它字段重置回默认值。
+
+    以前 _rewrite_self_node_toml 逐字段重建 NodeConfig，凡是忘了列举的字段都会被
+    静默丢掉——agent 与 reload_policy 就是这么被重置的。现在用 dataclasses.replace。
+    """
+
+    def test_preserves_reload_policy(self, db_path: Path, tmp_path: Path) -> None:
+        _register_self(db_path)
+        toml = tmp_path / "node.toml"
+        save_node_config(
+            toml,
+            NodeConfig(
+                server="http://[::1]:4242",
+                node_id=NODE_SELF,
+                token="stale",
+                reload_policy="never",
+            ),
+        )
+        rotate_token(db_path=db_path, node_id=NODE_SELF, self_node_toml_path=toml)
+        assert load_node_config(toml).reload_policy == "never"
+
+    def test_preserves_agent_options(self, db_path: Path, tmp_path: Path) -> None:
+        from dn42ctl.node_config import AgentOptions
+
+        _register_self(db_path)
+        toml = tmp_path / "node.toml"
+        tuned = AgentOptions(reconnect_max_seconds=17.0, heartbeat_interval_seconds=42.0)
+        save_node_config(
+            toml,
+            NodeConfig(server="http://[::1]:4242", node_id=NODE_SELF, token="stale", agent=tuned),
+        )
+        rotate_token(db_path=db_path, node_id=NODE_SELF, self_node_toml_path=toml)
+        assert load_node_config(toml).agent == tuned
+
+    def test_preserves_apply_overrides_and_cache_path(self, db_path: Path, tmp_path: Path) -> None:
+        _register_self(db_path)
+        toml = tmp_path / "node.toml"
+        cache = tmp_path / "custom-cache.sqlite3"
+        save_node_config(
+            toml,
+            NodeConfig(
+                server="http://[::1]:4242",
+                node_id=NODE_SELF,
+                token="stale",
+                apply_overrides={"peers_dir": "/etc/bird/peers"},
+                cache_db_path=cache,
+            ),
+        )
+        rotate_token(db_path=db_path, node_id=NODE_SELF, self_node_toml_path=toml)
+        loaded = load_node_config(toml)
+        assert loaded.apply_overrides == {"peers_dir": "/etc/bird/peers"}
+        assert loaded.cache_db_path == cache
+
+    def test_still_updates_token_and_node_id(self, db_path: Path, tmp_path: Path) -> None:
+        _register_self(db_path)
+        toml = tmp_path / "node.toml"
+        save_node_config(
+            toml,
+            NodeConfig(server="http://[::1]:4242", node_id="old-id", token="stale", reload_policy="never"),
+        )
+        rotated = rotate_token(db_path=db_path, node_id=NODE_SELF, self_node_toml_path=toml)
+        loaded = load_node_config(toml)
+        assert loaded.token == rotated.plaintext
+        assert loaded.node_id == NODE_SELF

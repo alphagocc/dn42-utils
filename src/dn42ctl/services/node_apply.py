@@ -23,7 +23,12 @@ from pathlib import Path
 from typing import Any
 
 from dn42ctl.config import ConfigError, dumps_config, load_config
-from dn42ctl.constants import FILE_MODE_NETDEV, FILE_MODE_PRIVATE, RELOAD_POLICY_NEVER
+from dn42ctl.constants import (
+    FILE_MODE_NETDEV,
+    FILE_MODE_PRIVATE,
+    NET_BACKEND_NETWORKD,
+    RELOAD_POLICY_NEVER,
+)
 from dn42ctl.fs import chmod_best_effort
 from dn42ctl.node_config import NodeConfig
 from dn42ctl.paths import DEFAULT_CONFIG_PATH
@@ -262,13 +267,28 @@ def _render_node_config_files(
                 own_ipv6=merged.own_ipv6,
                 ownnet_v6=merged.ownnet_v6,
                 ownnetset_v6=merged.ownnetset_v6,
-                bird_babel_conf_path=Path(merged.bird_babel_conf_path),
-                bird_peers_dir=Path(merged.bird_peers_dir),
+                # 用**解析后**的路径,不是 config.toml 里的:peer 文件和 babel.conf 正是
+                # 按这些路径写出去的(desired-state paths + node.toml [apply] 覆盖)。
+                # 用 config.toml 的值会让 bird.conf 去 include 一个空目录。
+                bird_babel_conf_path=paths.babel_conf_path,
+                bird_peers_dir=paths.bird_peers_dir,
+                # ROA 文件不由 apply 管理,没有对应的 ResolvedPaths 条目。
                 bird_roa_v6_conf_path=Path(merged.bird_roa_v6_conf_path),
             ),
             FILE_MODE_PRIVATE,
         )
     )
+
+    if merged.dummy_backend != NET_BACKEND_NETWORKD:
+        # dn42-dummy 由 NetworkManager 管理时,写 networkd 的 .netdev/.network 会造出
+        # 一份与 NM 冲突的配置。apply 又刻意不 shell out(nmcli 属于 ensure_dummy_interface),
+        # 所以这里只能跳过并告知:该节点要靠本机 dn42ctl genconf/init 落地新地址。
+        warnings.append(
+            f"dummy_backend={merged.dummy_backend},dn42-dummy 由 NetworkManager 管理,"
+            "本次未更新其地址;请在该节点上运行 dn42ctl genconf 使新 own_ipv6 生效"
+        )
+        return files, warnings
+
     # dn42-dummy 当作普通文件条目进列表,不调 ensure_dummy_interface —— 那个函数自己
     # shell out 到 networkctl/nmcli,会绕过 diff/dry-run 机制。生效交给 reload 步骤。
     files.append((paths.networkd_dir / f"{DUMMY_IFNAME}.netdev", render_dummy_netdev(), FILE_MODE_NETDEV))
