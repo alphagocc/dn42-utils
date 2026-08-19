@@ -69,7 +69,8 @@ class IbgpPeerView(_PeerViewBase):
     babel_type: str
     peer_ip: str | None
     has_wg: bool
-    # 这条记录所代表的受管节点(用于地址传播)。None = 未关联。
+    # The managed node this record stands for (used for address propagation).
+    # None = not linked.
     remote_node_id: str | None = None
 
 

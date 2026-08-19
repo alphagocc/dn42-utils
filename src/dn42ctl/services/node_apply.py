@@ -1,15 +1,18 @@
 """Spoke-side `dn42ctl node apply`: turn a cached desired-state into actual
-files under /etc/bird, /etc/systemd/network.
+files under /etc/bird and /etc/systemd/network.
 
-Reuses the existing Jinja renderers. Normally only touches per-peer files plus
-babel.conf.
+Reuses the existing Jinja renderers. Normally only the per-peer files and
+babel.conf are touched.
 
-**当且仅当** desired state 带非空 `node` 块时，apply 还会重写 `config.toml`、重渲
-`bird.conf`、重写 `dn42-dummy.*`。没有该块的节点，写入的文件集与本特性引入之前
-逐字节一致。语义见 `docs/architecture/node_addressing.md`。
+If and only if the desired state carries a non-empty `node` block, apply also
+rewrites `config.toml`, re-renders `bird.conf` and rewrites `dn42-dummy.*`. For a
+node without that block, the set of written files is byte-for-byte identical to
+what it was before this feature landed. See
+`docs/architecture/node_addressing.md` for the semantics.
 
 Atomic writes (tmp + rename) ensure we never leave a half-written file behind.
-写盘之后按实际变更的路径 reload networkd/bird（best-effort，失败只记 warning）。
+Once the files are on disk, networkd and bird are reloaded based on which paths
+actually changed; that step is best-effort and a failure only records a warning.
 """
 
 from __future__ import annotations
@@ -184,8 +187,8 @@ def _render_ibgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths, node_id:
     name = peer["name"]
     ifname = peer["ifname"]
     out: list[tuple[Path, str, int]] = []
-    # peer_ip 为空时 render_bird_ibgp_peer_conf 会抛异常。跳过这一个文件而不是让
-    # **整个** apply 失败 —— genconf 也是这么处理的。
+    # render_bird_ibgp_peer_conf raises when peer_ip is empty. Skip just this one file
+    # rather than failing the entire apply; genconf handles it the same way.
     if peer.get("peer_ip"):
         out.append(
             (
@@ -228,12 +231,14 @@ def _render_node_config_files(
     node_block: dict[str, Any],
     paths: ResolvedPaths,
 ) -> tuple[list[tuple[Path, str, int]], list[str]]:
-    """中心下发的节点自身地址 -> config.toml / bird.conf / dn42-dummy.*。
+    """Turn the hub-pushed node addresses into config.toml / bird.conf / dn42-dummy.*.
 
-    本地没有 config.toml（或读不出来）时**跳过全部三步并告警**，绝不伪造一份：
-    `bird.conf` 还需要 own_asn / ownnet_v6 / ownnetset_v6 这些不在下发范围内的
-    AS 级字段，缺了就渲染不出来（模板跑在 StrictUndefined 下）。纯 spoke 完全可能
-    只跑过 `node init` 而从没有过 config.toml。
+    When there is no local config.toml, or it cannot be read, all three steps are
+    skipped and a warning is recorded; a config is never fabricated. `bird.conf` also
+    needs the AS-level fields own_asn / ownnet_v6 / ownnetset_v6, which are outside
+    what the hub pushes, and without them the template cannot render at all since it
+    runs under StrictUndefined. A pure spoke may well have only ever run `node init`
+    and never had a config.toml.
     """
     files: list[tuple[Path, str, int]] = []
     warnings: list[str] = []
@@ -253,8 +258,9 @@ def _render_node_config_files(
         return files, warnings
 
     merged = dataclasses.replace(app_config, **updates)
-    # 先比较,有差异才写。save_config 用 tomli_w 整体重写,注释与未知键会丢 ——
-    # 常规路径因此根本不碰这个文件。
+    # Compare first and write only on a real difference. save_config rewrites the whole
+    # file through tomli_w, losing comments and unknown keys, so the normal path must
+    # not touch this file at all.
     if merged != app_config:
         files.append((paths.config_path, dumps_config(merged), FILE_MODE_PRIVATE))
 
@@ -267,12 +273,13 @@ def _render_node_config_files(
                 own_ipv6=merged.own_ipv6,
                 ownnet_v6=merged.ownnet_v6,
                 ownnetset_v6=merged.ownnetset_v6,
-                # 用**解析后**的路径,不是 config.toml 里的:peer 文件和 babel.conf 正是
-                # 按这些路径写出去的(desired-state paths + node.toml [apply] 覆盖)。
-                # 用 config.toml 的值会让 bird.conf 去 include 一个空目录。
+                # Use the resolved paths, not the ones in config.toml: the peer files
+                # and babel.conf are written to exactly these paths (desired-state paths
+                # plus any node.toml [apply] overrides). Using config.toml's values would
+                # make bird.conf include an empty directory.
                 bird_babel_conf_path=paths.babel_conf_path,
                 bird_peers_dir=paths.bird_peers_dir,
-                # ROA 文件不由 apply 管理,没有对应的 ResolvedPaths 条目。
+                # The ROA file is not managed by apply, so it has no ResolvedPaths entry.
                 bird_roa_v6_conf_path=Path(merged.bird_roa_v6_conf_path),
             ),
             FILE_MODE_PRIVATE,
@@ -280,17 +287,20 @@ def _render_node_config_files(
     )
 
     if merged.dummy_backend != NET_BACKEND_NETWORKD:
-        # dn42-dummy 由 NetworkManager 管理时,写 networkd 的 .netdev/.network 会造出
-        # 一份与 NM 冲突的配置。apply 又刻意不 shell out(nmcli 属于 ensure_dummy_interface),
-        # 所以这里只能跳过并告知:该节点要靠本机 dn42ctl genconf/init 落地新地址。
+        # When dn42-dummy is managed by NetworkManager, writing networkd's
+        # .netdev/.network would produce a configuration that conflicts with NM. apply
+        # also deliberately never shells out (nmcli belongs to ensure_dummy_interface),
+        # so all it can do here is skip and warn: that node has to land the new address
+        # via a local dn42ctl genconf/init.
         warnings.append(
             f"dummy_backend={merged.dummy_backend},dn42-dummy 由 NetworkManager 管理,"
             "本次未更新其地址;请在该节点上运行 dn42ctl genconf 使新 own_ipv6 生效"
         )
         return files, warnings
 
-    # dn42-dummy 当作普通文件条目进列表,不调 ensure_dummy_interface —— 那个函数自己
-    # shell out 到 networkctl/nmcli,会绕过 diff/dry-run 机制。生效交给 reload 步骤。
+    # dn42-dummy goes into the list as an ordinary file entry rather than through
+    # ensure_dummy_interface: that function shells out to networkctl/nmcli itself, which
+    # would bypass the diff/dry-run machinery. Activation is left to the reload step.
     files.append((paths.networkd_dir / f"{DUMMY_IFNAME}.netdev", render_dummy_netdev(), FILE_MODE_NETDEV))
     files.append(
         (
@@ -303,7 +313,9 @@ def _render_node_config_files(
 
 
 def _render_config_toml(config: Any) -> str:  # noqa: ANN401 — AppConfig
-    """把 AppConfig 渲染成 TOML 文本，好让它走与其它文件相同的原子写 + diff 管线。"""
+    """Render an AppConfig to TOML text so it goes through the same atomic-write + diff
+    pipeline as every other file.
+    """
     import io
 
     import tomli_w
@@ -425,7 +437,8 @@ def apply(
         files.extend(_render_ibgp_peer_files(peer, paths, node_id))
     files.append(_render_babel(payload, paths))
 
-    # 兼容铰链:没有 node 块的节点,写入的文件集与本特性引入之前逐字节一致。
+    # Backwards compatibility: for a node without a `node` block, the set of written
+    # files is byte-for-byte what it was before this feature landed.
     node_block = payload.get("node") or {}
     if node_block:
         node_files, node_warnings = _render_node_config_files(node_block, paths)
@@ -457,8 +470,9 @@ def apply(
         if no_reload or node_config.reload_policy == RELOAD_POLICY_NEVER:
             pass
         else:
-            # 按**实际发生变化**的路径决定,而不是"写过就 reload":agent 每 900 秒
-            # reconcile 一次,无脑 reload 会让每个节点每天无谓 birdc configure 96 次。
+            # Driven by which paths actually changed, not by "something was written":
+            # the agent reconciles every 900 seconds, so reloading unconditionally would
+            # mean 96 pointless birdc configure calls per node per day.
             touched = sorted(changed_actions | set(deleted))
             result = run_reloads(
                 plan_reloads(

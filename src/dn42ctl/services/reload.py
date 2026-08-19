@@ -1,9 +1,14 @@
-"""apply 之后让守护进程重读配置。
+"""Make the daemons re-read their configuration after apply has written it out.
 
-在此之前 `node apply` 只落盘、从不 reload —— 改了地址会写进文件然后静静躺着不生效。
+`node apply` only lands the desired state on disk; it does not itself make anything
+take effect. Without this step a change is written correctly and then simply never
+applies, until someone reloads by hand or the machine reboots.
 
-两条命令都**只是让守护进程重读配置文件**，不添加也不删除任何路由，因此不违反
-`docs/spec.md` 的"禁止自动修改路由表"约束；`RouteTable=off` 仍由 netdev 模板保证。
+This module runs exactly two commands, `networkctl reload` and `birdc configure`.
+Both only make the corresponding daemon re-read its own configuration files; neither
+adds or removes a route, so this does not violate the "never modify routing tables
+automatically" constraint in `docs/spec.md`. `RouteTable=off` is still guaranteed by
+the netdev template.
 """
 
 from __future__ import annotations
@@ -18,7 +23,7 @@ from dn42ctl.constants import RELOAD_POLICY_AUTO, RELOAD_POLICY_NEVER, VALID_REL
 RELOAD_TIMEOUT = 15
 
 NETWORKCTL_RELOAD = ["networkctl", "reload"]
-# 用 configure 而非 configure soft —— soft 不能正确加载新增的 protocol。
+# configure, not configure soft: soft does not correctly load newly added protocols.
 BIRDC_CONFIGURE = ["birdc", "configure"]
 
 
@@ -33,7 +38,7 @@ class ReloadAction:
 @dataclass(frozen=True)
 class ReloadResult:
     actions: list[ReloadAction] = field(default_factory=list)
-    skipped: str | None = None  # 未执行的原因(dry-run / policy / 无变更)
+    skipped: str | None = None  # why nothing ran (dry-run / policy / no changes)
 
     @property
     def warnings(self) -> list[str]:
@@ -45,15 +50,16 @@ Runner = Callable[[list[str]], ReloadAction]
 
 def default_runner(cmd: list[str]) -> ReloadAction:
     try:
-        out = subprocess.check_output(  # noqa: S603 — cmd 是本模块的字面量常量
+        out = subprocess.check_output(  # noqa: S603 — cmd is a literal constant from this module
             cmd,
             text=True,
             stderr=subprocess.STDOUT,
             timeout=RELOAD_TIMEOUT,
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
-        # best-effort:失败绝不抛出。agent 是常驻进程,缺 birdc 不能让它崩溃重启;
-        # 文件已经正确落盘,应当报 success-with-warnings。
+        # Best-effort: never raise. The agent is a long-running process and a missing
+        # birdc must not crash-restart it. The files are already correctly on disk, so
+        # this should surface as success-with-warnings.
         return ReloadAction(cmd=cmd, ok=False, error=str(exc))
     return ReloadAction(cmd=cmd, ok=True, output=out.strip())
 
@@ -61,7 +67,7 @@ def default_runner(cmd: list[str]) -> ReloadAction:
 def _under(path: Path, directory: Path) -> bool:
     try:
         return path.resolve().parent == directory.resolve()
-    except OSError:  # pragma: no cover — resolve 在异常文件系统上可能失败
+    except OSError:  # pragma: no cover — resolve can fail on an unusual filesystem
         return path.parent == directory
 
 
@@ -72,12 +78,13 @@ def plan_reloads(
     bird_peers_dir: Path,
     bird_files: Sequence[Path] = (),
 ) -> list[list[str]]:
-    """按实际写入/删除的路径决定要跑哪些命令。
+    """Decide which commands to run from the paths that were actually written or deleted.
 
-    什么都没变就一条都不跑 —— 否则 agent 的 900 秒 reconcile 会让每个节点每天无谓地
-    `birdc configure` 96 次。
+    If nothing changed, nothing runs. Otherwise the agent's 900-second reconcile would
+    mean a pointless `birdc configure` 96 times per node per day.
 
-    顺序固定:先 networkctl 起接口,再 birdc 读到引用这些接口的 protocol。
+    The order is fixed: networkctl first so the interfaces come up, then birdc so it
+    reads the protocols that reference those interfaces.
     """
     paths = list(touched)
     cmds: list[list[str]] = []

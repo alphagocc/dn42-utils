@@ -151,17 +151,18 @@ def _self_node_id() -> str | None:
 
 
 def _resolve_target_node(node_id: str | None) -> str:
-    """这个 admin 请求操作的是哪个节点的行？
+    """返回该 admin 请求应当操作的节点 id。
 
-    显式 `?node_id=` 优先；否则用 hub 的 **self 节点**（`managed_nodes.is_self=1`），
-    **而不是** `config.node_id`。
+    显式传入的 `?node_id=` 优先；未传时取 hub 的 self 节点（`managed_nodes.is_self=1`），
+    而不是 `config.node_id`。
 
-    这不是风格问题：`config.toml` 的 `node_id` 来自 `dn42ctl init`，self 节点 id 来自
-    `serve_bootstrap` 独立生成的 `/var/lib/dn42ctl/self_node_id`，两者从不互相校验。
-    以前 admin API 用前者写 peer、desired-state 用后者读 peer —— 一旦分叉，管理员在 UI
-    里加的 peer 永远不会下发，且没有任何报错。默认对齐到 self 就消除了这条静默失败路径。
+    这两个 id 的来源相互独立：`config.toml` 里的 `node_id` 由 `dn42ctl init` 写入，
+    self 节点 id 则由 `serve_bootstrap` 生成并保存在 `/var/lib/dn42ctl/self_node_id`，
+    两者之间从不互相校验。早先 admin API 按前者写入 peer，而 desired-state 按后者读取
+    peer，一旦两个 id 分叉，管理员在 UI 中添加的 peer 就永远不会下发，并且不会有任何
+    报错。默认对齐到 self 节点即可消除这条静默失败路径。
 
-    没有 self 行（`--no-self-register` 部署）时才回落到 `config.node_id`。
+    只有在 self 行不存在时（`--no-self-register` 部署）才回退到 `config.node_id`。
     """
     if node_id:
         return node_id

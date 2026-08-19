@@ -34,8 +34,9 @@ class DesiredState:
     bgp_peers: list[dict[str, Any]] = field(default_factory=list)
     ibgp_peers: list[dict[str, Any]] = field(default_factory=list)
     paths: dict[str, str] = field(default_factory=dict)
-    # 节点自身地址块(own_ipv6 / router_id)。列为 NULL 时对应的键省略,整块为空时
-    # 表示"该节点不由中心管理地址",apply 不会去动 config.toml / bird.conf。
+    # The node's own address block (own_ipv6 / router_id). A NULL column is left out
+    # of the dict; an empty block means the hub does not manage this node's addresses,
+    # and apply leaves config.toml / bird.conf alone.
     node: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -47,19 +48,22 @@ class DesiredState:
             "ibgp_peers": list(self.ibgp_peers),
             "paths": dict(self.paths),
         }
-        # 空 block 不出现在 payload 里 —— 见 compute_content_digest 的零抖动规则。
+        # An empty block stays out of the payload; see the no-churn rule in
+        # compute_content_digest.
         if self.node:
             out["node"] = dict(self.node)
         return out
 
 
 def _node_block(row: Any) -> dict[str, Any]:
-    """节点自身地址块。只放非 NULL 的字段。
+    """The node's own address block, carrying only the non-NULL fields.
 
-    NULL = "该字段不由中心管理":不下发,节点 config.toml 里的现有值原样保留。
+    NULL means the hub does not manage that field: it is not pushed, and whatever the
+    node already has in its config.toml is left untouched.
 
-    endpoint_host 刻意不下发 —— 节点不会拨自己,apply 对它无事可做。desired state 里
-    每个字段都必须对 spoke 有定义明确的作用。
+    endpoint_host is deliberately never pushed. A node does not dial itself, so apply
+    would have nothing to do with it, and every field in the desired state has to have
+    a well-defined effect on the spoke.
     """
     out: dict[str, Any] = {}
     if row is None:
@@ -131,9 +135,11 @@ def compute_content_digest(
     the same digest even though their revision strings differ. This is what lets
     the hub answer "did anything actually change?" without writing to the DB.
 
-    零抖动规则:`node` 只在**非空**时才进 canonical JSON。这不是优化而是正确性 ——
-    无条件加这个键会让全网每个节点的内容哈希在升级瞬间全部改变,于是每个节点各收一次
-    无意义的推送、各写一行 config_revisions。加了条件,没启用该特性的机群逐字节不变。
+    The no-churn rule: `node` only enters the canonical JSON when it is non-empty.
+    That is correctness, not an optimisation. Adding the key unconditionally would
+    change the content hash of every node in the mesh the moment this ships, so every
+    node would receive one meaningless push and write one config_revisions row. With
+    the condition, a fleet that does not use the feature stays byte-for-byte the same.
     """
     canon_obj: dict[str, Any] = {
         "node_id": node_id,
@@ -208,7 +214,7 @@ def compute_desired_fingerprint(*, db_path: Path, node_id: str) -> DesiredFinger
                 bgp_peers=payload.get("bgp_peers", []),
                 ibgp_peers=payload.get("ibgp_peers", []),
                 paths=payload.get("paths", {}),
-                # 老快照里没有这个键。
+                # Older snapshots do not carry this key.
                 node=payload.get("node", {}),
             ),
             pinned_revision=pin.revision,
@@ -263,8 +269,8 @@ def build_desired_state(
         "ibgp_peers": ibgp_peers,
         "paths": paths,
     }
-    # 与 compute_content_digest 保持一致:空 block 不进 canonical JSON,否则升级瞬间
-    # 全网 revision 全变。
+    # Must match compute_content_digest: an empty block stays out of the canonical
+    # JSON, otherwise every node's revision would change the moment this ships.
     if node_block:
         base["node"] = node_block
     revision = _compute_revision(base, generated_at)
@@ -314,7 +320,7 @@ def build_desired_state(
                 bgp_peers=pin.payload.get("bgp_peers", []),
                 ibgp_peers=pin.payload.get("ibgp_peers", []),
                 paths=pin.payload.get("paths", {}),
-                # 老快照里没有这个键。
+                # Older snapshots do not carry this key.
                 node=pin.payload.get("node", {}),
             )
 

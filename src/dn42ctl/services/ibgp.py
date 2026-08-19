@@ -60,8 +60,9 @@ def create_ibgp_peer(
 
     See create_bgp_peer for `node_id` / `render_files` semantics.
 
-    `remote_node_id` 把这条记录关联到它所代表的受管节点,使节点地址变更能够传播过来;
-    None = 不关联。见 docs/architecture/node_addressing.md。
+    `remote_node_id` links this record to the managed node it stands for, which is what
+    lets that node's address changes propagate here; None means it is not linked. See
+    docs/architecture/node_addressing.md.
     """
     node_id = node_id or config.node_id
     db = open_db_and_ensure_node(db_path, node_id)

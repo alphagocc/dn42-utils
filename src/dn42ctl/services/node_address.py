@@ -1,12 +1,14 @@
-"""节点地址集中管理：传播计算与写入。
+"""Central management of node addresses: propagation planning and writes.
 
-一个节点的"地址"会以反范式化的形式出现在**其他**节点的 `ibgp_peers` 行里
-（`endpoint` 的主机部分、`peer_ip`）。本模块负责在节点地址变更时把这些副本改到位。
+A node's address shows up denormalised in *other* nodes' `ibgp_peers` rows, as the
+host part of `endpoint` and as `peer_ip`. This module keeps those copies in step
+whenever a node's address changes.
 
-纯计算 (`plan_propagation`) 与 DB 写入分离，前者只吃 dict、便于表驱动单测。
+The pure computation (`plan_propagation`) is kept separate from the DB writes; it
+takes plain dicts, which makes it easy to unit-test in a table-driven way.
 
-规则、不变量与"无法自动推导因而留给人工"的情形，见
-`docs/architecture/node_addressing.md`。
+For the rules, the invariants, and the cases that cannot be derived automatically and
+are therefore left to a human, see `docs/architecture/node_addressing.md`.
 """
 
 from __future__ import annotations
@@ -45,10 +47,11 @@ def plan_propagation(
     own_ipv6: str | None,
     endpoint_host: str | None,
 ) -> tuple[list[PropagatedChange], list[str]]:
-    """算出指向某节点的 iBGP 行需要怎么改。
+    """Work out how the iBGP rows pointing at a node need to change.
 
-    `rows` 是 `ibgp_peers` 里 `remote_node_id` 指向该节点的所有行（跨全部分区）。
-    `own_ipv6` / `endpoint_host` 是该节点的**新**值；None 表示未纳入中心管理。
+    `rows` is every row in `ibgp_peers` whose `remote_node_id` points at that node,
+    across all partitions. `own_ipv6` / `endpoint_host` are the node's new values;
+    None means the field is not centrally managed.
     """
     changes: list[PropagatedChange] = []
     warnings: list[str] = []
@@ -56,8 +59,10 @@ def plan_propagation(
     for row in rows:
         label = f"{row['node_id']}/{row['name']}"
 
-        # peer_ip <- 目标节点的 own_ipv6。只写非空值:清空 own_ipv6 绝不能把 peer_ip 抹掉,
-        # render_bird_ibgp_peer_conf 对空 peer_ip 直接抛异常,那会让对端整个 apply 失败。
+        # peer_ip follows the target node's own_ipv6, but only for a non-empty value:
+        # clearing own_ipv6 must never blank out peer_ip, because
+        # render_bird_ibgp_peer_conf raises on an empty peer_ip and that would fail the
+        # peer's entire apply.
         if own_ipv6 and row["peer_ip"] != own_ipv6:
             changes.append(
                 PropagatedChange(
@@ -74,7 +79,8 @@ def plan_propagation(
 
         current = (row["endpoint"] or "").strip()
         if not current:
-            # 被动侧从不主动拨号,没有端口可保留 —— 编不出 endpoint,留空并告知。
+            # A passive side never dials out, so there is no port to preserve and no
+            # endpoint that could be derived. Leave it empty and say so.
             warnings.append(f"{label}: endpoint 为空(被动侧),无法推导端口,已跳过")
             continue
         try:
@@ -82,8 +88,9 @@ def plan_propagation(
         except ValidationError:
             warnings.append(f"{label}: endpoint 无法解析 ({current!r}),已跳过")
             continue
-        # 只换 host,端口原样保留 —— NAT 端口映射下端口与对端 listen_port 本就合法地
-        # 不一致,顺手"修正"会精确地弄坏最难排查的那类部署。
+        # Swap the host only and keep the port verbatim: behind NAT port mapping the
+        # port legitimately differs from the peer's listen_port, and "fixing" it would
+        # break exactly the deployments that are hardest to debug.
         new_endpoint = format_endpoint(endpoint_host, port)
         if new_endpoint != current:
             changes.append(
@@ -104,7 +111,7 @@ def _validated(
     validator: Any,
     **kwargs: Any,
 ) -> str | None | _Unset:
-    """UNSET 与 None 原样通过；其余交给 validator。"""
+    """Pass UNSET and None through unchanged; hand anything else to the validator."""
     if isinstance(value, _Unset) or value is None:
         return value
     try:
@@ -125,9 +132,10 @@ def set_node_addresses(
     propagate: bool = True,
     dry_run: bool = False,
 ) -> NodeAddressUpdate:
-    """更新节点地址并（可选）把改动传播到 mesh。
+    """Update a node's addresses and optionally propagate the change across the mesh.
 
-    UNSET = 该字段不改动；None = 清除该字段（交还节点本地管理）。
+    UNSET means leave the field alone; None means clear it, handing the field back to
+    the node's own local management.
     """
     endpoint_host = _validated(endpoint_host, validate_endpoint_host)
     own_ipv6 = _validated(own_ipv6, validate_ipv6_address, field_name="own_ipv6")
@@ -140,7 +148,8 @@ def set_node_addresses(
         if node is None:
             raise Dn42CtlError(f"managed node 不存在: {node_id}")
 
-        # 传播用的是**新**值:未传的字段沿用库里现有的值。
+        # Propagation uses the new values; a field that was not passed falls back to
+        # whatever is already in the DB.
         effective_ipv6 = node.own_ipv6 if isinstance(own_ipv6, _Unset) else own_ipv6
         effective_host = node.endpoint_host if isinstance(endpoint_host, _Unset) else endpoint_host
 
@@ -177,10 +186,11 @@ def set_node_addresses(
 
 
 def backfill_remote_node_ids(*, db_path: Path, dry_run: bool = False) -> tuple[list[str], list[str]]:
-    """按 `managed_nodes.own_ipv6 == ibgp_peers.peer_ip` 唯一匹配回填 remote_node_id。
+    """Backfill remote_node_id from a unique `managed_nodes.own_ipv6 == ibgp_peers.peer_ip` match.
 
-    返回 (已链接的描述, 跳过的描述)。匹配不唯一或匹配不到的行一律跳过并报告——
-    猜错关联会让后续的地址传播改错节点的配置。
+    Returns (descriptions of what was linked, descriptions of what was skipped). A row
+    is skipped and reported whenever the match is ambiguous or absent: guessing the
+    link wrong would make later address propagation rewrite the wrong node's config.
     """
     linked: list[str] = []
     skipped: list[str] = []
@@ -233,7 +243,7 @@ def backfill_remote_node_ids(*, db_path: Path, dry_run: bool = False) -> tuple[l
 
 @dataclass(frozen=True)
 class AdoptSelfResult:
-    """把 peer 行从失效分区重新挂到 self 节点的结果。"""
+    """Result of re-homing peer rows from a stale partition onto the self node."""
 
     from_node_id: str
     to_node_id: str
@@ -249,14 +259,17 @@ def adopt_self_partition(
     from_node_id: str | None = None,
     dry_run: bool = False,
 ) -> AdoptSelfResult:
-    """修复 `config.toml` 的 node_id 与 self 节点 id 分叉的存量部署。
+    """Repair a deployment where `config.toml`'s node_id diverged from the self node id.
 
-    分叉时 admin 曾把 peer 写在 `config.node_id` 分区下，而 desired state 是按
-    `managed_nodes.is_self` 读的——那些 peer 永远不会下发且没有任何报错。这里在一个
-    事务里把它们重新挂到 self 节点。
+    While they were diverged, admin wrote peers under the `config.node_id` partition
+    while the desired state was read via `managed_nodes.is_self`, so those peers were
+    never pushed and nothing reported an error. This re-homes them onto the self node
+    in a single transaction.
 
-    **目标分区非空时拒绝执行**：`UNIQUE(node_id, ifname)` 会让搬迁半途失败，而两边
-    都有行意味着已经有人在新分区下写过配置，合并策略只能由人来定。
+    The operation refuses to run when the target partition is non-empty:
+    `UNIQUE(node_id, ifname)` would make the move fail halfway through, and rows on
+    both sides mean someone has already written config under the new partition, where
+    only a human can decide the merge strategy.
     """
     db = Database.open(db_path)
     try:
@@ -281,7 +294,7 @@ def adopt_self_partition(
             try:
                 db.connection.execute("UPDATE bgp_peers SET node_id=? WHERE node_id=?", (target, source))
                 db.connection.execute("UPDATE ibgp_peers SET node_id=? WHERE node_id=?", (target, source))
-                # 搬迁后目标节点的 desired state 变了,必须推给它。
+                # The move changed the target node's desired state, so it must be pushed.
                 emit_sync_event(db.connection, node_id=target)
                 db.connection.commit()
             except sqlite3.Error as exc:

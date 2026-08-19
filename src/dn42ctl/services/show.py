@@ -94,8 +94,10 @@ def show_bgp_peers(
 ) -> list[BgpPeerView]:
     db = open_db(db_path)
     node_id = node_id or config.node_id
-    # 目标不是本机时,本地文件路径与 live 探测都没有意义:peer_files_for_backend 用的是
-    # **hub 的**目录,对远端节点显示成"缺失"会主动误导;wg/birdc 探的也是本机接口。
+    # For a target that is not this host, local file paths and live probing are both
+    # meaningless: peer_files_for_backend looks at the hub's own directories, so
+    # reporting "missing" for a remote node would actively mislead, and wg/birdc probe
+    # this host's interfaces anyway.
     local = node_id == config.node_id
     include_live = include_live and local
     try:
