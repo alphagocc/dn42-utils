@@ -63,7 +63,6 @@ def _register_and_submit(runner: CliRunner, base_args: list[str], tmp_path: Path
     runner.invoke(app, [*base_args, "node", "add", NODE_A, "--name", "alpha"])
     from dn42ctl.services import submit_proposal
 
-    # Find db_path argument
     db_path = Path(base_args[base_args.index("--db-path") + 1])
     p = submit_proposal(
         db_path=db_path,

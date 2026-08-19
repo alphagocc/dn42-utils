@@ -48,6 +48,18 @@ Notes:
 - Change config outputs: update the corresponding renderer in `src/dn42ctl/render.py` and template(s) together.
 - Auto-peer touches the registry parser: [`src/dn42ctl/services/registry.py`](src/dn42ctl/services/registry.py).
 
+## Comment policy
+
+- **If the code already says it clearly, don't write the comment.** A comment that
+  restates the next line (`# 打开数据库` above `Database.open(...)`, `# 第二次 apply`
+  above a second `apply()` call) is noise — delete it, or rename the variable/helper
+  so the code carries the meaning itself.
+- Keep comments that record **why**: a non-obvious constraint, a rejected alternative,
+  a bug the code is defending against, an invariant that isn't visible locally. These
+  are the expensive knowledge and must survive.
+- Same rule in tests. A test name that describes the behaviour beats a comment above
+  the assertion; the docstring is for *why this case matters*, not *what it does*.
+
 ## Ruff lint policy
 
 - **Never add broad per-directory ruff ignores** (e.g. `"tests/**" = ["S603"]`) for security checks. Use per-file ignores in `pyproject.toml` (e.g. `"tests/test_foo.py" = ["S603"]`).

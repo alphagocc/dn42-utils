@@ -60,7 +60,6 @@ def test_verify_ssh_wrong_key(tmp_path: Path, ssh_keypair: tuple[Path, str]) -> 
         check=True,
     )
     sig = (tmp_path / "msg.txt.sig").read_text("utf-8")
-    # generate a different key to use for verification
     priv2 = tmp_path / "id_other"
     subprocess.run(
         ["ssh-keygen", "-t", "ed25519", "-f", str(priv2), "-N", "", "-q"],
@@ -110,7 +109,6 @@ class TestPGPVerify:
         home = tmp_path / "gnupg"
         home.mkdir(mode=0o700)
         common = ["gpg", "--homedir", str(home), "--batch", "--no-tty", "--quiet"]
-        # generate a key
         subprocess.run(
             common
             + [
@@ -124,7 +122,6 @@ class TestPGPVerify:
             ],
             check=True,
         )
-        # export pubkey
         exp = subprocess.run(
             common + ["--armor", "--export", "test@dn42"],
             capture_output=True,
@@ -134,7 +131,6 @@ class TestPGPVerify:
         msg = b"challenge-nonce-xyz"
         msg_file = tmp_path / "msg.txt"
         msg_file.write_bytes(msg)
-        # clear-sign
         subprocess.run(
             common + ["--passphrase", "", "--pinentry-mode", "loopback", "--clearsign", str(msg_file)],
             check=True,

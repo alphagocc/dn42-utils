@@ -102,12 +102,10 @@ class TestAdminNodesCrud:
         _add_node(admin_client, NODE_A, "alpha")
         resp = admin_client.delete(f"/api/admin/nodes/{NODE_A}", headers=ADMIN_H)
         assert resp.status_code == 200
-        # Now gone.
         resp2 = admin_client.get(f"/api/admin/nodes/{NODE_A}", headers=ADMIN_H)
         assert resp2.status_code == 400
 
     def test_add_requires_admin(self, admin_client: TestClient) -> None:
-        # No auth header -> 401
         resp = admin_client.post("/api/admin/nodes", json={"node_id": NODE_A, "name": "alpha"})
         assert resp.status_code == 401
 

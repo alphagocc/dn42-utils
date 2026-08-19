@@ -83,7 +83,6 @@ class TestRunSelfRegistration:
 
     def test_regenerates_when_node_toml_node_id_mismatch(self, tmp_path: Path) -> None:
         db, sid, ncfg = _paths(tmp_path)
-        # Write a stale node.toml first.
         ncfg.write_text(
             'server = "http://[::1]:4242"\nnode_id = "00000000-0000-4000-8000-000000000000"\ntoken = "ancient"\n',
             encoding="utf-8",

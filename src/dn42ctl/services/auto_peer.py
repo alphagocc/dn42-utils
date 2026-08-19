@@ -47,9 +47,6 @@ class AutoPeerSessionError(AutoPeerError):
     """Session token invalid / ASN mismatch (HTTP 403)."""
 
 
-# --- data structures ---
-
-
 @dataclass(frozen=True)
 class MntnerOptions:
     name: str

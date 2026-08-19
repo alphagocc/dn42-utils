@@ -98,7 +98,6 @@ class TestNodePull:
 class TestNodeApply:
     def test_apply_dry_run(self, runner: CliRunner, base_args: list[str], node_toml_path: Path, tmp_path: Path) -> None:
         cache_db = tmp_path / "node-cache.sqlite3"
-        # Render target dirs in tmp_path.
         peers_dir = tmp_path / "peers"
         babel = tmp_path / "babel.conf"
         networkd_dir = tmp_path / "networkd"
@@ -120,7 +119,6 @@ class TestNodeApply:
             [*base_args, "node", "apply", "--dry-run", "--node-config-path", str(node_toml_path)],
         )
         assert result.exit_code == 0, result.output
-        # In dry-run nothing should be written
         assert not babel.exists()
 
     def test_no_reload_flag(

@@ -416,7 +416,6 @@ class TestStartupApply:
                 emit=lambda _m: None,
             )
         )
-        # Still went on to connect.
         assert ws.sent_types()[0] == MSG_HELLO
 
 
@@ -428,7 +427,6 @@ class TestReconnect:
         def factory(url: str, **kwargs: Any):
             calls.append(kwargs)
             if len(calls) == 1:
-                # Rotate the token on disk between attempts.
                 save_node_config(
                     node_toml,
                     NodeConfig(

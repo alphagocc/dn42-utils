@@ -135,7 +135,6 @@ class TestAcceptIbgpAdd:
 class TestAcceptFailureKeepsPending:
     def test_duplicate_asn(self, sample_config: AppConfig, db_path: Path) -> None:
         _register(db_path)
-        # First accept: ok
         p1 = submit_proposal(
             db_path=db_path,
             node_id=NODE_A,
@@ -229,7 +228,6 @@ class TestAcceptAlreadyDecided:
 class TestAutoAccept:
     def test_peer_add_auto_accept_writes(self, sample_config: AppConfig, db_path: Path) -> None:
         _register(db_path)
-        # Switch policy.
         from dn42ctl.services import set_policy
 
         set_policy(db_path=db_path, node_id=NODE_A, peer_add="auto_accept")

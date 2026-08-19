@@ -115,7 +115,6 @@ class TestEmpty:
         payload = _make_payload(tmp_path)
         _seed_cache(cfg.cache_db_path, payload)
         result = apply(node_config=cfg)
-        # babel.conf should exist (only file rendered when no peers)
         babel_path = Path(payload["paths"]["babel_conf_path"])
         assert babel_path.exists()
         assert any(d.path == babel_path for d in result.diffs)
@@ -132,7 +131,6 @@ class TestBgpPeer:
         assert (peers_dir / "dn42_1234.conf").exists()
         assert (networkd_dir / "dn42_1234.netdev").exists()
         assert (networkd_dir / "dn42_1234.network").exists()
-        # netdev contains private key
         netdev = (networkd_dir / "dn42_1234.netdev").read_text()
         assert "PRIV" in netdev
 
@@ -156,10 +154,8 @@ class TestIbgpPeer:
         payload = _make_payload(tmp_path, ibgp=[_ibgp_peer(has_wg=False)])
         _seed_cache(cfg.cache_db_path, payload)
         apply(node_config=cfg)
-        # no netdev/.network/.nmconnection should exist
         networkd_dir = Path(payload["paths"]["networkd_dir"])
         assert not (networkd_dir / "wg_alpha.netdev").exists()
-        # babel should not include this peer
         babel = Path(payload["paths"]["babel_conf_path"]).read_text()
         assert "wg_alpha" not in babel
 
@@ -173,7 +169,6 @@ class TestDryRun:
         assert result.dry_run is True
         peers_dir = Path(payload["paths"]["peers_dir"])
         assert not (peers_dir / "dn42_1234.conf").exists()
-        # diff should mark create
         actions = {d.action for d in result.diffs}
         assert "create" in actions
         text = apply_diff_text(result)
@@ -186,12 +181,10 @@ class TestUpdate:
         payload = _make_payload(tmp_path, bgp=[_bgp_peer()])
         _seed_cache(cfg.cache_db_path, payload)
         apply(node_config=cfg)
-        # Second apply: everything unchanged.
         result = apply(node_config=cfg)
         actions = {d.action for d in result.diffs}
         assert "unchanged" in actions
 
-        # Modify peer and rerun -> update action.
         modified = _bgp_peer()
         modified["endpoint"] = "new.example:51820"
         _seed_cache(cfg.cache_db_path, _make_payload(tmp_path, bgp=[modified]))
@@ -214,7 +207,6 @@ class TestApplyOverrides:
         _seed_cache(cfg.cache_db_path, payload)
         apply(node_config=cfg)
         assert (custom_peers / "dn42_1234.conf").exists()
-        # Original peers_dir from payload should NOT have been used.
         orig_peers = Path(payload["paths"]["peers_dir"])
         assert not (orig_peers / "dn42_1234.conf").exists()
 
@@ -233,7 +225,6 @@ class TestAtomicWrite:
 class TestStaleDeletion:
     def test_deletes_files_no_longer_in_desired_state(self, tmp_path: Path) -> None:
         cfg = _cfg(tmp_path)
-        # First apply with one BGP peer.
         payload_a = _make_payload(tmp_path, bgp=[_bgp_peer()])
         _seed_cache(cfg.cache_db_path, payload_a)
         apply(node_config=cfg)
@@ -242,14 +233,12 @@ class TestStaleDeletion:
         assert (peers_dir / "dn42_1234.conf").exists()
         assert (networkd_dir / "dn42_1234.netdev").exists()
 
-        # Second apply with the peer removed entirely.
         payload_b = _make_payload(tmp_path, bgp=[])
         _seed_cache(cfg.cache_db_path, payload_b)
         result = apply(node_config=cfg)
         assert not (peers_dir / "dn42_1234.conf").exists()
         assert not (networkd_dir / "dn42_1234.netdev").exists()
         assert not (networkd_dir / "dn42_1234.network").exists()
-        # Result should record the deletions.
         actions = {d.action for d in result.diffs}
         assert "delete" in actions
 
@@ -262,9 +251,7 @@ class TestStaleDeletion:
         _seed_cache(cfg.cache_db_path, payload_b)
         result = apply(node_config=cfg, dry_run=True)
         peers_dir = Path(payload_a["paths"]["peers_dir"])
-        # Files still on disk.
         assert (peers_dir / "dn42_1234.conf").exists()
-        # But diff records pending deletes.
         assert any(d.action == "delete" for d in result.diffs)
 
     def test_does_not_delete_unrelated_files(self, tmp_path: Path) -> None:
@@ -276,7 +263,6 @@ class TestStaleDeletion:
         peers_dir = Path(payload["paths"]["peers_dir"])
         custom = peers_dir / "mycustom.conf"
         custom.write_text("custom peer config\n")
-        # Now re-apply; mycustom.conf must not be touched.
         apply(node_config=cfg)
         assert custom.exists()
 
@@ -503,7 +489,6 @@ class TestEmptyPeerIpIsSkipped:
         result = apply(node_config=cfg)
         names = {p.name for p in result.written}
         assert "ibgp_alpha.conf" not in names
-        # 其它文件照常写
         assert {"wg_alpha.netdev", "dn42_1234.conf", "babel.conf"} <= names
 
 

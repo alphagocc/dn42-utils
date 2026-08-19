@@ -227,7 +227,6 @@ class TestAuthFailureIsHandled:
 
 class TestAdminProposalsReports:
     def test_proposals_empty(self, runner: CliRunner, base_args: list[str]) -> None:
-        # Need to register node first.
         runner.invoke(app, [*base_args, "node", "add", NODE_A, "--name", "alpha"])
         result = runner.invoke(app, [*base_args, "node", "proposals", NODE_A])
         assert result.exit_code == 0

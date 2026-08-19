@@ -49,7 +49,6 @@ class TestRotateTokenSelf:
         rotated = rotate_token(db_path=db_path, node_id=NODE_SELF, self_node_toml_path=toml)
         assert rotated.self_node_toml_updated is True
         assert rotated.self_node_toml_path == toml
-        # token in file matches the freshly-issued plaintext
         loaded = load_node_config(toml)
         assert loaded.token == rotated.plaintext
         assert loaded.token != "stale-token"
@@ -82,7 +81,6 @@ class TestRotateTokenSelf:
         _seed_self_toml(toml, token="self-keeps-this")
         rotated = rotate_token(db_path=db_path, node_id=NODE_A, self_node_toml_path=toml)
         assert rotated.self_node_toml_updated is False
-        # toml content not touched.
         loaded = load_node_config(toml)
         assert loaded.token == "self-keeps-this"
 
@@ -130,7 +128,6 @@ class TestRemoveSelf:
                 force=False,
                 self_node_toml_path=toml,
             )
-        # toml untouched.
         assert toml.exists()
 
 

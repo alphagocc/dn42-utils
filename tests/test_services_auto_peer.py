@@ -117,7 +117,6 @@ def test_submit_peer_creates_proposal(
     mock_wg_keypair,
 ) -> None:
     cfg = _config_with_registry(sample_config, dn42_registry)
-    # bootstrap self node
     db = Database.open(db_path)
     try:
         ManagedNodeStore(db.connection).upsert_self("test-node", name="self")

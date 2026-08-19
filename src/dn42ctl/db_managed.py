@@ -150,8 +150,6 @@ class ManagedNodeStore:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
 
-    # ---- create / read ----
-
     def add(self, node_id: str, name: str) -> ManagedNode:
         now = _now_iso()
         try:
@@ -277,8 +275,6 @@ class ManagedNodeStore:
             raise DatabaseError("upsert 后无法读取 self 节点")
         return node
 
-    # ---- delete ----
-
     def delete(self, node_id: str, *, force: bool = False) -> ManagedNode | None:
         existing = self.get(node_id)
         if existing is None:
@@ -294,8 +290,6 @@ class ManagedNodeStore:
             self._conn.rollback()
             raise DatabaseError("删除 managed_node 失败") from exc
         return existing
-
-    # ---- token signing / verification ----
 
     def set_token_hash(self, node_id: str, token_hash: str) -> None:
         now = _now_iso()
@@ -335,8 +329,6 @@ class ManagedNodeStore:
                 return _row_to_managed_node(row)
         return None
 
-    # ---- policy ----
-
     def set_write_policy(self, node_id: str, policy: dict[str, str]) -> ManagedNode:
         normalized = validate_write_policy(policy)
         now = _now_iso()
@@ -367,8 +359,6 @@ class ManagedNodeStore:
         except sqlite3.Error as exc:
             self._conn.rollback()
             raise DatabaseError("更新 last_seen_at 失败") from exc
-
-    # ---- 名称 / 启用状态 / 地址 ----
 
     def set_name(self, node_id: str, name: str) -> ManagedNode:
         return self._update_fields(node_id, {"name": name}, events=())
@@ -866,8 +856,6 @@ class RevisionStore:
             self._conn.rollback()
             raise DatabaseError("trim revisions 失败") from exc
         return cur.rowcount
-
-    # --- rollback pin ---
 
     def pin(self, node_id: str, revision: str) -> None:
         """Mark `revision` as the desired revision for `node_id`. The revision

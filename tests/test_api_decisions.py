@@ -156,7 +156,6 @@ class TestAutoAcceptViaApi:
     def test_peer_add_auto_accept_writes_during_submit(self, client: TestClient) -> None:
         token = _register(client)
         token_h = {"Authorization": f"Bearer {token}"}
-        # Switch policy.
         client.patch(
             f"/api/admin/nodes/{NODE_A}/policy",
             json={"peer_add": "auto_accept"},

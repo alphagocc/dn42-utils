@@ -46,9 +46,6 @@ def _register(db_path: Path) -> None:
         db.close()
 
 
-# ---- service layer ----
-
-
 class TestGetNodeStatus:
     def test_fresh_node(self, db_path: Path) -> None:
         _register(db_path)
@@ -80,9 +77,6 @@ class TestGetNodeStatus:
         Database.open(db_path).close()
         with pytest.raises(Dn42CtlError, match="不存在"):
             get_node_status(db_path=db_path, node_id=NODE_A)
-
-
-# ---- API layer ----
 
 
 @pytest.fixture

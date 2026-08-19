@@ -41,7 +41,6 @@ def client_no_registry(sample_config: AppConfig, db_path: Path) -> TestClient:
 def client(sample_config: AppConfig, dn42_registry: Path, db_path: Path, mock_wg_keypair) -> TestClient:
     cfg = _config_with_registry(sample_config, dn42_registry)
     configure(config=cfg, db_path=db_path, token="admin-tok")
-    # bootstrap self node
     db = Database.open(db_path)
     try:
         ManagedNodeStore(db.connection).upsert_self("test-node", name="self")
@@ -69,11 +68,9 @@ def test_lookup_unknown_asn(client: TestClient) -> None:
 
 
 def test_challenge_and_verify_and_submit(client: TestClient) -> None:
-    # step 1: lookup
     r = client.post("/api/public/auto-peer/lookup", json={"asn": 4242421234})
     assert r.status_code == 200
 
-    # step 2: challenge
     r = client.post(
         "/api/public/auto-peer/challenge",
         json={"asn": 4242421234, "mntner": "TEST-MNT", "auth_index": 0},
@@ -92,7 +89,6 @@ def test_challenge_and_verify_and_submit(client: TestClient) -> None:
     token = r.json()["peer_session_token"]
     assert r.json()["verified_asn"] == 4242421234
 
-    # step 4: submit
     r = client.post(
         "/api/public/auto-peer/submit",
         json={

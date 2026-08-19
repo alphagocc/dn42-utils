@@ -1216,8 +1216,6 @@ def cmd_serve(
     uvicorn.run(api_app, host=host, port=port)
 
 
-# --- node management (admin subcommands) ---
-
 node_app = typer.Typer(help="多节点中心化同步: admin 与节点同步命令")
 
 
@@ -2036,8 +2034,6 @@ def cmd_node_rollback_clear(
     typer.echo(f"已清除 pin: node={node_id} (恢复到最新)")
 
 
-# --- system install / uninstall ---
-
 system_app = typer.Typer(help="系统组件安装/卸载 (firewalld, nftables, ROA timer)")
 
 _SYSTEM_COMPONENTS = ["firewalld-conf", "nftables-conf", "roa-service"]
@@ -2123,8 +2119,6 @@ def cmd_system_uninstall(
 
 app.add_typer(system_app, name="system")
 
-
-# --- deploy ---
 
 deploy_app = typer.Typer(help="部署 Web UI / daemon 到系统目录")
 

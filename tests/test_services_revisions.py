@@ -104,7 +104,6 @@ class TestRollback:
         ds3 = build_desired_state(db_path=db_path, node_id=NODE_A)
         assert ds3.revision == ds1.revision
         assert len(ds3.bgp_peers) == 1  # only the first peer
-        # Confirm pinned
         pin = get_pinned(db_path=db_path, node_id=NODE_A)
         assert pin is not None
         assert pin.revision == ds1.revision
@@ -117,7 +116,6 @@ class TestRollback:
         rollback_to(db_path=db_path, node_id=NODE_A, revision=ds1.revision)
         clear_rollback(db_path=db_path, node_id=NODE_A)
         ds_after = build_desired_state(db_path=db_path, node_id=NODE_A)
-        # Now back to latest content (2 peers).
         assert len(ds_after.bgp_peers) == 2
 
     def test_rollback_unknown_revision(self, db_path: Path) -> None:
@@ -159,7 +157,6 @@ class TestTrim:
             _insert_peer(db_path, asn)
             build_desired_state(db_path=db_path, node_id=NODE_A, keep_latest=2)
             _delete_peer(db_path, asn)
-        # Pin still resolves; pull returns pinned payload.
         pin = get_pinned(db_path=db_path, node_id=NODE_A)
         assert pin is not None
         assert pin.revision == first_rev

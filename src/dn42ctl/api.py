@@ -239,10 +239,8 @@ app = FastAPI(title="dn42ctl API", lifespan=_lifespan)
 admin_prefix = "/api/admin"
 node_prefix = "/api/v1/nodes"
 
-# Admin node-management endpoints under /api/admin/.
 _admin_nodes_router = APIRouter(prefix=admin_prefix, dependencies=[Depends(require_admin)])
 
-# Node-token endpoints under /api/v1/nodes/{node_id}/...
 _node_router = APIRouter(prefix=node_prefix)
 
 # Public (no-auth) routes for the auto-peer wizard.
@@ -450,7 +448,7 @@ def api_node_desired(
         state = build_desired_state(db_path=_get_db_path(), node_id=node_id)
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    # Touch last_seen on successful pull (best-effort, ignore failures).
+    # Best-effort: a failed last_seen write must not fail the pull.
     try:
         db = Database.open(_get_db_path())
         try:
@@ -1215,7 +1213,7 @@ def _monotonic_now() -> float:
     return time.monotonic()
 
 
-# Show endpoints under /api/show/ (mirrors CLI `dn42ctl show`).
+# Mirrors CLI `dn42ctl show`.
 _show_router = APIRouter(prefix="/api/show", dependencies=[Depends(require_admin)])
 
 
@@ -1285,8 +1283,6 @@ def api_version() -> dict:
 
     return {"version": __version__, "commit": get_commit()}
 
-
-# --- Mount routers ---
 
 app.include_router(_admin_nodes_router)
 app.include_router(_node_router)

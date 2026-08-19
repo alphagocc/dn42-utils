@@ -99,7 +99,6 @@ def discover_bird_paths(
         )
 
         if peers_dir or babel_path or roa_v6_path:
-            # Found useful paths; return immediately.
             return BirdPathsDiscovery(
                 bird_conf_path=p,
                 bird_peers_dir=peers_dir,
@@ -357,7 +356,6 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
     except OSError as exc:
         warnings.append(f"无法访问 babel.conf: {babel_path} ({exc})")
 
-    # Candidate interfaces from known config file names.
     candidates: set[str] = set()
 
     def _collect_stems(dirs: list[Path], suffix: str) -> None:
@@ -385,7 +383,6 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
         kind = "bgp" if ifname.startswith(IFNAME_PREFIX_BGP) else "ibgp"
         peer_name = ifname[len(IFNAME_PREFIX_IBGP) :] if kind == "ibgp" else None
 
-        # Locate config sources.
         netdev_path = _find_first([d / f"{ifname}.netdev" for d in networkd_dirs])
         network_path = _find_first([d / f"{ifname}.network" for d in networkd_dirs])
 

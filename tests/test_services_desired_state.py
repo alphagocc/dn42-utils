@@ -358,7 +358,6 @@ class TestNodeBlockInDesiredState:
 
 class TestRequireManagedNodeExists:
     def test_missing(self, db_path: Path) -> None:
-        # DB exists (created by build_desired_state? No, that returns empty); create.
         Database.open(db_path).close()
         with pytest.raises(Dn42CtlError, match="不存在"):
             require_managed_node_exists(db_path=db_path, node_id=NODE_A)

@@ -151,7 +151,6 @@ def genconf(
             peer_asn = row["peer_asn"]
             backend = row["net_backend"] or "networkd"
 
-            # Remove legacy NM profile if it exists
             legacy_nm = nm_dir / f"{ifname}.nmconnection"
             legacy_nm.unlink(missing_ok=True)
 
@@ -199,7 +198,6 @@ def genconf(
                 warnings.append(f"iBGP peer {peer_name!r}: peer_ip 为空，跳过 Bird conf 生成")
 
             if has_wg:
-                # Remove legacy NM profile if it exists
                 legacy_nm = nm_dir / f"{ifname}.nmconnection"
                 legacy_nm.unlink(missing_ok=True)
 

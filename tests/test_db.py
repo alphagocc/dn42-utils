@@ -89,11 +89,9 @@ class TestMigrations:
         )
         conn.commit()
 
-        # Now create a Database instance wrapping this connection and run migrate
         db = Database(conn)
         db.migrate()
 
-        # Verify conversion happened
         bgp_row = conn.execute("SELECT net_backend FROM bgp_peers WHERE peer_asn=4242421111").fetchone()
         assert bgp_row["net_backend"] == "networkd", f"BGP peer not converted: {bgp_row['net_backend']}"
 

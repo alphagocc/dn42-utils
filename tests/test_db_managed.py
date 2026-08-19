@@ -255,7 +255,6 @@ class TestTouchLastSeen:
 class TestForeignKeyCascade:
     def test_cascade_via_nodes_delete(self, store: ManagedNodeStore, mem_db: Database) -> None:
         store.add(NODE_A, "alpha")
-        # Inserting a proposal referencing this node should succeed.
         mem_db.connection.execute(
             "INSERT INTO config_proposals(node_id,source,kind,payload_json,received_at) VALUES (?,?,?,?,?)",
             (NODE_A, "push", "peer_add", "{}", "2026-05-18T00:00:00+00:00"),
