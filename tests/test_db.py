@@ -32,11 +32,6 @@ class TestMigrations:
         ibgp_cols = {row[1] for row in conn.execute("PRAGMA table_info(ibgp_peers)")}
         assert "remote_node_id" in ibgp_cols
 
-    def test_all_versions_applied(self, mem_db: Database) -> None:
-        rows = mem_db._conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
-        versions = [row[0] for row in rows]
-        assert versions == [1, 8, 9, 10]
-
     def test_migrate_idempotent(self, mem_db: Database) -> None:
         mem_db.migrate()
         mem_db.migrate()

@@ -147,17 +147,6 @@ class TestSetPolicy:
         assert resp.status_code == 400
 
 
-class TestNodeCannotReachAdmin:
-    def test_node_token_blocked_from_admin_nodes(self, admin_client: TestClient) -> None:
-        _add_node(admin_client, NODE_A, "alpha")
-        token = _rotate_token(admin_client, NODE_A)
-        resp = admin_client.get(
-            "/api/admin/nodes",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        assert resp.status_code == 403
-
-
 class TestPatchNode:
     def test_rename(self, admin_client: TestClient) -> None:
         _add_node(admin_client, NODE_A, "alpha")

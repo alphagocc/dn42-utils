@@ -148,20 +148,10 @@ class TestNodeSetAddress:
         )
         assert result.exit_code != 0
 
-    def test_invalid_value_rejected(self, runner: CliRunner, base_args: list[str]) -> None:
+    def test_service_error_becomes_nonzero_exit(self, runner: CliRunner, base_args: list[str]) -> None:
+        """校验规则本身在 service / API 层测;这里只钉住 Dn42CtlError -> 非零退出码这一段接线。"""
         runner.invoke(app, [*base_args, "node", "add", NODE_A, "--name", "alpha"])
         result = runner.invoke(app, [*base_args, "node", "set-address", NODE_A, "--own-ipv6", "not-an-ip"])
-        assert result.exit_code != 0
-
-    def test_endpoint_host_with_port_rejected(self, runner: CliRunner, base_args: list[str]) -> None:
-        runner.invoke(app, [*base_args, "node", "add", NODE_A, "--name", "alpha"])
-        result = runner.invoke(
-            app, [*base_args, "node", "set-address", NODE_A, "--endpoint-host", "a.example.com:51820"]
-        )
-        assert result.exit_code != 0
-
-    def test_unknown_node_rejected(self, runner: CliRunner, base_args: list[str]) -> None:
-        result = runner.invoke(app, [*base_args, "node", "set-address", NODE_A, "--own-ipv6", "fd42::1"])
         assert result.exit_code != 0
 
     def test_dry_run_does_not_write(self, runner: CliRunner, base_args: list[str]) -> None:

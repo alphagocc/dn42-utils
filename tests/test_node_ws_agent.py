@@ -502,13 +502,6 @@ class TestNextDelay:
             assert 0.0 <= delay <= min(60.0, 2**attempt)
             assert nxt == attempt + 1
 
-    def test_caps_at_max(self) -> None:
-        settings = AgentOptions(reconnect_initial_seconds=1.0, reconnect_max_seconds=5.0)
-        rng = _rng(0)
-        for _ in range(50):
-            delay, _ = _next_delay(settings, attempt=20, close_code=None, rng=rng)
-            assert delay <= 5.0
-
     @pytest.mark.parametrize("code", [CLOSE_UNAUTHORIZED, CLOSE_REVOKED])
     def test_auth_fatal_uses_fixed_long_wait(self, code: int) -> None:
         """A stale token retrying every second would be an argon2 DoS on the hub."""

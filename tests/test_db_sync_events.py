@@ -4,7 +4,12 @@ import sqlite3
 
 import pytest
 
-from dn42ctl.constants import SYNC_EVENT_ACCESS_REVOKED, SYNC_EVENT_DESIRED, SYNC_EVENTS_KEEP
+from dn42ctl.constants import (
+    SYNC_EVENT_ACCESS_REVOKED,
+    SYNC_EVENT_DESIRED,
+    SYNC_EVENTS_KEEP,
+    SYNC_EVENTS_TRIM_EVERY,
+)
 from dn42ctl.db import BgpPeerRecord, Database, DatabaseError, IbgpPeerRecord, emit_sync_event
 from dn42ctl.db_managed import ManagedNodeStore, PropagatedChange, RevisionStore, SyncEventStore
 
@@ -56,21 +61,6 @@ def _events(db: Database) -> list[tuple[str, str]]:
 
 
 class TestMigration:
-    def test_table_exists(self, mem_db: Database) -> None:
-        row = mem_db.connection.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='sync_events'"
-        ).fetchone()
-        assert row is not None
-
-    def test_version_9_applied(self, mem_db: Database) -> None:
-        applied = {r[0] for r in mem_db.connection.execute("SELECT version FROM schema_migrations").fetchall()}
-        assert 9 in applied
-
-    def test_rerunning_migrate_is_idempotent(self, mem_db: Database) -> None:
-        mem_db.migrate()
-        mem_db.migrate()
-        assert _events(mem_db) == []
-
     def test_autoincrement_declared(self, mem_db: Database) -> None:
         """Plain INTEGER PRIMARY KEY would reuse rowids after a trim, silently
         rewinding the watcher cursor. The DDL must say AUTOINCREMENT.
@@ -348,12 +338,15 @@ class TestSyncEventStore:
 
 class TestTrimming:
     def test_bounded_growth(self, mem_db: Database) -> None:
-        # Enough rows to cross several trim thresholds.
+        """Trimming is amortized, so the table settles at KEEP plus at most one
+        un-trimmed batch. Asserting against the inserted count instead would pass
+        even with trimming disabled entirely.
+        """
         for _ in range(SYNC_EVENTS_KEEP + 600):
             emit_sync_event(mem_db.connection, node_id=NODE_A)
         mem_db.connection.commit()
         count = mem_db.connection.execute("SELECT COUNT(*) FROM sync_events").fetchone()[0]
-        assert count <= SYNC_EVENTS_KEEP + 600
+        assert count <= SYNC_EVENTS_KEEP + SYNC_EVENTS_TRIM_EVERY
 
     def test_cursor_stays_monotonic_across_trim(self, mem_db: Database) -> None:
         """The AUTOINCREMENT regression test.

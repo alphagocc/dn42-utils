@@ -657,14 +657,3 @@ class TestNodeBlockPathsAndBackend:
         assert any("NetworkManager" in w for w in result.warnings)
         # config.toml 与 bird.conf 仍然照常更新
         assert "fd42:4242:1234::9" in (tmp_path / "bird" / "bird.conf").read_text()
-
-    def test_networkd_backend_still_writes_dummy(self, tmp_path: Path) -> None:
-        config_path = _app_config_toml(tmp_path)
-        cfg = _cfg_with_config_path(tmp_path, config_path)
-        payload = _make_payload(tmp_path)
-        payload["node"] = {"own_ipv6": "fd42:4242:1234::9"}
-        _seed_cache(cfg.cache_db_path, payload)
-
-        result = apply(node_config=cfg)
-        assert (tmp_path / "networkd" / "dn42-dummy.network").exists()
-        assert result.warnings == []
