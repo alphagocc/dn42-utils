@@ -4,9 +4,10 @@ import json
 import os
 import secrets
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import typer
 
@@ -69,7 +70,15 @@ def _db_open_hint(db_path: Path) -> str:
     )
 
 
-def _cli_validate(fn: Any, *args: Any, **kwargs: Any) -> Any:
+_ValidatedT = TypeVar("_ValidatedT")
+
+
+def _cli_validate(fn: Callable[..., _ValidatedT], *args: Any, **kwargs: Any) -> _ValidatedT:
+    """把 validators 的 ValidationError 翻译成 typer.BadParameter。
+
+    返回值必须跟着 fn 的返回类型走：validator 会做归一化（大小写、去空白），调用方
+    普遍把结果赋回原变量，返回 Any 会把该变量已有的类型收窄整个抹掉。
+    """
     try:
         return fn(*args, **kwargs)
     except _ValidationError as exc:
