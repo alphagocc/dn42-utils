@@ -60,7 +60,7 @@ class AgentOptions:
     reconnect_initial_seconds: float = 1.0
     reconnect_max_seconds: float = 60.0
     # Auth-fatal closes get a long fixed wait rather than the exponential ramp:
-    # a stale token retrying every second is an argon2 DoS against the hub.
+    # a stale token retrying every second is a reconnect storm against the hub.
     auth_retry_seconds: float = 300.0
     reconcile_interval_seconds: float = 900.0
     heartbeat_interval_seconds: float = 60.0

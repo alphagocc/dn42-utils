@@ -17,7 +17,7 @@ class TestNoLingeringWriteTransaction:
     """自定义异常绕过 except sqlite3.Error,不显式 rollback 就会留下写事务。
 
     0 行匹配的 UPDATE 照样拿 RESERVED 锁,另一个连接会先卡满 busy_timeout 再报
-    database is locked。见 docs/architecture/database.md 的"事务纪律"。
+    database is locked。见 docs/architecture/database.md 的"事务准则"。
     """
 
     def test_update_bgp_peer_missing(self, mem_db: Database) -> None:

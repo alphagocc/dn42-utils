@@ -105,7 +105,7 @@ def configure(
     """Inject runtime config. `token` becomes the admin token.
 
     Node tokens are managed separately via `dn42ctl node token rotate` and stored
-    as argon2id hashes in `managed_nodes.api_token_hash`; they are not configured here.
+    as SHA-256 hashes in `managed_nodes.api_token_hash`; they are not configured here.
 
     `sync_poll_interval` is how often the watcher scans `sync_events`, i.e. the
     worst-case delay between a config change and the node being told about it.

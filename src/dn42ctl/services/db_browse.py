@@ -100,10 +100,10 @@ def _require_table(table: str) -> tuple[str, tuple[str, ...]]:
 def _redact_value(value: Any) -> Any:
     """Map a non-NULL value to "***" and NULL to None.
 
-    Never emit a prefix of the real value: an argon2 prefix leaks the parameters, and
-    a WireGuard private key prefix is a genuine reduction of the key space. Preserving
-    the NULL / non-NULL distinction is intentional — that is exactly the has_token
-    semantics the Nodes page already relies on.
+    Never emit a prefix of the real value: a token digest prefix makes offline matching
+    feasible, and a WireGuard private key prefix is a genuine reduction of the key
+    space. Preserving the NULL / non-NULL distinction is intentional — that is exactly
+    the has_token semantics the Nodes page already relies on.
     """
     return None if value is None else REDACTED
 

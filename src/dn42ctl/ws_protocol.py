@@ -72,7 +72,7 @@ CLOSE_NOT_FOUND = 4404
 CLOSE_HANDSHAKE_TIMEOUT = 4408
 
 # Closes the agent must not retry against with the exponential ramp: a stale
-# token reconnecting every second is an argon2 DoS on the hub.
+# token reconnecting every second is a reconnect storm on the hub.
 AUTH_FATAL_CLOSE_CODES = frozenset(
     {
         CLOSE_REVOKED,

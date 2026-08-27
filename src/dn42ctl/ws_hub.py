@@ -13,7 +13,7 @@ Two moving parts:
 
 Every service call in here is synchronous and opens its own sqlite connection, so
 each one is dispatched to a worker thread. Running them on the event loop would
-stall every other connection — an argon2 verify alone is 50–100 ms per row.
+stall every other connection — a desired-state build alone touches sqlite repeatedly.
 """
 
 from __future__ import annotations
@@ -216,7 +216,7 @@ def _extract_bearer(header_value: str | None) -> str | None:
 
 
 def _authenticate_sync(*, db_path: Path, token: str, node_id: str) -> _AuthResult:
-    """Runs in a worker thread. One argon2 pass per connection, never per frame."""
+    """Runs in a worker thread. One token check per connection, never per frame."""
     db = Database.open(db_path)
     try:
         node = ManagedNodeStore(db.connection).authenticate(token)

@@ -302,7 +302,7 @@ def _next_delay(
 
     Full rather than equal jitter because the dominant failure mode is the whole
     fleet reconnecting in lockstep after a hub restart, and `authenticate` is an
-    O(nodes) argon2 scan — the flatter the burst, the better.
+    O(nodes) auth scan plus a desired-state build — the flatter the burst, the better.
 
     Auth-fatal closes bypass the ramp entirely and use a long fixed wait.
     """

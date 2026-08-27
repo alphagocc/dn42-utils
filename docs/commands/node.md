@@ -51,7 +51,7 @@ hub 以非 root 的 `dn42ctl` 用户运行，而 `node.toml` 是 `0600 root:root
 
 所以第 4 步失败**不能**回滚（明文只存在于这一次响应里，回滚会把它丢掉），也**不能**沉默。`RotatedToken` 带 `self_node_toml_updated` 与 `self_node_toml_error` 两个字段，CLI 打 warning，`POST /api/admin/nodes/{id}/token` 的响应体一并返回，供 Web UI 提示管理员手工更新文件。
 
-> 即使漏了，`dn42ctl serve` 下次启动时会发现 `node.toml` 与库中 hash 对不上并自动重签（见 [`sync_hub_spoke.md`](../architecture/sync_hub_spoke.md)）。但那要等到下一次重启，中间这段时间 hub 是不收敛的，所以仍然要当场告警。
+> 即使漏了，`dn42ctl serve` 下次启动时会发现 `node.toml` 与库中 hash 对不上并自动重签（见 [`sync_hub_spoke.md`](../architecture/sync_hub_spoke.md)）。但那要等到下一次重启，中间这段时间 hub 的配置停止更新，所以仍然要当场告警。
 
 ### `dn42ctl node policy set <node-id> [选项]`
 
@@ -250,6 +250,6 @@ token   = "<token>"
 
 ## 与 `dn42ctl serve` 的关系
 
-`dn42ctl serve` 不在本组命令下，但它的启动序列与 self 节点强相关：跑迁移、读取或创建 `/var/lib/dn42ctl/self_node_id`、UPSERT `managed_nodes` 中 `is_self=1` 的行、在 `node.toml` 缺失或不匹配时生成 self token，最后监听 `[::1]:4242` 并起 `sync_events` watcher。
+`dn42ctl serve` 不在本组命令下，但它的启动序列与 self 节点强相关：跑迁移、读取或创建 `/var/lib/dn42ctl/self_node_id`、UPSERT `managed_nodes` 中 `is_self=1` 的行、在 `node.toml` 与库中 hash 不一致时生成 self token，最后监听 `[::1]:4242` 并起 `sync_events` watcher。
 
 `--no-self-register` 关闭其中的自动注册步骤。`--sync-poll-interval`（默认 1.0 秒）调整 watcher 轮询间隔，决定配置变更推送到节点的最大延迟。完整语义见 `docs/architecture/sync_hub_spoke.md`。

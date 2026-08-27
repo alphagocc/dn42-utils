@@ -373,7 +373,7 @@ class ManagedNodeStore:
         """启用/禁用节点。
 
         **禁用必须发 access_revoked。** `authenticate` 虽然过滤 enabled=1,但 WS 握手
-        只验一次 argon2、之后整条连接吃缓存 principal —— 不发事件的话,禁用一个节点不会
+        只验一次 token、之后整条连接吃缓存 principal —— 不发事件的话,禁用一个节点不会
         影响它**已经建立**的连接,该连接将无限期保持授权。
         """
         events: tuple[tuple[str, str], ...] = ()
