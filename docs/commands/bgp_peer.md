@@ -18,7 +18,7 @@
 ### 输入校验
 
 - `--asn`：正整数。
-- `--pubkey`：WireGuard 公钥，base64 格式（40~44 字符）。
+- `--pubkey`：WireGuard 公钥，base64 格式，解码后须为 32 字节。
 - `--endpoint`：`host:port` 或 `[IPv6]:port` 格式，端口 1-65535。可为空。
 - `--peer-lla`：合法的 IPv6 地址。
 - `--listen-port`：0 或 1-65535。
@@ -65,5 +65,5 @@
 ### 行为
 
 - 删除前必须二次确认（交互 prompt）。
-- 删除数据库记录。
-- 删除生成文件（Bird peer conf + networkd 文件）。
+- 先删数据库记录，再删生成文件（Bird peer conf + networkd 文件）。顺序见 [`../architecture/database.md`](../architecture/database.md)。
+- 删不掉的文件（权限等）只打 warning，不让命令失败——DB 行已经删了，退不回去。

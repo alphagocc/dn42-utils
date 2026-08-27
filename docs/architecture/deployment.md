@@ -207,9 +207,9 @@ dn42ctl node token rotate <node-id>          # 明文只在这里返回一次
 
 ## self node 自动注册
 
-`dn42ctl serve` 启动时自动完成 self 节点注册：跑迁移、生成或读取 `/var/lib/dn42ctl/self_node_id`、UPSERT `managed_nodes` 中 `is_self=1` 的行、在 `/etc/dn42ctl/node.toml` 缺失或不匹配时签发 self token，最后监听 `[::1]:4242` 并起 `sync_events` watcher。各步骤的详细语义见 `docs/architecture/sync_hub_spoke.md`。
+`dn42ctl serve` 启动时自动完成 self 节点注册：跑迁移、生成或读取 `/var/lib/dn42ctl/self_node_id`、UPSERT `managed_nodes` 中 `is_self=1` 的行（同时清零其它行）、在 `/etc/dn42ctl/node.toml` 与库中 hash 不一致时签发 self token，最后监听 `[::1]:4242` 并起 `sync_events` watcher。各步骤的详细语义见 `docs/architecture/sync_hub_spoke.md`。
 
-第一次 `enable --now` 后 self 节点完全就绪，后续 restart 幂等，不会重新生成 token。`--no-self-register` 关闭其中的注册步骤，适用于测试或不希望中心机自管的部署。
+第一次 `enable --now` 后 self 节点完全就绪，后续 restart 幂等，只要 `node.toml` 与库中 hash 仍然对得上就不会重新生成 token。`--no-self-register` 关闭其中的注册步骤，适用于测试或不希望中心机自管的部署。
 
 ## token 轮换
 

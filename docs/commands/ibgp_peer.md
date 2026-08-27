@@ -31,7 +31,7 @@ iBGP 互联与 eBGP（`bgp peer`）在几处刻意不同，修改前请先理解
 
 - `--name`：非空，自动规范化（非字母数字下划线字符替换为 `_`，转小写）。
 - `--peer-ip`：合法的 IPv6 地址（允许带 `/prefix`）。
-- `--pubkey`：WireGuard 公钥，base64 格式（40~44 字符）。
+- `--pubkey`：WireGuard 公钥，base64 格式，解码后须为 32 字节。
 - `--endpoint`：`host:port` 或 `[IPv6]:port` 格式，端口 1-65535。可为空。
 - `--peer-lla`：合法的 IPv6 地址（允许带 `/prefix`）。
 - `--rxcost`：0-65535。
@@ -84,6 +84,7 @@ iBGP 互联与 eBGP（`bgp peer`）在几处刻意不同，修改前请先理解
 ### 行为
 
 - 删除前必须二次确认（交互 prompt）。
-- 删除数据库记录。
-- 有 WG 时：删除生成文件（Bird peer conf + networkd 文件），并重生成 `babel.conf`。
+- 先删数据库记录，再删生成文件。顺序见 [`../architecture/database.md`](../architecture/database.md)。
+- 有 WG 时：删除 Bird peer conf + networkd 文件，并重生成 `babel.conf`。
 - 无 WG 时：仅删除 Bird peer conf。
+- 删不掉的文件（权限等）只打 warning，不让命令失败——DB 行已经删了，退不回去。
