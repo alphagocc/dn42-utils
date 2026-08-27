@@ -117,6 +117,11 @@ hub 以非 root 的 `dn42ctl` 用户运行，而 `node.toml` 是 `0600 root:root
 
 - 与节点直接 push proposal 等价；提供这个命令是为了管理员可以从历史 report 里挑选导入。
 - 成功后 `imported_at` 字段被填充。
+- 返回计数包含 `malformed`：payload 的 `bgp_peers` / `ibgp_peers` 数组里不是对象的条目会被跳过并计入这一项。
+  这些条目**不会**让整次导入失败——它们本来就没法转成 peer——但也不能不作声：`imported_at` 一旦写上，
+  这份 report 就再也不能重导（`已被导入过` 会直接拒绝），丢掉的条目将没有任何补救途径。CLI 对
+  `malformed > 0` 打 warning，REST 响应带该字段。要真正找回那些 peer，只能让节点重新 `node scan` 出一份新
+  report。
 
 ### `dn42ctl node revisions <node-id>`（阶段 5）
 

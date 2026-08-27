@@ -303,7 +303,7 @@ class TestImportReport:
             },
         )
         counts = import_report(config=sample_config, db_path=db_path, report_id=r.id)
-        assert counts == {"bgp_created": 1, "bgp_skipped": 0, "ibgp_created": 1, "ibgp_skipped": 0}
+        assert counts == {"bgp_created": 1, "bgp_skipped": 0, "ibgp_created": 1, "ibgp_skipped": 0, "malformed": 0}
         listed = list_reports(db_path=db_path, node_id=NODE_A)
         assert listed[0].imported_at is not None
         # The created peer must belong to NODE_A (the reporting node),
@@ -336,6 +336,23 @@ class TestImportReport:
         counts = import_report(config=sample_config, db_path=db_path, report_id=r2.id)
         assert counts["bgp_skipped"] == 1
         assert counts["bgp_created"] == 0
+
+    def test_malformed_entries_are_counted(self, sample_config: AppConfig, db_path: Path) -> None:
+        """丢弃条目必须计数:imported_at 一旦写上就无法重导,静默丢弃等于永久丢配置。"""
+        _register(db_path)
+        r = submit_report(
+            db_path=db_path,
+            node_id=NODE_A,
+            kind="scan_result",
+            payload={
+                "bgp_peers": ["oops-a-string", None, 42, _bgp_add_payload()["peer"]],
+                "ibgp_peers": [[], _ibgp_add_payload()["peer"]],
+            },
+        )
+        counts = import_report(config=sample_config, db_path=db_path, report_id=r.id)
+        assert counts["malformed"] == 4
+        assert counts["bgp_created"] == 1
+        assert counts["ibgp_created"] == 1
 
     def test_reject_non_scan_kind(self, sample_config: AppConfig, db_path: Path) -> None:
         _register(db_path)

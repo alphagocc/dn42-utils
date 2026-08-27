@@ -103,9 +103,12 @@ def import_report(
     if not isinstance(bgp_peers, list) or not isinstance(ibgp_peers, list):
         raise Dn42CtlError("scan_result payload 必须含 bgp_peers / ibgp_peers 数组")
 
-    counts = {"bgp_created": 0, "bgp_skipped": 0, "ibgp_created": 0, "ibgp_skipped": 0}
+    counts = {"bgp_created": 0, "bgp_skipped": 0, "ibgp_created": 0, "ibgp_skipped": 0, "malformed": 0}
     for peer in bgp_peers:
+        # 非对象条目转不成 peer,不该让整次导入失败;但也不能不作声——imported_at 一旦
+        # 写上,这份 report 就再也不能重导,丢掉的条目将没有补救途径。
         if not isinstance(peer, dict):
+            counts["malformed"] += 1
             continue
         try:
             res = _import_bgp(config=config, db_path=db_path, target_node_id=target_node_id, peer=peer)
@@ -114,6 +117,7 @@ def import_report(
         counts[f"bgp_{res}"] += 1
     for peer in ibgp_peers:
         if not isinstance(peer, dict):
+            counts["malformed"] += 1
             continue
         try:
             res = _import_ibgp(config=config, db_path=db_path, target_node_id=target_node_id, peer=peer)

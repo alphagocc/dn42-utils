@@ -1979,6 +1979,12 @@ def cmd_node_import_report(
         f"bgp(created={counts['bgp_created']}, skipped={counts['bgp_skipped']}), "
         f"ibgp(created={counts['ibgp_created']}, skipped={counts['ibgp_skipped']})"
     )
+    if counts["malformed"]:
+        typer.echo(
+            f"警告: {counts['malformed']} 个条目不是对象,已丢弃。report 已标记导入,无法重导;"
+            "要找回这些 peer 需让节点重新 scan 出一份新 report",
+            err=True,
+        )
 
 
 # --- stage 5: revisions / rollback ---
