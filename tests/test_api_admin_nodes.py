@@ -281,6 +281,39 @@ class TestPatchNode:
 
 
 class TestNodeScopedPeerRoutes:
+    def test_unregistered_node_id_is_rejected(self, admin_client: TestClient) -> None:
+        """不校验的话会建出一个没有 agent 拉取、管理界面也看不见的孤儿分区。"""
+        resp = admin_client.post(
+            f"/api/admin/bgp/peers?node_id={NODE_A}",
+            json={
+                "peer_asn": 4242425678,
+                "peer_public_key": VALID_PUBKEY,
+                "endpoint": "b.example.com:51820",
+                "peer_lla": "fe80::2",
+            },
+            headers=ADMIN_H,
+        )
+        assert resp.status_code == 400
+        assert "不存在" in resp.json()["detail"]
+
+    def test_unregistered_node_id_creates_no_rows(self, admin_client: TestClient) -> None:
+        admin_client.post(
+            "/api/admin/bgp/peers?node_id=obviously-not-a-node",
+            json={
+                "peer_asn": 4242425678,
+                "peer_public_key": VALID_PUBKEY,
+                "endpoint": "b.example.com:51820",
+                "peer_lla": "fe80::2",
+            },
+            headers=ADMIN_H,
+        )
+        rows = admin_client.get("/api/admin/db/tables/nodes", headers=ADMIN_H).json()["rows"]
+        assert all(r["node_id"] != "obviously-not-a-node" for r in rows)
+
+    def test_read_routes_also_reject_unregistered_node(self, admin_client: TestClient) -> None:
+        resp = admin_client.get(f"/api/show/all?node_id={NODE_A}", headers=ADMIN_H)
+        assert resp.status_code == 400
+
     def test_peer_created_under_explicit_node_is_partitioned(self, admin_client: TestClient) -> None:
         _add_node(admin_client, NODE_A, "alpha")
         resp = admin_client.post(

@@ -153,8 +153,8 @@ def _self_node_id() -> str | None:
 def _resolve_target_node(node_id: str | None) -> str:
     """返回该 admin 请求应当操作的节点 id。
 
-    显式传入的 `?node_id=` 优先；未传时取 hub 的 self 节点（`managed_nodes.is_self=1`），
-    而不是 `config.node_id`。
+    显式传入的 `?node_id=` 优先，但必须是已注册的受管节点；未传时取 hub 的 self
+    节点（`managed_nodes.is_self=1`），而不是 `config.node_id`。
 
     这两个 id 的来源相互独立：`config.toml` 里的 `node_id` 由 `dn42ctl init` 写入，
     self 节点 id 则由 `serve_bootstrap` 生成并保存在 `/var/lib/dn42ctl/self_node_id`，
@@ -163,8 +163,10 @@ def _resolve_target_node(node_id: str | None) -> str:
     报错。默认对齐到 self 节点即可消除这条静默失败路径。
 
     只有在 self 行不存在时（`--no-self-register` 部署）才回退到 `config.node_id`。
+    该回退值**不做存在性校验**——这类部署本来就可能没有对应的 `managed_nodes` 行。
     """
     if node_id:
+        require_managed_node_exists(db_path=_get_db_path(), node_id=node_id)
         return node_id
     return _self_node_id() or _get_config().node_id
 
@@ -1232,9 +1234,9 @@ _show_router = APIRouter(prefix="/api/show", dependencies=[Depends(require_admin
 def api_show_all(live: bool = Query(False), node_id: str | None = Query(None)) -> dict:
     config = _get_config()
     db_path = _get_db_path()
-    target = _resolve_target_node(node_id)
     self_id = _self_node_id()
     try:
+        target = _resolve_target_node(node_id)
         wg = show_wg_tunnels(config=config, db_path=db_path, include_live=live, node_id=target)
         bgp = show_bgp_peers(config=config, db_path=db_path, include_live=live, node_id=target)
         ibgp = show_ibgp_peers(config=config, db_path=db_path, include_live=live, node_id=target)

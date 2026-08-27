@@ -63,6 +63,10 @@ token hash 比对走恒定时间。self 节点的 token 由 `dn42ctl serve` 启�
 
 **省略时默认解析到 hub 的 self 节点（`managed_nodes.is_self = 1`），而不是 `config.toml` 的 `node_id`。** 这两个 UUID 互不校验，一旦分叉，admin 写入的 peer 会落在 desired state 读不到的分区里，且没有任何报错。默认对齐到 self 消除了这条静默失败路径；`/api/show/all` 额外返回 `self_node_id` / `config_node_id` / `node_id_mismatch` 供前端告警。详见 [`node_addressing.md`](node_addressing.md) §9。
 
+**显式传入的 `node_id` 必须是已注册的受管节点**，否则返回 400。不校验的话，`open_db_and_ensure_node` 会为这个 id 凭空建出一行 `nodes` 并把 peer 写进去，而 `managed_nodes` 里没有对应行：没有 agent 会来拉取它，`GET /api/admin/nodes` 与 `dn42ctl node list` 都读 `managed_nodes` 因而看不见它，`nodes` 那一行更是没有任何代码路径能删掉。节点侧的 `GET /desired` 与 WS 握手一直在用 `require_managed_node_exists`，管理侧用的是同一个校验。
+
+> 只校验显式传入的值。省略时解析到的 self 节点在 `--no-self-register` 部署下会回退到 `config.node_id`，那个 id 本来就可能没有 `managed_nodes` 行，一并校验会直接打断这类部署。
+
 > 目标不是 hub 自身时，`show` 系列返回 `files: []` 与 `live_*: null`——本地文件路径对远端节点没有意义，把它们显示成"缺失"会主动误导。
 
 ### 节点路由（node token，`node_id` 必须匹配）
