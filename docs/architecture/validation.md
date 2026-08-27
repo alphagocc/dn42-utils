@@ -23,13 +23,19 @@ dn42ctl 对所有用户输入（CLI 参数、API 请求体、配置文件字段�
 
 `services/peer_payload.py` 把 payload 到 service 层参数的解析集中在一处，逐字段过 validators，并把 `KeyError` / `ValueError` / `OverflowError` 统一转成 `Dn42CtlError`——这些异常此前会裸奔成 HTTP 500，在 WS 路径上还会直接拆掉 agent 连接。
 
+两条容易写错的规则：
+
+**`has_wg` 只在 create 时可信。** `modify_ibgp_peer` 根本不接受 `has_wg` 参数——它按**数据库现有行**判断有没有隧道，并且直接拒绝 `has_wg=0` 的行。所以 modify payload 里的 `has_wg` 完全不影响写入结果，只会影响"要不要校验 WireGuard 字段"。让它自称 `false` 就能跳过公钥与 LLA 校验，随后被写成空串，落到一条数据库里 `has_wg=1` 的行上——渲染出的 netdev 带一个空 `PublicKey=`，systemd-networkd 直接拒绝拉起该接口。因此 **modify 一律按"有隧道"校验**，payload 的 `has_wg` 只用于 create。
+
+**类型检查必须排在 `or` 默认值之前。** `peer.get("net_backend") or "networkd"` 这种写法会把 `false` / `0` / `[]` 一并当成"没填"，静默落到默认值上。先判类型、再取默认，才能把"填错了"和"没填"区分开。
+
 ## 校验器列表
 
 | 函数 | 输入类型 | 校验规则 | 错误示例 |
 |------|---------|---------|---------|
 | `validate_asn` | `int` | 1 ~ 4294967295（RFC 6793 的 32 位 AS 号） | `ASN 必须是正整数` / `ASN 超出 32 位范围` |
 | `validate_pubkey` | `str` | 非空，标准 base64，解码后恰好 **32 字节**（WireGuard X25519 公钥长度） | `公钥格式不合法` |
-| `validate_endpoint` | `str` | `host:port` 或 `[IPv6]:port`，端口 1-65535；支持 `allow_empty` | `Endpoint 格式错误` |
+| `validate_endpoint` | `str` | `host:port` 或 `[IPv6]:port`，端口 1-65535（位数超长也按格式错误处理，不放 `ValueError` 出去）；支持 `allow_empty` | `Endpoint 格式错误` |
 | `validate_ipv6_address` | `str` | 非空，合法 IPv6 地址；允许带 `/prefix`，**但前缀长度也要合法**（0-128） | `不是合法的 IPv6 地址` |
 | `validate_ipv4_address` | `str` | 非空，合法 IPv4 地址 | `不是合法的 IPv4 地址` |
 | `validate_ipv6_network` | `str` | 非空，合法 IPv6 CIDR 前缀 | `不是合法的 IPv6 CIDR 前缀` |

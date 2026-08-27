@@ -90,6 +90,19 @@ def _checked(field: str, fn, value):  # noqa: ANN001, ANN202 — 泛化包装,�
         raise Dn42CtlError(f"{field}: {exc}") from exc
 
 
+def _optional_str(peer: dict[str, Any], field: str, default: str = "") -> str:
+    """取一个可选字符串。类型检查排在默认值之前。
+
+    `peer.get(field) or default` 会把 `false` / `0` / `[]` 一并当成"没填"并静默落到
+    默认值上，"填错了"与"没填"就再也分不开。
+    """
+    raw = peer.get(field)
+    if raw is None:
+        return default
+    value = _as_str(raw, field)
+    return value or default
+
+
 def _optional_listen_port(peer: dict[str, Any]) -> int | None:
     raw = peer.get("listen_port")
     if raw is None:
@@ -98,8 +111,11 @@ def _optional_listen_port(peer: dict[str, Any]) -> int | None:
 
 
 def _net_backend(peer: dict[str, Any]) -> str:
-    raw = peer.get("net_backend") or DEFAULT_NET_BACKEND
-    return _checked("net_backend", validate_net_backend, _as_str(raw, "net_backend"))
+    return _checked("net_backend", validate_net_backend, _optional_str(peer, "net_backend", DEFAULT_NET_BACKEND))
+
+
+def _endpoint(peer: dict[str, Any]) -> str:
+    return _checked("endpoint", lambda v: validate_endpoint(v, allow_empty=True), _optional_str(peer, "endpoint"))
 
 
 def parse_bgp_peer(peer: dict[str, Any]) -> BgpPeerPayload:
@@ -108,11 +124,7 @@ def parse_bgp_peer(peer: dict[str, Any]) -> BgpPeerPayload:
         peer_public_key=_checked(
             "peer_public_key", validate_pubkey, _as_str(_require(peer, "peer_public_key"), "peer_public_key")
         ),
-        endpoint=_checked(
-            "endpoint",
-            lambda v: validate_endpoint(v, allow_empty=True),
-            _as_str(peer.get("endpoint") or "", "endpoint"),
-        ),
+        endpoint=_endpoint(peer),
         peer_lla=_checked(
             "peer_lla",
             lambda v: validate_ipv6_address(v, field_name="peer_lla"),
@@ -123,23 +135,28 @@ def parse_bgp_peer(peer: dict[str, Any]) -> BgpPeerPayload:
     )
 
 
-def parse_ibgp_peer(peer: dict[str, Any]) -> IbgpPeerPayload:
+def parse_ibgp_peer(peer: dict[str, Any], *, require_wg_fields: bool | None = None) -> IbgpPeerPayload:
     """Parse an iBGP peer payload.
 
-    `has_wg=False` peers carry no tunnel at all, so the WireGuard fields are dropped
-    rather than validated — a payload built from a DB row carries `""` for those
-    columns, and rejecting it would break a legitimate round-trip. When a tunnel *is*
-    present they are mandatory: an empty public key renders a bare `PublicKey=` line
-    that systemd-networkd silently refuses to bring up.
+    `require_wg_fields=None` (create) takes the payload's own `has_wg`: a peer without
+    a tunnel carries no WireGuard fields, and a payload built from a DB row carries `""`
+    for those columns, so rejecting it would break a legitimate round-trip.
+
+    **Modify must pass `True`.** `modify_ibgp_peer` takes no `has_wg` argument at all —
+    it reads the stored row and refuses rows with `has_wg=0`. So the payload's `has_wg`
+    changes nothing about the write, only whether these fields get validated; a payload
+    claiming `has_wg=false` would skip the checks and then land empty strings on a row
+    that still has `has_wg=1`, rendering a netdev with a bare `PublicKey=`.
     """
     name = _as_str(_require(peer, "name"), "name")
     if not name.strip():
         raise Dn42CtlError("name 不能为空")
-    has_wg = _as_bool(_require(peer, "has_wg"), "has_wg")
+    has_wg = _as_bool(_require(peer, "has_wg"), "has_wg") if require_wg_fields is None else True
+    validate_wg = has_wg if require_wg_fields is None else require_wg_fields
 
     peer_public_key: str | None = None
     peer_lla: str | None = None
-    if has_wg:
+    if validate_wg:
         peer_public_key = _checked(
             "peer_public_key", validate_pubkey, _as_str(_require(peer, "peer_public_key"), "peer_public_key")
         )
@@ -158,11 +175,7 @@ def parse_ibgp_peer(peer: dict[str, Any]) -> IbgpPeerPayload:
         ),
         has_wg=has_wg,
         peer_public_key=peer_public_key,
-        endpoint=_checked(
-            "endpoint",
-            lambda v: validate_endpoint(v, allow_empty=True),
-            _as_str(peer.get("endpoint") or "", "endpoint"),
-        ),
+        endpoint=_endpoint(peer),
         peer_lla=peer_lla,
         net_backend=_net_backend(peer),
         babel_rxcost=_checked("babel_rxcost", validate_rxcost, _as_int(_require(peer, "babel_rxcost"), "babel_rxcost")),

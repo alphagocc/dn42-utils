@@ -13,6 +13,7 @@ class ValidationError(ValueError):
 
 
 _ENDPOINT_RE = re.compile(r"^(\[.+\]|[^:]+):(\d+)$")
+_MAX_PORT_DIGITS = len(str(MAX_PORT))
 _HOSTNAME_RE = re.compile(
     r"^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?$"
 )
@@ -67,7 +68,12 @@ def validate_endpoint(value: str, *, allow_empty: bool = False) -> str:
     m = _ENDPOINT_RE.match(value)
     if not m:
         raise ValidationError(f"Endpoint 格式错误: 需要 host:port 或 [IPv6]:port 形式: {value!r}")
-    port = int(m.group(2))
+    digits = m.group(2)
+    # Python 3.11 起 int() 对超过 4300 位的字符串抛 ValueError。位数一多本来就出了
+    # 端口范围,先在这里判掉,免得漏一个裸 ValueError 出去变成 HTTP 500。
+    if len(digits) > _MAX_PORT_DIGITS:
+        raise ValidationError(f"Endpoint 端口超出范围 (1-{MAX_PORT}): {digits[:16]}…")
+    port = int(digits)
     if not (1 <= port <= MAX_PORT):
         raise ValidationError(f"Endpoint 端口超出范围 (1-{MAX_PORT}): {port}")
     return value
@@ -202,9 +208,10 @@ def validate_endpoint_host(value: str) -> str:
 
 def split_endpoint(value: str) -> tuple[str, int]:
     """`host:port` / `[v6]:port` -> (host, port)。host 不含方括号。"""
-    m = _ENDPOINT_RE.match(value.strip())
-    if not m:
-        raise ValidationError(f"Endpoint 格式错误: 需要 host:port 或 [IPv6]:port 形式: {value!r}")
+    # 走一遍 validate_endpoint,顺带继承端口范围与位数检查;裸 int() 会漏 ValueError。
+    m = _ENDPOINT_RE.match(validate_endpoint(value))
+    if m is None:  # pragma: no cover — validate_endpoint 已经用同一个正则匹配过
+        raise ValidationError(f"Endpoint 格式错误: {value!r}")
     host = m.group(1)
     if host.startswith("[") and host.endswith("]"):
         host = host[1:-1]

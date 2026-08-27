@@ -136,6 +136,42 @@ class TestIbgpPayload:
         with pytest.raises(Dn42CtlError, match="缺少必填字段"):
             parse_ibgp_peer(peer)
 
+    def test_modify_ignores_payload_has_wg(self) -> None:
+        """modify_ibgp_peer 按库里的行判断隧道,信 payload 的 has_wg 等于让调用方自选校验。"""
+        peer = _ibgp(has_wg=False)
+        peer.pop("peer_public_key")
+        peer.pop("peer_lla")
+        with pytest.raises(Dn42CtlError, match="缺少必填字段"):
+            parse_ibgp_peer(peer, require_wg_fields=True)
+
+    def test_modify_still_validates_tunnel_fields(self) -> None:
+        with pytest.raises(Dn42CtlError):
+            parse_ibgp_peer(_ibgp(has_wg=False, peer_public_key="", peer_lla=""), require_wg_fields=True)
+
+
+class TestFalsyValuesAreNotSilentDefaults:
+    """`peer.get(x) or 默认` 会把 false / 0 / [] 当成"没填",填错与没填就分不开了。"""
+
+    @pytest.mark.parametrize("value", [False, 0, [], {}])
+    def test_endpoint(self, value: Any) -> None:
+        with pytest.raises(Dn42CtlError, match="endpoint 必须是字符串"):
+            parse_bgp_peer(_bgp(endpoint=value))
+
+    @pytest.mark.parametrize("value", [False, 0, []])
+    def test_net_backend(self, value: Any) -> None:
+        with pytest.raises(Dn42CtlError, match="net_backend 必须是字符串"):
+            parse_bgp_peer(_bgp(net_backend=value))
+
+    def test_null_still_means_absent(self) -> None:
+        parsed = parse_bgp_peer(_bgp(endpoint=None, net_backend=None))
+        assert parsed.endpoint == ""
+        assert parsed.net_backend == "networkd"
+
+    def test_overlong_port_is_rejected_not_crashed(self) -> None:
+        """Python 3.11 起 int() 对超过 4300 位的字符串抛 ValueError,不能漏出去。"""
+        with pytest.raises(Dn42CtlError):
+            parse_bgp_peer(_bgp(endpoint="h:" + "9" * 5000))
+
 
 class TestDeleteKeys:
     def test_bgp_key(self) -> None:
