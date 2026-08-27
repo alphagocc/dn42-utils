@@ -367,6 +367,8 @@ def open_db_and_ensure_node(db_path: Path, node_id: str) -> Database:
     try:
         db.ensure_node(node_id)
     except DatabaseError as exc:
+        # 这条路径上连接还没交给调用方,失败就没人负责关它。
+        db.close()
         raise Dn42CtlError(str(exc)) from exc
     return db
 

@@ -378,90 +378,134 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
     _collect_stems(networkd_dirs, ".network")
 
     db = open_db_and_ensure_node(db_path, config.node_id)
+    try:
+        for ifname in sorted(candidates):
+            kind = "bgp" if ifname.startswith(IFNAME_PREFIX_BGP) else "ibgp"
+            peer_name = ifname[len(IFNAME_PREFIX_IBGP) :] if kind == "ibgp" else None
 
-    for ifname in sorted(candidates):
-        kind = "bgp" if ifname.startswith(IFNAME_PREFIX_BGP) else "ibgp"
-        peer_name = ifname[len(IFNAME_PREFIX_IBGP) :] if kind == "ibgp" else None
+            netdev_path = _find_first([d / f"{ifname}.netdev" for d in networkd_dirs])
+            network_path = _find_first([d / f"{ifname}.network" for d in networkd_dirs])
 
-        netdev_path = _find_first([d / f"{ifname}.netdev" for d in networkd_dirs])
-        network_path = _find_first([d / f"{ifname}.network" for d in networkd_dirs])
+            backend: str = "networkd"
+            data: dict[str, object] = {}
 
-        backend: str = "networkd"
-        data: dict[str, object] = {}
-
-        try:
-            if netdev_path and network_path:
-                data.update(_parse_networkd_netdev(_read_text(netdev_path)))
-                data.update(_parse_networkd_network(_read_text(network_path)))
-            else:
-                skipped.append(f"{ifname}: 未找到 networkd 配置")
-                continue
-        except Dn42CtlError as exc:
-            skipped.append(f"{ifname}: 读取配置失败: {exc}")
-            continue
-
-        private_key = str(data.get("private_key") or "").strip()
-        if not private_key:
-            skipped.append(f"{ifname}: 缺少 PrivateKey")
-            continue
-
-        raw_port = data.get("listen_port")
-        listen_port: int = 0
-        if isinstance(raw_port, int):
-            listen_port = raw_port
-        elif isinstance(raw_port, str):
             try:
-                listen_port = int(raw_port.strip())
-            except ValueError:
-                listen_port = 0
-        if listen_port <= 0:
-            # ListenPort is optional for some setups (e.g. behind NAT/firewall).
-            # Store 0 as a sentinel meaning "unset".
-            warnings.append(f"{ifname}: 未找到 ListenPort，将以 0(未设置) 导入")
-            listen_port = 0
-
-        local_lla = str(data.get("local_lla") or "").strip()
-        if not local_lla:
-            skipped.append(f"{ifname}: 缺少本端 LLA/Address")
-            continue
-
-        peer_public_key = str(data.get("peer_public_key") or "").strip() or None
-        endpoint = str(data.get("endpoint") or "").strip() or None
-        allowed_ips_list: list[str]
-        raw_allowed = data.get("allowed_ips")
-        if isinstance(raw_allowed, list):
-            collected: list[str] = []
-            for item in cast(list[object], raw_allowed):
-                if isinstance(item, str) and item:
-                    collected.append(item)
-            allowed_ips_list = collected or DEFAULT_ALLOWED_IPS
-        else:
-            allowed_ips_list = DEFAULT_ALLOWED_IPS
-
-        peer_lla = str(data.get("peer_lla") or "").strip() or None
-
-        # Bird conf is required for BGP ASN; optional for iBGP peer_lla.
-        if kind == "bgp":
-            bird_path = _find_first([d / f"{ifname}.conf" for d in bird_peers_dirs])
-            if bird_path is None:
-                skipped.append(f"{ifname}: 缺少 Bird peer conf，无法解析 ASN")
-                continue
-            try:
-                bird_text = _read_text(bird_path)
+                if netdev_path and network_path:
+                    data.update(_parse_networkd_netdev(_read_text(netdev_path)))
+                    data.update(_parse_networkd_network(_read_text(network_path)))
+                else:
+                    skipped.append(f"{ifname}: 未找到 networkd 配置")
+                    continue
             except Dn42CtlError as exc:
-                skipped.append(f"{ifname}: 读取 Bird peer conf 失败: {exc}")
+                skipped.append(f"{ifname}: 读取配置失败: {exc}")
                 continue
-            asn, bird_peer_lla = _parse_bird_bgp_peer_conf(bird_text, ifname)
-            if asn is None:
-                skipped.append(f"{ifname}: Bird peer conf 解析 ASN 失败")
-                continue
-            if peer_lla is None and bird_peer_lla:
-                peer_lla = bird_peer_lla
 
-            peer_key = f"AS{asn}"
-            try:
-                # Skip conflicts by default; user can delete then rescan.
-                if db.get_bgp_peer(config.node_id, asn) is not None:
+            private_key = str(data.get("private_key") or "").strip()
+            if not private_key:
+                skipped.append(f"{ifname}: 缺少 PrivateKey")
+                continue
+
+            raw_port = data.get("listen_port")
+            listen_port: int = 0
+            if isinstance(raw_port, int):
+                listen_port = raw_port
+            elif isinstance(raw_port, str):
+                try:
+                    listen_port = int(raw_port.strip())
+                except ValueError:
+                    listen_port = 0
+            if listen_port <= 0:
+                # ListenPort is optional for some setups (e.g. behind NAT/firewall).
+                # Store 0 as a sentinel meaning "unset".
+                warnings.append(f"{ifname}: 未找到 ListenPort，将以 0(未设置) 导入")
+                listen_port = 0
+
+            local_lla = str(data.get("local_lla") or "").strip()
+            if not local_lla:
+                skipped.append(f"{ifname}: 缺少本端 LLA/Address")
+                continue
+
+            peer_public_key = str(data.get("peer_public_key") or "").strip() or None
+            endpoint = str(data.get("endpoint") or "").strip() or None
+            allowed_ips_list: list[str]
+            raw_allowed = data.get("allowed_ips")
+            if isinstance(raw_allowed, list):
+                collected: list[str] = []
+                for item in cast(list[object], raw_allowed):
+                    if isinstance(item, str) and item:
+                        collected.append(item)
+                allowed_ips_list = collected or DEFAULT_ALLOWED_IPS
+            else:
+                allowed_ips_list = DEFAULT_ALLOWED_IPS
+
+            peer_lla = str(data.get("peer_lla") or "").strip() or None
+
+            # Bird conf is required for BGP ASN; optional for iBGP peer_lla.
+            if kind == "bgp":
+                bird_path = _find_first([d / f"{ifname}.conf" for d in bird_peers_dirs])
+                if bird_path is None:
+                    skipped.append(f"{ifname}: 缺少 Bird peer conf，无法解析 ASN")
+                    continue
+                try:
+                    bird_text = _read_text(bird_path)
+                except Dn42CtlError as exc:
+                    skipped.append(f"{ifname}: 读取 Bird peer conf 失败: {exc}")
+                    continue
+                asn, bird_peer_lla = _parse_bird_bgp_peer_conf(bird_text, ifname)
+                if asn is None:
+                    skipped.append(f"{ifname}: Bird peer conf 解析 ASN 失败")
+                    continue
+                if peer_lla is None and bird_peer_lla:
+                    peer_lla = bird_peer_lla
+
+                peer_key = f"AS{asn}"
+                try:
+                    # Skip conflicts by default; user can delete then rescan.
+                    if db.get_bgp_peer(config.node_id, asn) is not None:
+                        conflicts.append(
+                            ScanImported(
+                                kind="bgp",
+                                key=peer_key,
+                                ifname=ifname,
+                                net_backend=backend,
+                            )
+                        )
+                        continue
+                except DatabaseError as exc:
+                    raise Dn42CtlError(str(exc)) from exc
+
+                try:
+                    wg_public_key = pubkey_from_private(private_key)
+                except WireGuardError as exc:
+                    skipped.append(f"{ifname}: wg pubkey 失败: {exc}")
+                    continue
+                try:
+                    db.insert_bgp_peer(
+                        BgpPeerRecord(
+                            node_id=config.node_id,
+                            peer_asn=asn,
+                            ifname=ifname,
+                            wg_private_key=private_key,
+                            wg_public_key=wg_public_key,
+                            peer_public_key=peer_public_key,
+                            endpoint=endpoint,
+                            local_lla=local_lla,
+                            peer_lla=peer_lla,
+                            listen_port=listen_port,
+                            allowed_ips=allowed_ips_list,
+                            net_backend=backend,
+                        )
+                    )
+                    inserted.append(
+                        ScanImported(
+                            kind="bgp",
+                            key=peer_key,
+                            ifname=ifname,
+                            net_backend=backend,
+                        )
+                    )
+                except DatabaseError as exc:
+                    # Keep it explicit; treat as conflict-like.
                     conflicts.append(
                         ScanImported(
                             kind="bgp",
@@ -470,77 +514,82 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
                             net_backend=backend,
                         )
                     )
+                    warnings.append(f"{ifname}: 写入 DB 失败: {exc}")
+            else:
+                assert peer_name is not None
+                try:
+                    peer_name = sanitize_name(peer_name)
+                except Dn42CtlError as exc:
+                    skipped.append(f"{ifname}: 接口名无效: {exc}")
                     continue
-            except DatabaseError as exc:
-                raise Dn42CtlError(str(exc)) from exc
 
-            try:
-                wg_public_key = pubkey_from_private(private_key)
-            except WireGuardError as exc:
-                skipped.append(f"{ifname}: wg pubkey 失败: {exc}")
-                continue
-            try:
-                db.insert_bgp_peer(
-                    BgpPeerRecord(
-                        node_id=config.node_id,
-                        peer_asn=asn,
-                        ifname=ifname,
-                        wg_private_key=private_key,
-                        wg_public_key=wg_public_key,
-                        peer_public_key=peer_public_key,
-                        endpoint=endpoint,
-                        local_lla=local_lla,
-                        peer_lla=peer_lla,
-                        listen_port=listen_port,
-                        allowed_ips=allowed_ips_list,
-                        net_backend=backend,
-                    )
-                )
-                inserted.append(
-                    ScanImported(
-                        kind="bgp",
-                        key=peer_key,
-                        ifname=ifname,
-                        net_backend=backend,
-                    )
-                )
-            except DatabaseError as exc:
-                # Keep it explicit; treat as conflict-like.
-                conflicts.append(
-                    ScanImported(
-                        kind="bgp",
-                        key=peer_key,
-                        ifname=ifname,
-                        net_backend=backend,
-                    )
-                )
-                warnings.append(f"{ifname}: 写入 DB 失败: {exc}")
-        else:
-            assert peer_name is not None
-            try:
-                peer_name = sanitize_name(peer_name)
-            except Dn42CtlError as exc:
-                skipped.append(f"{ifname}: 接口名无效: {exc}")
-                continue
+                # Optional: try bird conf to extract peer_ip and/or peer_lla.
+                peer_ip: str | None = None
+                if True:
+                    bird_path = _find_first([d / f"ibgp_{peer_name}.conf" for d in bird_peers_dirs])
+                    if bird_path is not None:
+                        try:
+                            bird_text = _read_text(bird_path)
+                        except Dn42CtlError as exc:
+                            warnings.append(f"{ifname}: 读取 Bird iBGP peer conf 失败: {exc}")
+                        else:
+                            parsed_ip, parsed_lla = _parse_bird_ibgp_peer_conf(bird_text, ifname)
+                            if parsed_ip:
+                                peer_ip = parsed_ip
+                            if parsed_lla and peer_lla is None:
+                                peer_lla = parsed_lla
 
-            # Optional: try bird conf to extract peer_ip and/or peer_lla.
-            peer_ip: str | None = None
-            if True:
-                bird_path = _find_first([d / f"ibgp_{peer_name}.conf" for d in bird_peers_dirs])
-                if bird_path is not None:
-                    try:
-                        bird_text = _read_text(bird_path)
-                    except Dn42CtlError as exc:
-                        warnings.append(f"{ifname}: 读取 Bird iBGP peer conf 失败: {exc}")
-                    else:
-                        parsed_ip, parsed_lla = _parse_bird_ibgp_peer_conf(bird_text, ifname)
-                        if parsed_ip:
-                            peer_ip = parsed_ip
-                        if parsed_lla and peer_lla is None:
-                            peer_lla = parsed_lla
+                try:
+                    if db.get_ibgp_peer(config.node_id, peer_name) is not None:
+                        conflicts.append(
+                            ScanImported(
+                                kind="ibgp",
+                                key=peer_name,
+                                ifname=ifname,
+                                net_backend=backend,
+                            )
+                        )
+                        continue
+                except DatabaseError as exc:
+                    raise Dn42CtlError(str(exc)) from exc
 
-            try:
-                if db.get_ibgp_peer(config.node_id, peer_name) is not None:
+                try:
+                    wg_public_key = pubkey_from_private(private_key)
+                except WireGuardError as exc:
+                    skipped.append(f"{ifname}: wg pubkey 失败: {exc}")
+                    continue
+                try:
+                    params = babel_params_by_ifname.get(ifname)
+                    scan_rxcost = params.rxcost if (params and params.rxcost is not None) else BABEL_DEFAULT_RXCOST
+                    scan_babel_type = params.babel_type if (params and params.babel_type) else BABEL_DEFAULT_TYPE
+                    db.insert_ibgp_peer(
+                        IbgpPeerRecord(
+                            node_id=config.node_id,
+                            name=peer_name,
+                            ifname=ifname,
+                            wg_private_key=private_key,
+                            wg_public_key=wg_public_key,
+                            peer_public_key=peer_public_key,
+                            endpoint=endpoint,
+                            local_lla=local_lla,
+                            peer_lla=peer_lla,
+                            listen_port=listen_port,
+                            allowed_ips=allowed_ips_list,
+                            net_backend=backend,
+                            babel_rxcost=scan_rxcost,
+                            babel_type=scan_babel_type,
+                            peer_ip=peer_ip,
+                        )
+                    )
+                    inserted.append(
+                        ScanImported(
+                            kind="ibgp",
+                            key=peer_name,
+                            ifname=ifname,
+                            net_backend=backend,
+                        )
+                    )
+                except DatabaseError as exc:
                     conflicts.append(
                         ScanImported(
                             kind="ibgp",
@@ -549,71 +598,26 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
                             net_backend=backend,
                         )
                     )
-                    continue
-            except DatabaseError as exc:
-                raise Dn42CtlError(str(exc)) from exc
+                    warnings.append(f"{ifname}: 写入 DB 失败: {exc}")
 
-            try:
-                wg_public_key = pubkey_from_private(private_key)
-            except WireGuardError as exc:
-                skipped.append(f"{ifname}: wg pubkey 失败: {exc}")
-                continue
-            try:
-                params = babel_params_by_ifname.get(ifname)
-                scan_rxcost = params.rxcost if (params and params.rxcost is not None) else BABEL_DEFAULT_RXCOST
-                scan_babel_type = params.babel_type if (params and params.babel_type) else BABEL_DEFAULT_TYPE
-                db.insert_ibgp_peer(
-                    IbgpPeerRecord(
-                        node_id=config.node_id,
-                        name=peer_name,
-                        ifname=ifname,
-                        wg_private_key=private_key,
-                        wg_public_key=wg_public_key,
-                        peer_public_key=peer_public_key,
-                        endpoint=endpoint,
-                        local_lla=local_lla,
-                        peer_lla=peer_lla,
-                        listen_port=listen_port,
-                        allowed_ips=allowed_ips_list,
-                        net_backend=backend,
-                        babel_rxcost=scan_rxcost,
-                        babel_type=scan_babel_type,
-                        peer_ip=peer_ip,
-                    )
-                )
-                inserted.append(
-                    ScanImported(
-                        kind="ibgp",
-                        key=peer_name,
-                        ifname=ifname,
-                        net_backend=backend,
-                    )
-                )
-            except DatabaseError as exc:
-                conflicts.append(
-                    ScanImported(
-                        kind="ibgp",
-                        key=peer_name,
-                        ifname=ifname,
-                        net_backend=backend,
-                    )
-                )
-                warnings.append(f"{ifname}: 写入 DB 失败: {exc}")
+                if ifname not in babel_params_by_ifname:
+                    missing_rxcost_ifnames.append(ifname)
 
-            if ifname not in babel_params_by_ifname:
-                missing_rxcost_ifnames.append(ifname)
+        if conflicts:
+            warnings.append("存在冲突（DB 已有记录）：默认已跳过。可先使用 'dn42ctl del peer ...' 删除后再 scan。")
 
-    if conflicts:
-        warnings.append("存在冲突（DB 已有记录）：默认已跳过。可先使用 'dn42ctl del peer ...' 删除后再 scan。")
+        if missing_rxcost_ifnames:
+            preview = ", ".join(missing_rxcost_ifnames[:8])
+            extra = "" if len(missing_rxcost_ifnames) <= 8 else f" ... (+{len(missing_rxcost_ifnames) - 8})"
+            warnings.append(
+                f"babel.conf 未提供部分接口的 rxcost：{preview}{extra}；已使用默认值 {BABEL_DEFAULT_RXCOST}"
+            )
 
-    if missing_rxcost_ifnames:
-        preview = ", ".join(missing_rxcost_ifnames[:8])
-        extra = "" if len(missing_rxcost_ifnames) <= 8 else f" ... (+{len(missing_rxcost_ifnames) - 8})"
-        warnings.append(f"babel.conf 未提供部分接口的 rxcost：{preview}{extra}；已使用默认值 {BABEL_DEFAULT_RXCOST}")
-
-    return ScanResult(
-        inserted=inserted,
-        conflicts=conflicts,
-        skipped=skipped,
-        warnings=warnings,
-    )
+        return ScanResult(
+            inserted=inserted,
+            conflicts=conflicts,
+            skipped=skipped,
+            warnings=warnings,
+        )
+    finally:
+        db.close()

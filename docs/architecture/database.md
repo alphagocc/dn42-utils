@@ -53,7 +53,8 @@ DB 层的写方法长成 `try: execute(...) → 检查 rowcount → emit → com
 
 1. DB 层：`raise DatabaseError` 之前显式 `rollback()`。
 2. service 层：拿到 `Database` 就用 `try/finally: db.close()`——`close()` 会隐式回滚，
-   把窗口压到零。
+   把窗口压到零。这条对**所有**持有连接的路径成立，不限于 peer 增删改：`open_db_and_ensure_node`
+   自身的失败分支、`scan` 与 `init_sys` 里那些一路走到底的长函数同样适用。
 
 这条路径要命中需要跨进程 TOCTOU（另一个进程在 `SELECT` 与 `UPDATE` 之间删掉了行），
 罕见但不是不可能——hub 上 CLI 与 server 本来就在并发写同一个库文件。

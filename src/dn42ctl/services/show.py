@@ -93,54 +93,61 @@ def show_bgp_peers(
     node_id: str | None = None,
 ) -> list[BgpPeerView]:
     db = open_db(db_path)
-    node_id = node_id or config.node_id
-    # For a target that is not this host, local file paths and live probing are both
-    # meaningless: peer_files_for_backend looks at the hub's own directories, so
-    # reporting "missing" for a remote node would actively mislead, and wg/birdc probe
-    # this host's interfaces anyway.
-    local = node_id == config.node_id
-    include_live = include_live and local
     try:
-        rows = db.list_bgp_peers(node_id)
-    except DatabaseError as exc:
-        raise Dn42CtlError(str(exc)) from exc
+        node_id = node_id or config.node_id
+        # For a target that is not this host, local file paths and live probing are both
+        # meaningless: peer_files_for_backend looks at the hub's own directories, so
+        # reporting "missing" for a remote node would actively mislead, and wg/birdc probe
+        # this host's interfaces anyway.
+        local = node_id == config.node_id
+        include_live = include_live and local
+        try:
+            rows = db.list_bgp_peers(node_id)
+        except DatabaseError as exc:
+            raise Dn42CtlError(str(exc)) from exc
 
-    out: list[BgpPeerView] = []
+        out: list[BgpPeerView] = []
 
-    wg_map: dict[str, CommandOutput] = {}
-    bird_map: dict[str, CommandOutput] = {}
-    if include_live and rows:
-        ifnames = [str(r["ifname"]) for r in rows]
-        wg_map, bird_map = _run_live_probes(wg_ifnames=ifnames, bird_protocols=ifnames)
+        wg_map: dict[str, CommandOutput] = {}
+        bird_map: dict[str, CommandOutput] = {}
+        if include_live and rows:
+            ifnames = [str(r["ifname"]) for r in rows]
+            wg_map, bird_map = _run_live_probes(wg_ifnames=ifnames, bird_protocols=ifnames)
 
-    for row in rows:
-        ifname = str(row["ifname"])
-        peer_asn = int(row["peer_asn"])
-        net_backend = str(row["net_backend"])
-        files = (
-            peer_files_for_backend(config=config, ifname=ifname, net_backend=net_backend, kind="bgp") if local else []
-        )
-        live_wg = wg_map.get(ifname) if include_live else None
-        live_bird = bird_map.get(ifname) if include_live else None
-
-        out.append(
-            BgpPeerView(
-                peer_asn=peer_asn,
-                ifname=ifname,
-                peer_public_key=row["peer_public_key"],
-                endpoint=row["endpoint"],
-                peer_lla=row["peer_lla"],
-                local_lla=str(row["local_lla"]),
-                listen_port=int(row["listen_port"]),
-                allowed_ips=parse_allowed_ips_json(str(row["allowed_ips_json"]) if row["allowed_ips_json"] else None),
-                net_backend=net_backend,
-                wg_public_key=str(row["wg_public_key"]),
-                files=_file_status(files),
-                live_wg=live_wg,
-                live_bird=live_bird,
+        for row in rows:
+            ifname = str(row["ifname"])
+            peer_asn = int(row["peer_asn"])
+            net_backend = str(row["net_backend"])
+            files = (
+                peer_files_for_backend(config=config, ifname=ifname, net_backend=net_backend, kind="bgp")
+                if local
+                else []
             )
-        )
-    return out
+            live_wg = wg_map.get(ifname) if include_live else None
+            live_bird = bird_map.get(ifname) if include_live else None
+
+            out.append(
+                BgpPeerView(
+                    peer_asn=peer_asn,
+                    ifname=ifname,
+                    peer_public_key=row["peer_public_key"],
+                    endpoint=row["endpoint"],
+                    peer_lla=row["peer_lla"],
+                    local_lla=str(row["local_lla"]),
+                    listen_port=int(row["listen_port"]),
+                    allowed_ips=parse_allowed_ips_json(
+                        str(row["allowed_ips_json"]) if row["allowed_ips_json"] else None
+                    ),
+                    net_backend=net_backend,
+                    wg_public_key=str(row["wg_public_key"]),
+                    files=_file_status(files),
+                    live_wg=live_wg,
+                    live_bird=live_bird,
+                )
+            )
+        return out
+    finally:
+        db.close()
 
 
 def show_ibgp_peers(
@@ -151,65 +158,70 @@ def show_ibgp_peers(
     node_id: str | None = None,
 ) -> list[IbgpPeerView]:
     db = open_db(db_path)
-    node_id = node_id or config.node_id
-    local = node_id == config.node_id
-    include_live = include_live and local
     try:
-        rows = db.list_ibgp_peers(node_id)
-    except DatabaseError as exc:
-        raise Dn42CtlError(str(exc)) from exc
+        node_id = node_id or config.node_id
+        local = node_id == config.node_id
+        include_live = include_live and local
+        try:
+            rows = db.list_ibgp_peers(node_id)
+        except DatabaseError as exc:
+            raise Dn42CtlError(str(exc)) from exc
 
-    out: list[IbgpPeerView] = []
+        out: list[IbgpPeerView] = []
 
-    wg_map: dict[str, CommandOutput] = {}
-    bird_map: dict[str, CommandOutput] = {}
-    if include_live and rows:
-        ifnames = [str(r["ifname"]) for r in rows if r["has_wg"]]
-        protos = [f"ibgp_{str(r['name'])}" for r in rows]
-        wg_map, bird_map = _run_live_probes(wg_ifnames=ifnames, bird_protocols=protos)
+        wg_map: dict[str, CommandOutput] = {}
+        bird_map: dict[str, CommandOutput] = {}
+        if include_live and rows:
+            ifnames = [str(r["ifname"]) for r in rows if r["has_wg"]]
+            protos = [f"ibgp_{str(r['name'])}" for r in rows]
+            wg_map, bird_map = _run_live_probes(wg_ifnames=ifnames, bird_protocols=protos)
 
-    for row in rows:
-        name = str(row["name"])
-        ifname = str(row["ifname"])
-        net_backend = str(row["net_backend"])
-        row_has_wg = bool(row["has_wg"])
-        files = (
-            peer_files_for_backend(
-                config=config,
-                ifname=ifname,
-                net_backend=net_backend,
-                kind="ibgp",
-                ibgp_name=name,
+        for row in rows:
+            name = str(row["name"])
+            ifname = str(row["ifname"])
+            net_backend = str(row["net_backend"])
+            row_has_wg = bool(row["has_wg"])
+            files = (
+                peer_files_for_backend(
+                    config=config,
+                    ifname=ifname,
+                    net_backend=net_backend,
+                    kind="ibgp",
+                    ibgp_name=name,
+                )
+                if local
+                else []
             )
-            if local
-            else []
-        )
-        proto = f"ibgp_{name}"
-        live_wg = wg_map.get(ifname) if (include_live and row_has_wg) else None
-        live_bird = bird_map.get(proto) if include_live else None
-        out.append(
-            IbgpPeerView(
-                name=name,
-                ifname=ifname,
-                babel_rxcost=int(row["babel_rxcost"]),
-                babel_type=str(row["babel_type"] or "tunnel"),
-                peer_public_key=row["peer_public_key"],
-                endpoint=row["endpoint"],
-                peer_lla=row["peer_lla"],
-                local_lla=str(row["local_lla"]),
-                listen_port=int(row["listen_port"]),
-                allowed_ips=parse_allowed_ips_json(str(row["allowed_ips_json"]) if row["allowed_ips_json"] else None),
-                net_backend=net_backend,
-                wg_public_key=str(row["wg_public_key"]),
-                files=_file_status(files),
-                live_wg=live_wg,
-                live_bird=live_bird,
-                peer_ip=row["peer_ip"],
-                has_wg=row_has_wg,
-                remote_node_id=row["remote_node_id"],
+            proto = f"ibgp_{name}"
+            live_wg = wg_map.get(ifname) if (include_live and row_has_wg) else None
+            live_bird = bird_map.get(proto) if include_live else None
+            out.append(
+                IbgpPeerView(
+                    name=name,
+                    ifname=ifname,
+                    babel_rxcost=int(row["babel_rxcost"]),
+                    babel_type=str(row["babel_type"] or "tunnel"),
+                    peer_public_key=row["peer_public_key"],
+                    endpoint=row["endpoint"],
+                    peer_lla=row["peer_lla"],
+                    local_lla=str(row["local_lla"]),
+                    listen_port=int(row["listen_port"]),
+                    allowed_ips=parse_allowed_ips_json(
+                        str(row["allowed_ips_json"]) if row["allowed_ips_json"] else None
+                    ),
+                    net_backend=net_backend,
+                    wg_public_key=str(row["wg_public_key"]),
+                    files=_file_status(files),
+                    live_wg=live_wg,
+                    live_bird=live_bird,
+                    peer_ip=row["peer_ip"],
+                    has_wg=row_has_wg,
+                    remote_node_id=row["remote_node_id"],
+                )
             )
-        )
-    return out
+        return out
+    finally:
+        db.close()
 
 
 def show_wg_tunnels(
