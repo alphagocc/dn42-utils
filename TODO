@@ -4,20 +4,20 @@
 
 修复 PROBLEM 中经实测确认的 9 项缺陷（及审计中额外发现的问题），按优先级排列。
 
-- [ ] 去掉 argon2，改用普通哈希存 node token。存的是 `secrets.token_urlsafe(32)`（约 256 位熵，`serve_bootstrap.py:104`），本就不可爆破，用 argon2 属于过度设计：`db_managed.py:127` 的库默认值是 64 MiB / 3 轮，而无效 bearer token 会对全部启用节点逐行校验（`db_managed.py:314` / `api.py:191`），实测 10 节点时单个请求约 3.2 CPU 秒 + 64 MiB，40 并发即 2.5 GiB，且拖垮共用线程池的所有其他请求。换成 HMAC-SHA256 后单次降到微秒级，放大问题从根上消失，也不再需要给 REST 侧补 `ws_hub.py:97` 那样的并发闸门（该闸门连同 `sync_ws_protocol.md:281` 的 O(N²) 限制说明可一并移除）。需要一条迁移处理存量 argon2 hash（并存两种格式识别，或强制轮换全部 node token）。
-- [ ] self token 失配无法自愈：`serve_bootstrap.py:52` 的 `_needs_new_token` 只看文件存在与 node_id 相符，从不与 `managed_nodes.api_token_hash` 比对。DB 丢失、从旧备份恢复、token 轮换后 node.toml 改写失败等场景下 hub 自身 agent 永久 401，重启不修复。
-- [ ] token 轮换 / 节点删除时 node.toml 改写失败被静默吞掉：`node_admin.py:49` 返回 `False` 而 `api.py:381` 的响应丢掉了 `self_node_toml_updated`，UI 显示轮换成功但实际把 hub 自己锁在门外。改为显式报错并回传该字段。
-- [ ] proposal 接受与报告导入绕过参数校验：`proposal_decisions.py:61` / `report_import.py:22` 只做强制类型转换，ASN、WG 公钥、IPv6 字段一概不校验，实测 `peer_asn=-1`、空公钥、`peer_lla="not-ip"` 可落库并渲染进 spoke 的 bird.conf；因 `bird.conf.j2` 使用 `include "<peers_dir>/*"`，单条非法 peer 会导致该节点整份 BIRD 配置加载失败。复用现有 validators，并把 `KeyError` / `ValueError` / `OverflowError` 包装成 400 而非 500（WS 路径上这些异常还会拆掉 agent 连接）。
-- [ ] 双 self 节点：`db_managed.py:230` 的 `upsert_self` 不清除旧行的 `is_self`，`db_managed.py:217` 的 `get_self` 无 ORDER BY 而返回 rowid 最小的陈旧行。后果是 agent 拉到空 desired state 后由 `node_apply` 清扫删光 hub 上全部 peer 文件，同时 `/api/show/all` 的 `node_id_mismatch` 横幅恒为 False、`node adopt-self` 因 source == target 拒绝修复。需先置零 + 确定性排序 + 一条清理存量多 self 行的迁移。
-- [ ] 公共校验器过松：`validators.py:63` 的 `validate_ipv6_address` 忽略 `/` 之后的一切（`fd00::1/not-a-prefix` 通过）；`validators.py:39` 的公钥正则接受 31/33 字节的 key（真实 `wg` 一律拒绝），且错误文案"需 40~44 字符"与正则下限 42 不符。改用 `IPv6Interface` 与 base64 解码 + 32 字节长度校验，同步更新 `docs/architecture/validation.md`。
-- [ ] `config.py:56` 的 `_require_int` 接受 bool：`own_asn = true` 会渲染成 `define OWNAS = True;` 让 BIRD 无法解析，且 `dumps_config` 原样写回、`node apply` 后持续保留。
-- [ ] 管理侧写入不校验节点存在：`api.py:167` 的 `_resolve_target_node` 对显式 `?node_id=` 只判非空，随后 `core.py:365` 建出 `nodes` 行却无 `managed_nodes` 行，产生无 agent 拉取、管理界面不显示、且没有任何代码路径能删除的孤儿分区。节点侧 `/desired` 与 WS 握手已在用 `require_managed_node_exists`，管理侧补上同一个校验。
-- [ ] `report_import.py:109` 的非 dict 条目被静默丢弃：既不计数也不告警，而 `imported_at` 照常写入，使该报告永远无法重新导入。把丢弃数计入返回值，并在有丢弃时不静默标记完成。
-- [ ] 更新不存在的记录后残留 SQLite 写事务：`db.py` 与 `db_managed.py` 共 7 个方法 8 处 `raise DatabaseError` 落在 `try` 内而 `except` 只捕 `sqlite3.Error`，未 rollback，实测 `in_transaction=True` 且另一连接等满 `busy_timeout` 后仍报 database is locked。补 rollback；另外 `services/bgp.py:189` 与 `services/ibgp.py:322` 缺 `try/finally: db.close()`，是仅有的两处窗口非零路径。
-- [ ] auto-peer 一次性 challenge / session 存在检查后删除竞态（`auto_peer.py:229` / `:288`），实测 8 线程并发可从一个 challenge 换出 8 个 session、一个 session 提交 8 条 proposal。改为锁内标记 in-flight（或 pop 后失败再插回），保留"失败可重试"的既有语义。
-- [ ] peer 删除路径先删文件再删 DB（`bgp.py:249` / `ibgp.py:228`），文件已删而 DB 删除失败会留下被 `genconf --all` 复活的记录。改为 DB 优先，与创建路径方向一致。
-- [ ] 补齐上述各项的回归测试。现有测试离抓到残留事务只差一行 `assert conn.in_transaction is False`；`upsert_self` 的幂等测试只用同一个 id 调两次；proposal 接受路径没有任何字段合法性用例。
-- [ ] 同步修正过时文档：`database.md:109` 关于 `is_self` 仅用于展示的说法（`api.py:167` 已让它成为所有管理写入作用域的权威）；`validation.md:3` 与 `sync_hub_spoke.md:228` 关于 proposal 不绕过校验的承诺。
+- [x] 去掉 argon2，改用普通哈希存 node token。存的是 `secrets.token_urlsafe(32)`（约 256 位熵，`serve_bootstrap.py:104`），本就不可爆破，用 argon2 属于过度设计：`db_managed.py:127` 的库默认值是 64 MiB / 3 轮，而无效 bearer token 会对全部启用节点逐行校验（`db_managed.py:314` / `api.py:191`），实测 10 节点时单个请求约 3.2 CPU 秒 + 64 MiB，40 并发即 2.5 GiB，且拖垮共用线程池的所有其他请求。换成 HMAC-SHA256 后单次降到微秒级，放大问题从根上消失，也不再需要给 REST 侧补 `ws_hub.py:97` 那样的并发闸门（该闸门连同 `sync_ws_protocol.md:281` 的 O(N²) 限制说明可一并移除）。需要一条迁移处理存量 argon2 hash（并存两种格式识别，或强制轮换全部 node token）。
+- [x] self token 失配无法自愈：`serve_bootstrap.py:52` 的 `_needs_new_token` 只看文件存在与 node_id 相符，从不与 `managed_nodes.api_token_hash` 比对。DB 丢失、从旧备份恢复、token 轮换后 node.toml 改写失败等场景下 hub 自身 agent 永久 401，重启不修复。
+- [x] token 轮换 / 节点删除时 node.toml 改写失败被静默吞掉：`node_admin.py:49` 返回 `False` 而 `api.py:381` 的响应丢掉了 `self_node_toml_updated`，UI 显示轮换成功但实际把 hub 自己锁在门外。改为显式报错并回传该字段。
+- [x] proposal 接受与报告导入绕过参数校验：`proposal_decisions.py:61` / `report_import.py:22` 只做强制类型转换，ASN、WG 公钥、IPv6 字段一概不校验，实测 `peer_asn=-1`、空公钥、`peer_lla="not-ip"` 可落库并渲染进 spoke 的 bird.conf；因 `bird.conf.j2` 使用 `include "<peers_dir>/*"`，单条非法 peer 会导致该节点整份 BIRD 配置加载失败。复用现有 validators，并把 `KeyError` / `ValueError` / `OverflowError` 包装成 400 而非 500（WS 路径上这些异常还会拆掉 agent 连接）。
+- [x] 双 self 节点：`db_managed.py:230` 的 `upsert_self` 不清除旧行的 `is_self`，`db_managed.py:217` 的 `get_self` 无 ORDER BY 而返回 rowid 最小的陈旧行。后果是 agent 拉到空 desired state 后由 `node_apply` 清扫删光 hub 上全部 peer 文件，同时 `/api/show/all` 的 `node_id_mismatch` 横幅恒为 False、`node adopt-self` 因 source == target 拒绝修复。需先置零 + 确定性排序 + 一条清理存量多 self 行的迁移。
+- [x] 公共校验器过松：`validators.py:63` 的 `validate_ipv6_address` 忽略 `/` 之后的一切（`fd00::1/not-a-prefix` 通过）；`validators.py:39` 的公钥正则接受 31/33 字节的 key（真实 `wg` 一律拒绝），且错误文案"需 40~44 字符"与正则下限 42 不符。改用 `IPv6Interface` 与 base64 解码 + 32 字节长度校验，同步更新 `docs/architecture/validation.md`。
+- [x] `config.py:56` 的 `_require_int` 接受 bool：`own_asn = true` 会渲染成 `define OWNAS = True;` 让 BIRD 无法解析，且 `dumps_config` 原样写回、`node apply` 后持续保留。
+- [x] 管理侧写入不校验节点存在：`api.py:167` 的 `_resolve_target_node` 对显式 `?node_id=` 只判非空，随后 `core.py:365` 建出 `nodes` 行却无 `managed_nodes` 行，产生无 agent 拉取、管理界面不显示、且没有任何代码路径能删除的孤儿分区。节点侧 `/desired` 与 WS 握手已在用 `require_managed_node_exists`，管理侧补上同一个校验。
+- [x] `report_import.py:109` 的非 dict 条目被静默丢弃：既不计数也不告警，而 `imported_at` 照常写入，使该报告永远无法重新导入。把丢弃数计入返回值，并在有丢弃时不静默标记完成。
+- [x] 更新不存在的记录后残留 SQLite 写事务：`db.py` 与 `db_managed.py` 共 7 个方法 8 处 `raise DatabaseError` 落在 `try` 内而 `except` 只捕 `sqlite3.Error`，未 rollback，实测 `in_transaction=True` 且另一连接等满 `busy_timeout` 后仍报 database is locked。补 rollback；另外 `services/bgp.py:189` 与 `services/ibgp.py:322` 缺 `try/finally: db.close()`，是仅有的两处窗口非零路径。
+- [x] auto-peer 一次性 challenge / session 存在检查后删除竞态（`auto_peer.py:229` / `:288`），实测 8 线程并发可从一个 challenge 换出 8 个 session、一个 session 提交 8 条 proposal。改为锁内标记 in-flight（或 pop 后失败再插回），保留"失败可重试"的既有语义。
+- [x] peer 删除路径先删文件再删 DB（`bgp.py:249` / `ibgp.py:228`），文件已删而 DB 删除失败会留下被 `genconf --all` 复活的记录。改为 DB 优先，与创建路径方向一致。
+- [x] 补齐上述各项的回归测试。现有测试离抓到残留事务只差一行 `assert conn.in_transaction is False`；`upsert_self` 的幂等测试只用同一个 id 调两次；proposal 接受路径没有任何字段合法性用例。
+- [x] 同步修正过时文档：`database.md:109` 关于 `is_self` 仅用于展示的说法（`api.py:167` 已让它成为所有管理写入作用域的权威）；`validation.md:3` 与 `sync_hub_spoke.md:228` 关于 proposal 不绕过校验的承诺。
 
 </task>
 
