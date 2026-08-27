@@ -53,84 +53,88 @@ def create_bgp_peer(
 
     node_id = node_id or config.node_id
     db = open_db_and_ensure_node(db_path, node_id)
-
     try:
-        if db.get_bgp_peer(node_id, peer_asn) is not None:
-            raise Dn42CtlError("该 BGP peer 已存在，请使用 bgp peer modify")
-    except DatabaseError as exc:
-        raise Dn42CtlError(str(exc)) from exc
-
-    as_str = str(peer_asn)
-    as_last4 = as_str[-4:]
-    as_last5 = as_str[-5:]
-
-    ifname = f"dn42_{as_last4}"
-    if listen_port is None:
-        listen_port = int(as_last5)
-        if listen_port > MAX_PORT:
-            raise Dn42CtlError(f"由 ASN 推导的 ListenPort 超出范围: {listen_port}")
-    else:
         try:
-            validate_listen_port(listen_port, allow_zero=True)
+            if db.get_bgp_peer(node_id, peer_asn) is not None:
+                raise Dn42CtlError("该 BGP peer 已存在，请使用 bgp peer modify")
+        except DatabaseError as exc:
+            raise Dn42CtlError(str(exc)) from exc
+
+        as_str = str(peer_asn)
+        as_last4 = as_str[-4:]
+        as_last5 = as_str[-5:]
+
+        ifname = f"dn42_{as_last4}"
+        if listen_port is None:
+            listen_port = int(as_last5)
+            if listen_port > MAX_PORT:
+                raise Dn42CtlError(f"由 ASN 推导的 ListenPort 超出范围: {listen_port}")
+        else:
+            try:
+                validate_listen_port(listen_port, allow_zero=True)
+            except ValidationError as exc:
+                raise Dn42CtlError(str(exc)) from exc
+
+        private_key, public_key = resolve_wg_keypair(wg_private_key, wg_public_key)
+
+        local_lla_addr = local_lla or generate_random_lla()
+        effective_allowed_ips = allowed_ips if allowed_ips is not None else DEFAULT_ALLOWED_IPS
+
+        try:
+            validate_allowed_ips_list(effective_allowed_ips)
         except ValidationError as exc:
             raise Dn42CtlError(str(exc)) from exc
 
-    private_key, public_key = resolve_wg_keypair(wg_private_key, wg_public_key)
+        try:
+            db.insert_bgp_peer(
+                BgpPeerRecord(
+                    node_id=node_id,
+                    peer_asn=peer_asn,
+                    ifname=ifname,
+                    wg_private_key=private_key,
+                    wg_public_key=public_key,
+                    peer_public_key=peer_public_key,
+                    endpoint=endpoint,
+                    local_lla=local_lla_addr,
+                    peer_lla=peer_lla,
+                    listen_port=listen_port,
+                    allowed_ips=effective_allowed_ips,
+                    net_backend=backend,
+                )
+            )
+        except DatabaseError as exc:
+            raise Dn42CtlError(str(exc)) from exc
 
-    local_lla_addr = local_lla or generate_random_lla()
-    effective_allowed_ips = allowed_ips if allowed_ips is not None else DEFAULT_ALLOWED_IPS
+        generated: list[Path] = []
 
-    try:
-        validate_allowed_ips_list(effective_allowed_ips)
-    except ValidationError as exc:
-        raise Dn42CtlError(str(exc)) from exc
-
-    try:
-        db.insert_bgp_peer(
-            BgpPeerRecord(
+        if render_files:
+            write_bird_bgp_peer(config=config, ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn, generated=generated)
+            write_net_backend_files(
+                config=config,
                 node_id=node_id,
-                peer_asn=peer_asn,
+                backend=backend,
                 ifname=ifname,
-                wg_private_key=private_key,
-                wg_public_key=public_key,
+                private_key=private_key,
+                listen_port=listen_port,
                 peer_public_key=peer_public_key,
                 endpoint=endpoint,
+                allowed_ips=effective_allowed_ips,
                 local_lla=local_lla_addr,
                 peer_lla=peer_lla,
-                listen_port=listen_port,
-                allowed_ips=effective_allowed_ips,
-                net_backend=backend,
+                generated=generated,
             )
-        )
-    except DatabaseError as exc:
-        raise Dn42CtlError(str(exc)) from exc
 
-    generated: list[Path] = []
-
-    if render_files:
-        write_bird_bgp_peer(config=config, ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn, generated=generated)
-        write_net_backend_files(
-            config=config,
-            node_id=node_id,
-            backend=backend,
+        return PeerResult(
             ifname=ifname,
-            private_key=private_key,
             listen_port=listen_port,
-            peer_public_key=peer_public_key,
-            endpoint=endpoint,
-            allowed_ips=effective_allowed_ips,
+            wg_public_key=public_key,
             local_lla=local_lla_addr,
-            peer_lla=peer_lla,
-            generated=generated,
+            generated_files=generated,
         )
-
-    return PeerResult(
-        ifname=ifname,
-        listen_port=listen_port,
-        wg_public_key=public_key,
-        local_lla=local_lla_addr,
-        generated_files=generated,
-    )
+    finally:
+        # 找不到记录时 DB 层会 raise,close() 隐式回滚,避免残留写事务把
+        # 另一个连接卡满 busy_timeout。见 docs/architecture/database.md。
+        db.close()
 
 
 def modify_bgp_peer(
@@ -151,79 +155,83 @@ def modify_bgp_peer(
 
     node_id = node_id or config.node_id
     db = open_db_and_ensure_node(db_path, node_id)
-
     try:
-        row = db.get_bgp_peer(node_id, peer_asn)
-    except DatabaseError as exc:
-        raise Dn42CtlError(str(exc)) from exc
-    if row is None:
-        raise Dn42CtlError("该 BGP peer 不存在")
-
-    ifname = str(row["ifname"])
-    private_key = str(row["wg_private_key"])
-    public_key = str(row["wg_public_key"])
-    current_listen_port = int(row["listen_port"])
-    new_listen_port = current_listen_port if listen_port is None else listen_port
-    try:
-        validate_listen_port(new_listen_port, allow_zero=True)
-    except ValidationError as exc:
-        raise Dn42CtlError(str(exc)) from exc
-    if listen_port is not None and new_listen_port > 0 and new_listen_port != current_listen_port:
         try:
-            used_ports = db.get_used_listen_ports(node_id)
+            row = db.get_bgp_peer(node_id, peer_asn)
         except DatabaseError as exc:
             raise Dn42CtlError(str(exc)) from exc
-        used_ports.discard(0)
-        used_ports.discard(current_listen_port)
-        if new_listen_port in used_ports:
-            raise Dn42CtlError(f"ListenPort 已被占用: {new_listen_port}")
-    local_lla = str(row["local_lla"])
-    effective_allowed_ips = allowed_ips if allowed_ips is not None else parse_allowed_ips_json(row["allowed_ips_json"])
+        if row is None:
+            raise Dn42CtlError("该 BGP peer 不存在")
 
-    try:
-        validate_allowed_ips_list(effective_allowed_ips)
-    except ValidationError as exc:
-        raise Dn42CtlError(str(exc)) from exc
-
-    try:
-        db.update_bgp_peer(
-            node_id=node_id,
-            peer_asn=peer_asn,
-            peer_public_key=peer_public_key,
-            endpoint=endpoint,
-            peer_lla=peer_lla,
-            listen_port=new_listen_port,
-            allowed_ips=effective_allowed_ips,
-            net_backend=backend,
+        ifname = str(row["ifname"])
+        private_key = str(row["wg_private_key"])
+        public_key = str(row["wg_public_key"])
+        current_listen_port = int(row["listen_port"])
+        new_listen_port = current_listen_port if listen_port is None else listen_port
+        try:
+            validate_listen_port(new_listen_port, allow_zero=True)
+        except ValidationError as exc:
+            raise Dn42CtlError(str(exc)) from exc
+        if listen_port is not None and new_listen_port > 0 and new_listen_port != current_listen_port:
+            try:
+                used_ports = db.get_used_listen_ports(node_id)
+            except DatabaseError as exc:
+                raise Dn42CtlError(str(exc)) from exc
+            used_ports.discard(0)
+            used_ports.discard(current_listen_port)
+            if new_listen_port in used_ports:
+                raise Dn42CtlError(f"ListenPort 已被占用: {new_listen_port}")
+        local_lla = str(row["local_lla"])
+        effective_allowed_ips = (
+            allowed_ips if allowed_ips is not None else parse_allowed_ips_json(row["allowed_ips_json"])
         )
-    except DatabaseError as exc:
-        raise Dn42CtlError(str(exc)) from exc
 
-    generated: list[Path] = []
-    if render_files:
-        write_bird_bgp_peer(config=config, ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn, generated=generated)
-        write_net_backend_files(
-            config=config,
-            node_id=node_id,
-            backend=backend,
+        try:
+            validate_allowed_ips_list(effective_allowed_ips)
+        except ValidationError as exc:
+            raise Dn42CtlError(str(exc)) from exc
+
+        try:
+            db.update_bgp_peer(
+                node_id=node_id,
+                peer_asn=peer_asn,
+                peer_public_key=peer_public_key,
+                endpoint=endpoint,
+                peer_lla=peer_lla,
+                listen_port=new_listen_port,
+                allowed_ips=effective_allowed_ips,
+                net_backend=backend,
+            )
+        except DatabaseError as exc:
+            raise Dn42CtlError(str(exc)) from exc
+
+        generated: list[Path] = []
+        if render_files:
+            write_bird_bgp_peer(config=config, ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn, generated=generated)
+            write_net_backend_files(
+                config=config,
+                node_id=node_id,
+                backend=backend,
+                ifname=ifname,
+                private_key=private_key,
+                listen_port=new_listen_port,
+                peer_public_key=peer_public_key,
+                endpoint=endpoint,
+                allowed_ips=effective_allowed_ips,
+                local_lla=local_lla,
+                peer_lla=peer_lla,
+                generated=generated,
+            )
+
+        return PeerResult(
             ifname=ifname,
-            private_key=private_key,
             listen_port=new_listen_port,
-            peer_public_key=peer_public_key,
-            endpoint=endpoint,
-            allowed_ips=effective_allowed_ips,
+            wg_public_key=public_key,
             local_lla=local_lla,
-            peer_lla=peer_lla,
-            generated=generated,
+            generated_files=generated,
         )
-
-    return PeerResult(
-        ifname=ifname,
-        listen_port=new_listen_port,
-        wg_public_key=public_key,
-        local_lla=local_lla,
-        generated_files=generated,
-    )
+    finally:
+        db.close()
 
 
 def delete_bgp_peer(
@@ -235,33 +243,36 @@ def delete_bgp_peer(
     render_files: bool = True,
 ) -> DeleteResult:
     db = open_db(db_path)
-    node_id = node_id or config.node_id
     try:
-        row = db.get_bgp_peer(node_id, peer_asn)
-    except DatabaseError as exc:
-        raise Dn42CtlError(str(exc)) from exc
-    if row is None:
-        raise Dn42CtlError("该 BGP peer 不存在")
+        node_id = node_id or config.node_id
+        try:
+            row = db.get_bgp_peer(node_id, peer_asn)
+        except DatabaseError as exc:
+            raise Dn42CtlError(str(exc)) from exc
+        if row is None:
+            raise Dn42CtlError("该 BGP peer 不存在")
 
-    ifname = str(row["ifname"])
-    net_backend = str(row["net_backend"])
+        ifname = str(row["ifname"])
+        net_backend = str(row["net_backend"])
 
-    deleted: list[str] = []
-    missing: list[str] = []
-    if render_files:
-        files = peer_files_for_backend(config=config, ifname=ifname, net_backend=net_backend, kind="bgp")
-        deleted, missing = delete_files_and_collect_status(files)
+        deleted: list[str] = []
+        missing: list[str] = []
+        if render_files:
+            files = peer_files_for_backend(config=config, ifname=ifname, net_backend=net_backend, kind="bgp")
+            deleted, missing = delete_files_and_collect_status(files)
 
-    try:
-        db.delete_bgp_peer(node_id, peer_asn)
-    except DatabaseError as exc:
-        raise Dn42CtlError(str(exc)) from exc
+        try:
+            db.delete_bgp_peer(node_id, peer_asn)
+        except DatabaseError as exc:
+            raise Dn42CtlError(str(exc)) from exc
 
-    return DeleteResult(
-        kind="bgp",
-        peer_asn=peer_asn,
-        name=None,
-        deleted_files=deleted,
-        missing_files=missing,
-        regenerated_files=[],
-    )
+        return DeleteResult(
+            kind="bgp",
+            peer_asn=peer_asn,
+            name=None,
+            deleted_files=deleted,
+            missing_files=missing,
+            regenerated_files=[],
+        )
+    finally:
+        db.close()

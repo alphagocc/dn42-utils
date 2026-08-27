@@ -303,6 +303,7 @@ class ManagedNodeStore:
                 (token_hash, now, node_id),
             )
             if cur.rowcount == 0:
+                self._conn.rollback()
                 raise DatabaseError(f"节点不存在: {node_id}")
             # 旧 token 立即失效 —— 踢掉该节点仍在用旧 token 的 WS 连接。
             emit_sync_event(self._conn, node_id=node_id, kind=SYNC_EVENT_ACCESS_REVOKED)
@@ -342,6 +343,7 @@ class ManagedNodeStore:
                 (json.dumps(normalized, ensure_ascii=False), now, node_id),
             )
             if cur.rowcount == 0:
+                self._conn.rollback()
                 raise DatabaseError(f"节点不存在: {node_id}")
             self._conn.commit()
         except sqlite3.Error as exc:
@@ -461,9 +463,11 @@ class ManagedNodeStore:
                 (*fields.values(), now, node_id),
             )
             if cur.rowcount == 0:
+                self._conn.rollback()
                 raise DatabaseError(f"节点不存在: {node_id}")
             for change in changes:
                 if change.field not in _PROPAGATABLE_PEER_COLUMNS:  # pragma: no cover — 防御性
+                    self._conn.rollback()
                     raise DatabaseError(f"不可传播的列: {change.field}")
                 self._conn.execute(
                     f"UPDATE ibgp_peers SET {change.field}=?, updated_at=? WHERE node_id=? AND name=?",  # noqa: S608
@@ -605,6 +609,7 @@ class ProposalStore:
                 (status, now, message, proposal_id),
             )
             if cur.rowcount == 0:
+                self._conn.rollback()
                 raise DatabaseError(f"proposal 不存在: {proposal_id}")
             self._conn.commit()
         except sqlite3.Error as exc:
@@ -715,6 +720,7 @@ class ReportStore:
                 (now, report_id),
             )
             if cur.rowcount == 0:
+                self._conn.rollback()
                 raise DatabaseError(f"report 不存在: {report_id}")
             self._conn.commit()
         except sqlite3.Error as exc:

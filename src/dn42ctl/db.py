@@ -251,6 +251,8 @@ class Database:
                     (node_id, peer_asn),
                 ).fetchone()
                 if exists is None:
+                    # 自定义异常绕过下面的 except sqlite3.Error,不显式回滚就会留下写事务。
+                    self._conn.rollback()
                     raise DatabaseError("BGP peer not found")
             emit_sync_event(self._conn, node_id=node_id)
             self._conn.commit()
@@ -439,6 +441,7 @@ class Database:
                     (node_id, name),
                 ).fetchone()
                 if exists is None:
+                    self._conn.rollback()
                     raise DatabaseError("iBGP peer not found")
             emit_sync_event(self._conn, node_id=node_id)
             self._conn.commit()

@@ -14,6 +14,31 @@
 - **`ALTER TABLE ... ADD COLUMN` 必须走 callable 分支。** SQLite 没有 `ADD COLUMN IF NOT EXISTS`，而 `executescript` 在执行前**隐式 COMMIT**、语句不在调用方事务内：脚本中途失败会留下"前几列已提交、版本号没写、`rollback()` 对它们无效"的状态，重跑直接 duplicate column，**库永久卡死**。callable 分支跑在连接的隐式事务里，与 `schema_migrations` 插入真正原子。用 `migrations.ensure_column()`（先查 `PRAGMA table_info` 再决定是否 ALTER）。
 - **版本号不连续是有意的。** v1 是合并后的建表脚本，v2–v7 已在 2026-05-31 的清理中并入 v1；v8 是 `nm` → `networkd` 的数据回填（编号跳到 8 是为了避开生产库里已应用的旧 v2）。**当前最大版本是 v12**（清理多余的 `is_self` 行），新迁移从 v13 开始。
 
+## 事务纪律
+
+**每一条离开 DB 层的异常路径都必须先 `rollback()`。**
+
+DB 层的写方法长成 `try: execute(...) → 检查 rowcount → emit → commit / except sqlite3.Error: rollback + raise`。
+问题出在中间那步：`if cur.rowcount == 0: raise DatabaseError(...)` 抛的是**自定义异常**，
+不是 `sqlite3.Error`，因此绕过了那个 `except`，也就绕过了 `rollback()`。
+
+而 0 行匹配的 `UPDATE` 依然会拿到 `RESERVED` 锁——Python 的 sqlite3 是按语句类型
+开事务的，跟改了几行无关。于是连接停在一个只读但已开启的写事务里，另一个连接的写入
+会先卡满 `busy_timeout`（5 秒）再报 `database is locked`，比立即失败更难排查。
+
+连接不会被及时回收：异常的 traceback 引用着抛出它的栈帧，栈帧引用着 `Database`，
+构成引用环，只有分代 GC 能收；调用方若把异常留着（`raise HTTPException(...) from exc`、
+`raise typer.Exit(1) from exc`），锁会一直持有到那条异常链本身被回收。
+
+因此有两条规则：
+
+1. DB 层：`raise DatabaseError` 之前显式 `rollback()`。
+2. service 层：拿到 `Database` 就用 `try/finally: db.close()`——`close()` 会隐式回滚，
+   把窗口压到零。
+
+这条路径要命中需要跨进程 TOCTOU（另一个进程在 `SELECT` 与 `UPDATE` 之间删掉了行），
+罕见但不是不可能——hub 上 CLI 与 server 本来就在并发写同一个库文件。
+
 ## 连接 PRAGMA
 
 每个连接在打开后设置：
