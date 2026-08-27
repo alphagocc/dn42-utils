@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -197,13 +198,17 @@ class TestTokens:
 
 class TestMigrationV12:
     def test_keeps_only_the_most_recent_self(self, tmp_path: Path) -> None:
-        """存量库里可能已经有两行 is_self=1,迁移必须收敛到一行且不删数据。"""
+        """存量库里可能已经有两行 is_self=1,迁移必须收敛到一行且不删数据。
+
+        按真实升级顺序构造:重复行先存在,v12 收敛,v13 的唯一索引最后建。
+        """
         db_path = tmp_path / "multiself.sqlite3"
         db = Database.open(db_path)
         try:
             store = ManagedNodeStore(db.connection)
             store.add(NODE_A, "stale-self")
             store.add(NODE_B, "current-self")
+            db.connection.execute("DROP INDEX IF EXISTS idx_managed_nodes_single_self")
             db.connection.execute(
                 "UPDATE managed_nodes SET is_self=1, updated_at=? WHERE node_id=?",
                 ("2020-01-01T00:00:00+00:00", NODE_A),
@@ -212,7 +217,7 @@ class TestMigrationV12:
                 "UPDATE managed_nodes SET is_self=1, updated_at=? WHERE node_id=?",
                 ("2026-08-27T00:00:00+00:00", NODE_B),
             )
-            db.connection.execute("DELETE FROM schema_migrations WHERE version=12")
+            db.connection.execute("DELETE FROM schema_migrations WHERE version IN (12, 13)")
             db.connection.commit()
 
             db.migrate()
@@ -222,6 +227,24 @@ class TestMigrationV12:
             assert store.get(NODE_A) is not None  # 降级,不是删除
         finally:
             db.close()
+
+
+class TestMigrationV13:
+    def test_schema_rejects_a_second_self(self, mem_db: Database) -> None:
+        """应用路径之外还得有一道:直接写 SQL 也不能造出两个 self。"""
+        store = ManagedNodeStore(mem_db.connection)
+        store.upsert_self(NODE_SELF)
+        store.add(NODE_A, "alpha")
+        with pytest.raises(sqlite3.IntegrityError):
+            mem_db.connection.execute("UPDATE managed_nodes SET is_self=1 WHERE node_id=?", (NODE_A,))
+
+    def test_many_non_self_rows_are_fine(self, mem_db: Database) -> None:
+        """partial index 只覆盖 is_self=1,不能把普通节点也限成一行。"""
+        store = ManagedNodeStore(mem_db.connection)
+        store.upsert_self(NODE_SELF)
+        store.add(NODE_A, "alpha")
+        store.add(NODE_B, "beta")
+        assert len(store.list_all()) == 3
 
 
 class TestMigrationV11:

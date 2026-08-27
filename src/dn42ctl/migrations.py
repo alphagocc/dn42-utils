@@ -214,4 +214,14 @@ MIGRATIONS: list[tuple[int, MigrationStep]] = [
            );
         """.strip(),
     ),
+    (
+        13,
+        # 把"至多一行 is_self"从应用约定变成 schema 约束。partial index 只覆盖 is_self=1
+        # 的行,所以不影响其余任意多行的 is_self=0。必须排在 v12 之后:存量库先收敛,再建
+        # 索引,否则建索引这一步会直接失败。
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_managed_nodes_single_self
+            ON managed_nodes(is_self) WHERE is_self = 1;
+        """.strip(),
+    ),
 ]
