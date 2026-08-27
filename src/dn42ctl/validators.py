@@ -3,7 +3,7 @@ from __future__ import annotations
 import ipaddress
 import re
 
-from dn42ctl.constants import BABEL_VALID_TYPES, MAX_PORT
+from dn42ctl.constants import BABEL_VALID_TYPES, MAX_ASN, MAX_PORT
 
 
 class ValidationError(ValueError):
@@ -33,6 +33,8 @@ def validate_rxcost(value: int) -> int:
 def validate_asn(value: int) -> int:
     if value <= 0:
         raise ValidationError(f"ASN 必须是正整数: {value}")
+    if value > MAX_ASN:
+        raise ValidationError(f"ASN 超出 32 位范围 (1-{MAX_ASN}): {value}")
     return value
 
 

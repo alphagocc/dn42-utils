@@ -43,6 +43,7 @@ from dn42ctl.db_managed import (
 from dn42ctl.services.bgp import create_bgp_peer, delete_bgp_peer, modify_bgp_peer
 from dn42ctl.services.core import Dn42CtlError
 from dn42ctl.services.ibgp import create_ibgp_peer, delete_ibgp_peer, modify_ibgp_peer
+from dn42ctl.services.peer_payload import parse_bgp_key, parse_bgp_peer, parse_ibgp_key, parse_ibgp_peer
 
 
 def _require_peer_kind(payload: dict[str, Any]) -> str:
@@ -52,45 +53,45 @@ def _require_peer_kind(payload: dict[str, Any]) -> str:
     return pk
 
 
-def _require_ibgp_fields(peer: dict[str, Any], fields: list[str]) -> None:
-    missing = [f for f in fields if f not in peer]
-    if missing:
-        raise Dn42CtlError(f"iBGP peer payload 缺少必填字段: {', '.join(missing)}")
+def _require_peer(payload: dict[str, Any], field: str) -> dict[str, Any]:
+    value = payload.get(field)
+    if not isinstance(value, dict):
+        raise Dn42CtlError(f"payload.{field} 缺失或不是对象")
+    return value
 
 
 def _apply_peer_add(*, config: AppConfig, db_path: Path, target_node_id: str, payload: dict[str, Any]) -> None:
     peer_kind = _require_peer_kind(payload)
-    peer = payload.get("peer")
-    if not isinstance(peer, dict):
-        raise Dn42CtlError("payload.peer 缺失或不是对象")
+    peer = _require_peer(payload, "peer")
     if peer_kind == "bgp":
+        parsed = parse_bgp_peer(peer)
         create_bgp_peer(
             config=config,
             db_path=db_path,
-            peer_asn=int(peer["peer_asn"]),
-            peer_public_key=str(peer["peer_public_key"]),
-            endpoint=str(peer.get("endpoint") or ""),
-            peer_lla=str(peer["peer_lla"]),
-            net_backend=str(peer.get("net_backend") or "networkd"),
-            listen_port=peer.get("listen_port"),
+            peer_asn=parsed.peer_asn,
+            peer_public_key=parsed.peer_public_key,
+            endpoint=parsed.endpoint,
+            peer_lla=parsed.peer_lla,
+            net_backend=parsed.net_backend,
+            listen_port=parsed.listen_port,
             node_id=target_node_id,
             render_files=False,
         )
     else:
-        _require_ibgp_fields(peer, ["has_wg", "babel_rxcost", "babel_type"])
+        ibgp = parse_ibgp_peer(peer)
         create_ibgp_peer(
             config=config,
             db_path=db_path,
-            name=str(peer["name"]),
-            peer_ip=str(peer["peer_ip"]),
-            has_wg=bool(peer["has_wg"]),
-            peer_public_key=peer.get("peer_public_key"),
-            endpoint=peer.get("endpoint"),
-            peer_lla=peer.get("peer_lla"),
-            net_backend=peer.get("net_backend"),
-            babel_rxcost=int(peer["babel_rxcost"]),
-            babel_type=str(peer["babel_type"]),
-            listen_port=peer.get("listen_port"),
+            name=ibgp.name,
+            peer_ip=ibgp.peer_ip,
+            has_wg=ibgp.has_wg,
+            peer_public_key=ibgp.peer_public_key,
+            endpoint=ibgp.endpoint,
+            peer_lla=ibgp.peer_lla,
+            net_backend=ibgp.net_backend,
+            babel_rxcost=ibgp.babel_rxcost,
+            babel_type=ibgp.babel_type,
+            listen_port=ibgp.listen_port,
             node_id=target_node_id,
             render_files=False,
         )
@@ -98,36 +99,35 @@ def _apply_peer_add(*, config: AppConfig, db_path: Path, target_node_id: str, pa
 
 def _apply_peer_modify(*, config: AppConfig, db_path: Path, target_node_id: str, payload: dict[str, Any]) -> None:
     peer_kind = _require_peer_kind(payload)
-    peer = payload.get("peer")
-    if not isinstance(peer, dict):
-        raise Dn42CtlError("payload.peer 缺失或不是对象")
+    peer = _require_peer(payload, "peer")
     if peer_kind == "bgp":
+        parsed = parse_bgp_peer(peer)
         modify_bgp_peer(
             config=config,
             db_path=db_path,
-            peer_asn=int(peer["peer_asn"]),
-            peer_public_key=str(peer["peer_public_key"]),
-            endpoint=str(peer.get("endpoint") or ""),
-            peer_lla=str(peer["peer_lla"]),
-            net_backend=str(peer.get("net_backend") or "networkd"),
-            listen_port=peer.get("listen_port"),
+            peer_asn=parsed.peer_asn,
+            peer_public_key=parsed.peer_public_key,
+            endpoint=parsed.endpoint,
+            peer_lla=parsed.peer_lla,
+            net_backend=parsed.net_backend,
+            listen_port=parsed.listen_port,
             node_id=target_node_id,
             render_files=False,
         )
     else:
-        _require_ibgp_fields(peer, ["babel_rxcost", "babel_type"])
+        ibgp = parse_ibgp_peer(peer)
         modify_ibgp_peer(
             config=config,
             db_path=db_path,
-            name=str(peer["name"]),
-            peer_public_key=str(peer["peer_public_key"]),
-            endpoint=str(peer.get("endpoint") or ""),
-            peer_lla=str(peer.get("peer_lla") or ""),
-            peer_ip=str(peer["peer_ip"]),
-            net_backend=str(peer.get("net_backend") or "networkd"),
-            babel_rxcost=int(peer["babel_rxcost"]),
-            babel_type=str(peer["babel_type"]),
-            listen_port=peer.get("listen_port"),
+            name=ibgp.name,
+            peer_public_key=ibgp.peer_public_key or "",
+            endpoint=ibgp.endpoint or "",
+            peer_lla=ibgp.peer_lla or "",
+            peer_ip=ibgp.peer_ip,
+            net_backend=ibgp.net_backend,
+            babel_rxcost=ibgp.babel_rxcost,
+            babel_type=ibgp.babel_type,
+            listen_port=ibgp.listen_port,
             node_id=target_node_id,
             render_files=False,
         )
@@ -135,14 +135,12 @@ def _apply_peer_modify(*, config: AppConfig, db_path: Path, target_node_id: str,
 
 def _apply_peer_delete(*, config: AppConfig, db_path: Path, target_node_id: str, payload: dict[str, Any]) -> None:
     peer_kind = _require_peer_kind(payload)
-    key = payload.get("key")
-    if not isinstance(key, dict):
-        raise Dn42CtlError("payload.key 缺失或不是对象")
+    key = _require_peer(payload, "key")
     if peer_kind == "bgp":
         delete_bgp_peer(
             config=config,
             db_path=db_path,
-            peer_asn=int(key["peer_asn"]),
+            peer_asn=parse_bgp_key(key),
             node_id=target_node_id,
             render_files=False,
         )
@@ -150,7 +148,7 @@ def _apply_peer_delete(*, config: AppConfig, db_path: Path, target_node_id: str,
         delete_ibgp_peer(
             config=config,
             db_path=db_path,
-            name=str(key["name"]),
+            name=parse_ibgp_key(key),
             node_id=target_node_id,
             render_files=False,
         )

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 MAX_PORT = 65535
+# RFC 6793:AS 号是 32 位无符号数。没有上界的话超大值要到 sqlite 才炸成 OverflowError。
+MAX_ASN = 4294967295
 FILE_MODE_PRIVATE = 0o600
 FILE_MODE_NETDEV = 0o640
 BABEL_DEFAULT_RXCOST = 20

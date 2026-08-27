@@ -392,6 +392,7 @@ class TestStrictIbgpPayloadValidation:
                 "peer_ip": "fd42::1",
                 "has_wg": True,
                 "peer_public_key": VALID_PUBKEY,
+                "peer_lla": "fe80::1",
                 "babel_type": "tunnel",
             },
         }

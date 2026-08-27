@@ -228,6 +228,7 @@ agent 每次 apply 完成后自动上报 `apply_result`（payload 形状与 `dn4
 - **采用 level-triggered 语义**：节点连上时读取的是**当前**内容，事件仅触发一次重新检查；hub 用内容指纹与该连接已推送的指纹比对，相同则跳过推送。因此"事件与新连接竞态"不会丢更新，连接与 watcher 之间也无需游标协调。完整正确性论证见 `docs/architecture/sync_ws_protocol.md`。
 - **兜底**：agent 每 900 秒主动发一次 `desired_request{reason:"reconcile"}` 做全量对账，防止长时间断连或指纹逻辑出错导致的漂移。
 - 没有事件日志、CRDT、冲突合并：所有"冲突"都退化为中心 service 校验 + SQLite 约束。
+- **提案 payload 在进入 service 层之前逐字段过一遍 validators**（`services/peer_payload.py`）。payload 是节点写入的任意 JSON，而 service 层只校验 `listen_port` / `net_backend` / `allowed_ips`——只靠后者的话，ASN、WireGuard 公钥、IPv6 地址会原样落库并渲染进该节点的 `bird.conf`，而 `include "<peers_dir>/*";` 会让一条非法 peer 拖垮整份配置。详见 [`validation.md`](validation.md)。
 - `peer_modify` / `peer_delete` **始终** review，不支持 auto_accept（避免节点被入侵后污染权威表）。
 - 节点重启 / 重装：拿回 token 后 `dn42ctl node init` → agent 启动即恢复完整状态。
 

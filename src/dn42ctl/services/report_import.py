@@ -17,13 +17,15 @@ from dn42ctl.db_managed import ReportStore
 from dn42ctl.services.bgp import create_bgp_peer
 from dn42ctl.services.core import Dn42CtlError
 from dn42ctl.services.ibgp import create_ibgp_peer
+from dn42ctl.services.peer_payload import parse_bgp_peer, parse_ibgp_peer
 
 
 def _import_bgp(*, config: AppConfig, db_path: Path, target_node_id: str, peer: dict[str, Any]) -> str:
     """Returns 'created' | 'skipped'."""
+    parsed = parse_bgp_peer(peer)
     db = Database.open(db_path)
     try:
-        existing = db.get_bgp_peer(target_node_id, int(peer["peer_asn"]))
+        existing = db.get_bgp_peer(target_node_id, parsed.peer_asn)
     finally:
         db.close()
     if existing is not None:
@@ -31,12 +33,12 @@ def _import_bgp(*, config: AppConfig, db_path: Path, target_node_id: str, peer: 
     create_bgp_peer(
         config=config,
         db_path=db_path,
-        peer_asn=int(peer["peer_asn"]),
-        peer_public_key=str(peer["peer_public_key"]),
-        endpoint=str(peer.get("endpoint") or ""),
-        peer_lla=str(peer["peer_lla"]),
-        net_backend=str(peer.get("net_backend") or "networkd"),
-        listen_port=peer.get("listen_port"),
+        peer_asn=parsed.peer_asn,
+        peer_public_key=parsed.peer_public_key,
+        endpoint=parsed.endpoint,
+        peer_lla=parsed.peer_lla,
+        net_backend=parsed.net_backend,
+        listen_port=parsed.listen_port,
         node_id=target_node_id,
         render_files=False,
     )
@@ -44,13 +46,10 @@ def _import_bgp(*, config: AppConfig, db_path: Path, target_node_id: str, peer: 
 
 
 def _import_ibgp(*, config: AppConfig, db_path: Path, target_node_id: str, peer: dict[str, Any]) -> str:
-    _required = ("has_wg", "babel_rxcost", "babel_type")
-    missing = [f for f in _required if f not in peer]
-    if missing:
-        raise Dn42CtlError(f"iBGP peer payload 缺少必填字段: {', '.join(missing)}")
+    parsed = parse_ibgp_peer(peer)
     db = Database.open(db_path)
     try:
-        existing = db.get_ibgp_peer(target_node_id, str(peer["name"]))
+        existing = db.get_ibgp_peer(target_node_id, parsed.name)
     finally:
         db.close()
     if existing is not None:
@@ -58,16 +57,16 @@ def _import_ibgp(*, config: AppConfig, db_path: Path, target_node_id: str, peer:
     create_ibgp_peer(
         config=config,
         db_path=db_path,
-        name=str(peer["name"]),
-        peer_ip=str(peer["peer_ip"]),
-        has_wg=bool(peer["has_wg"]),
-        peer_public_key=peer.get("peer_public_key"),
-        endpoint=peer.get("endpoint"),
-        peer_lla=peer.get("peer_lla"),
-        net_backend=peer.get("net_backend"),
-        babel_rxcost=int(peer["babel_rxcost"]),
-        babel_type=str(peer["babel_type"]),
-        listen_port=peer.get("listen_port"),
+        name=parsed.name,
+        peer_ip=parsed.peer_ip,
+        has_wg=parsed.has_wg,
+        peer_public_key=parsed.peer_public_key,
+        endpoint=parsed.endpoint,
+        peer_lla=parsed.peer_lla,
+        net_backend=parsed.net_backend,
+        babel_rxcost=parsed.babel_rxcost,
+        babel_type=parsed.babel_type,
+        listen_port=parsed.listen_port,
         node_id=target_node_id,
         render_files=False,
     )
