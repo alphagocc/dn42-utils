@@ -64,3 +64,10 @@ dn42ctl 对所有用户输入（CLI 参数、API 请求体、配置文件字段�
 处截断、只验前半段，于是 `fd00::1/not-a-prefix` 与 `fd00::1/999` 都算合法，并被
 原样写进 `bird.conf` 的 `neighbor` 行和 networkd 的 `Peer=`。宽松的是"接受哪种
 形状"，不是"接受什么内容"。
+
+## config.toml 的类型校验
+
+`load_config` 用 `isinstance` 判类型，而 **Python 的 `bool` 是 `int` 的子类**，所以
+`own_asn = true` 会通过 `isinstance(value, int)` 并原样存成 `True`。它不会变成 ASN 1：
+模板渲染出来是 `define OWNAS = True;`，BIRD 直接无法解析；而 `dumps_config` 又会把它
+按 `true` 写回，`node apply` 之后继续保留。整数字段因此显式排除 `bool`。

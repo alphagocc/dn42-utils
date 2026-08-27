@@ -55,7 +55,8 @@ def _require_str(data: dict[str, Any], key: str) -> str:
 
 def _require_int(data: dict[str, Any], key: str) -> int:
     value = data.get(key)
-    if not isinstance(value, int):
+    # bool 是 int 的子类,不排除的话 `own_asn = true` 会通过并渲染成 define OWNAS = True。
+    if isinstance(value, bool) or not isinstance(value, int):
         raise ConfigError(f"Missing/invalid config key: {key}")
     return value
 

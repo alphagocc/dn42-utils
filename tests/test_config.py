@@ -60,6 +60,17 @@ class TestLoadConfig:
         with pytest.raises(ConfigError, match="不合法"):
             load_config(cfg_path)
 
+    @pytest.mark.parametrize("literal", ["true", "false"])
+    def test_bool_asn_rejected(self, tmp_path: Path, sample_config: AppConfig, literal: str) -> None:
+        """bool 是 int 的子类,不显式排除的话 own_asn = true 会渲染成 define OWNAS = True。"""
+        cfg_path = tmp_path / "config.toml"
+        save_config(cfg_path, sample_config)
+        content = cfg_path.read_text()
+        content = content.replace(f"own_asn = {sample_config.own_asn}", f"own_asn = {literal}")
+        cfg_path.write_text(content)
+        with pytest.raises(ConfigError, match="own_asn"):
+            load_config(cfg_path)
+
 
 class TestSaveConfig:
     def test_chmod_called(self, tmp_path: Path, sample_config: AppConfig) -> None:
