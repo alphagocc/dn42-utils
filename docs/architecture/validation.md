@@ -28,9 +28,9 @@ dn42ctl 对所有用户输入（CLI 参数、API 请求体、配置文件字段�
 | 函数 | 输入类型 | 校验规则 | 错误示例 |
 |------|---------|---------|---------|
 | `validate_asn` | `int` | 1 ~ 4294967295（RFC 6793 的 32 位 AS 号） | `ASN 必须是正整数` / `ASN 超出 32 位范围` |
-| `validate_pubkey` | `str` | 非空，base64 格式，40~44 字符 | `公钥格式不合法` |
+| `validate_pubkey` | `str` | 非空，标准 base64，解码后恰好 **32 字节**（WireGuard X25519 公钥长度） | `公钥格式不合法` |
 | `validate_endpoint` | `str` | `host:port` 或 `[IPv6]:port`，端口 1-65535；支持 `allow_empty` | `Endpoint 格式错误` |
-| `validate_ipv6_address` | `str` | 非空，合法 IPv6 地址（允许带 `/prefix`） | `不是合法的 IPv6 地址` |
+| `validate_ipv6_address` | `str` | 非空，合法 IPv6 地址；允许带 `/prefix`，**但前缀长度也要合法**（0-128） | `不是合法的 IPv6 地址` |
 | `validate_ipv4_address` | `str` | 非空，合法 IPv4 地址 | `不是合法的 IPv4 地址` |
 | `validate_ipv6_network` | `str` | 非空，合法 IPv6 CIDR 前缀 | `不是合法的 IPv6 CIDR 前缀` |
 | `validate_babel_type` | `str` | `wired` / `wireless` / `tunnel`（大小写不敏感） | `type 必须是 wired, wireless, tunnel 之一` |
@@ -51,3 +51,16 @@ dn42ctl 对所有用户输入（CLI 参数、API 请求体、配置文件字段�
 ## 错误消息语言
 
 所有校验错误消息使用中文，与项目现有风格一致。
+
+## 两处刻意收紧的校验
+
+**WireGuard 公钥按长度校验，不按字符数。** 正则曾经写成 `[A-Za-z0-9+/]{42,44}={0,2}`，
+把 42 到 46 个字符一律放行，于是 31 字节和 33 字节的 key 都能通过——真实的 `wg`
+一律报 `Key is not the correct length or format`。字符数与字节数不是一回事，改成
+解码后判长度才是这个字段真正的约束。（错误文案里写的"40~44 字符"与那条正则的下限
+42 也对不上，一并去掉。）
+
+**IPv6 地址允许带 `/prefix` 是有意的，但斜杠后面必须也校验。** 早先的实现在 `/`
+处截断、只验前半段，于是 `fd00::1/not-a-prefix` 与 `fd00::1/999` 都算合法，并被
+原样写进 `bird.conf` 的 `neighbor` 行和 networkd 的 `Peer=`。宽松的是"接受哪种
+形状"，不是"接受什么内容"。

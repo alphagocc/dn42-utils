@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import ipaddress
 import re
 
-from dn42ctl.constants import BABEL_VALID_TYPES, MAX_ASN, MAX_PORT
+from dn42ctl.constants import BABEL_VALID_TYPES, MAX_ASN, MAX_PORT, WG_KEY_BYTES
 
 
 class ValidationError(ValueError):
     pass
 
 
-_WG_PUBKEY_RE = re.compile(r"^[A-Za-z0-9+/]{42,44}={0,2}$")
 _ENDPOINT_RE = re.compile(r"^(\[.+\]|[^:]+):(\d+)$")
 _HOSTNAME_RE = re.compile(
     r"^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?$"
@@ -39,11 +40,21 @@ def validate_asn(value: int) -> int:
 
 
 def validate_pubkey(value: str) -> str:
+    """WireGuard X25519 公钥:标准 base64,解码后恰好 32 字节。
+
+    按解码长度而不是字符数校验。字符数放不出这个约束——42~46 个 base64 字符能塞进
+    31 到 33 字节,而 `wg` 对非 32 字节的 key 一律报 "Key is not the correct length
+    or format"。
+    """
     value = value.strip()
     if not value:
         raise ValidationError("公钥不能为空")
-    if not _WG_PUBKEY_RE.match(value):
-        raise ValidationError(f"公钥格式不合法 (base64, 需40~44字符): {value!r}")
+    try:
+        raw = base64.b64decode(value, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise ValidationError(f"公钥不是合法的 base64: {value!r}") from exc
+    if len(raw) != WG_KEY_BYTES:
+        raise ValidationError(f"公钥长度不对 (解码后需 {WG_KEY_BYTES} 字节, 实际 {len(raw)}): {value!r}")
     return value
 
 
@@ -63,12 +74,20 @@ def validate_endpoint(value: str, *, allow_empty: bool = False) -> str:
 
 
 def validate_ipv6_address(value: str, *, field_name: str = "IPv6 地址") -> str:
+    """合法 IPv6 地址,允许带 `/prefix`。
+
+    带前缀时用 IPv6Interface 整串解析:宽松的是"接受哪种形状",不是"接受什么内容"。
+    早先在 `/` 处截断只验前半段,于是 `fd00::1/not-a-prefix` 会被原样写进 bird.conf
+    的 neighbor 行与 networkd 的 Peer=。
+    """
     value = value.strip()
     if not value:
         raise ValidationError(f"{field_name} 不能为空")
-    addr_part = value.split("/", 1)[0]
     try:
-        ipaddress.IPv6Address(addr_part)
+        if "/" in value:
+            ipaddress.IPv6Interface(value)
+        else:
+            ipaddress.IPv6Address(value)
     except ValueError as exc:
         raise ValidationError(f"不是合法的 IPv6 地址: {value!r}") from exc
     return value

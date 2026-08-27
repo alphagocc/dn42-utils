@@ -77,6 +77,26 @@ class TestValidatePubkey:
         with pytest.raises(ValidationError):
             validate_pubkey("abc")
 
+    @pytest.mark.parametrize(
+        ("key", "decoded_bytes"),
+        [
+            ("A" * 42 + "==", 31),
+            ("A" * 44, 33),
+            ("QUFB" * 11, 33),
+        ],
+    )
+    def test_rejects_wrong_decoded_length(self, key: str, decoded_bytes: int) -> None:
+        """字符数落在 42~44 但解码后不是 32 字节 —— 真实的 wg 一律拒绝这些 key。"""
+        import base64
+
+        assert len(base64.b64decode(key, validate=True)) == decoded_bytes
+        with pytest.raises(ValidationError, match="长度不对"):
+            validate_pubkey(key)
+
+    def test_rejects_non_base64_alphabet(self) -> None:
+        with pytest.raises(ValidationError, match="base64"):
+            validate_pubkey("!" * 43 + "=")
+
     def test_invalid_chars(self) -> None:
         with pytest.raises(ValidationError):
             validate_pubkey("!" * 44)
@@ -117,6 +137,12 @@ class TestValidateIpv6Address:
 
     def test_with_prefix(self) -> None:
         assert validate_ipv6_address("fe80::1/64") == "fe80::1/64"
+
+    @pytest.mark.parametrize("addr", ["fd00::1/not-a-prefix", "fd00::1/999", "fe80::1/", "fe80::1/64/128"])
+    def test_rejects_bad_prefix(self, addr: str) -> None:
+        """允许带 /prefix 指的是形状,不是"斜杠后面不管"。"""
+        with pytest.raises(ValidationError):
+            validate_ipv6_address(addr)
 
     def test_empty(self) -> None:
         with pytest.raises(ValidationError, match="不能为空"):

@@ -19,7 +19,7 @@ from dn42ctl.services.desired_state import (
 NODE_A = "11111111-1111-4111-8111-111111111111"
 NODE_B = "22222222-2222-4222-8222-222222222222"
 FAKE_PRIV = "cFYxMU1qZEdOcUI3RHBOS0FRUUVMVmR3aFNTa1F3VT0="
-FAKE_PUB = "dGVzdHB1YmxpY2tleWZvcnVuaXR0ZXN0aW5nMTIzNA=="
+FAKE_PUB = "dGVzdHB1YmxpY2tleWZvcnVuaXR0ZXN0cy0zMmJ5dGU="
 
 
 def _seed_node_with_peers(db_path: Path, node_id: str = NODE_A) -> None:

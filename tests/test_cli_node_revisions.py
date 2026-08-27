@@ -10,7 +10,7 @@ from dn42ctl.db import BgpPeerRecord, Database
 
 NODE_A = "11111111-1111-4111-8111-111111111111"
 FAKE_PRIV = "cFYxMU1qZEdOcUI3RHBOS0FRUUVMVmR3aFNTa1F3VT0="
-FAKE_PUB = "dGVzdHB1YmxpY2tleWZvcnVuaXR0ZXN0aW5nMTIzNA=="
+FAKE_PUB = "dGVzdHB1YmxpY2tleWZvcnVuaXR0ZXN0cy0zMmJ5dGU="
 
 
 @pytest.fixture
