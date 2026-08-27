@@ -51,7 +51,7 @@ class TestRemove:
     def test_remove(self, db_path: Path) -> None:
         add_node(db_path=db_path, node_id=NODE_A, name="alpha")
         removed = remove_node(db_path=db_path, node_id=NODE_A)
-        assert removed.node_id == NODE_A
+        assert removed.node.node_id == NODE_A
         with pytest.raises(Dn42CtlError):
             get_node(db_path=db_path, node_id=NODE_A)
 

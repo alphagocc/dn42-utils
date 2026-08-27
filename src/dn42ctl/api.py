@@ -369,10 +369,13 @@ def api_patch_managed_node(node_id: str, body: NodePatchRequest) -> dict:
 @_admin_nodes_router.delete("/nodes/{node_id}")
 def api_remove_managed_node(node_id: str, force: Annotated[bool, Query()] = False) -> dict:
     try:
-        node = remove_node(db_path=_get_db_path(), node_id=node_id, force=force)
+        removed = remove_node(db_path=_get_db_path(), node_id=node_id, force=force)
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _managed_node_to_dict(node)
+    return {
+        **_managed_node_to_dict(removed.node),
+        "self_node_toml_error": removed.self_node_toml_error,
+    }
 
 
 @_admin_nodes_router.post("/nodes/{node_id}/token")
@@ -381,7 +384,14 @@ def api_rotate_node_token(node_id: str) -> dict:
         rotated = rotate_token(db_path=_get_db_path(), node_id=node_id)
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"node_id": rotated.node_id, "token": rotated.plaintext}
+    # node.toml 改写失败不影响 200:hash 已经换掉,明文只在这个响应里出现一次。
+    # 但必须让调用方看见,否则 hub 自己的 agent 会被静默锁在门外。
+    return {
+        "node_id": rotated.node_id,
+        "token": rotated.plaintext,
+        "self_node_toml_updated": rotated.self_node_toml_updated,
+        "self_node_toml_error": rotated.self_node_toml_error,
+    }
 
 
 @_admin_nodes_router.patch("/nodes/{node_id}/policy")

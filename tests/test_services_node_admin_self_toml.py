@@ -32,6 +32,14 @@ def _seed_self_toml(toml_path: Path, *, token: str) -> None:
     )
 
 
+def _authenticates(db_path: Path, token: str) -> bool:
+    db = Database.open(db_path)
+    try:
+        return ManagedNodeStore(db.connection).authenticate(token) is not None
+    finally:
+        db.close()
+
+
 class TestRotateTokenSelf:
     def test_self_rotate_updates_node_toml(self, db_path: Path, tmp_path: Path) -> None:
         _register_self(db_path)
@@ -88,7 +96,7 @@ class TestRemoveSelf:
             force=True,
             self_node_toml_path=toml,
         )
-        assert removed.is_self is True
+        assert removed.node.is_self is True
         assert not toml.exists()
 
     def test_remove_non_self_does_not_touch_toml(self, db_path: Path, tmp_path: Path) -> None:
@@ -120,6 +128,67 @@ class TestRemoveSelf:
                 self_node_toml_path=toml,
             )
         assert toml.exists()
+
+
+class TestSelfTomlFailureIsReported:
+    """node.toml 读写失败在标准部署下是常态:hub 跑在非 root 用户下,文件是 root:0600。
+
+    此时 DB 里的 hash 已经换掉,回滚会把只出现一次的明文丢掉,所以只能报告不能中止;
+    但也绝不能沉默——沉默等于把 hub 自己的 agent 静默锁在门外。见 docs/commands/node.md。
+    """
+
+    def test_rotate_reports_unreadable_toml(self, db_path: Path, tmp_path: Path) -> None:
+        _register_self(db_path)
+        toml = tmp_path / "node.toml"
+        _seed_self_toml(toml, token="stale-token")
+        toml.chmod(0o000)
+        try:
+            rotated = rotate_token(db_path=db_path, node_id=NODE_SELF, self_node_toml_path=toml)
+        finally:
+            toml.chmod(0o600)
+
+        assert rotated.self_node_toml_updated is False
+        assert rotated.self_node_toml_error is not None
+        assert _authenticates(db_path, rotated.plaintext)
+
+    def test_rotate_reports_unwritable_toml(self, db_path: Path, tmp_path: Path) -> None:
+        _register_self(db_path)
+        toml = tmp_path / "node.toml"
+        _seed_self_toml(toml, token="stale-token")
+        toml.chmod(0o400)
+        try:
+            rotated = rotate_token(db_path=db_path, node_id=NODE_SELF, self_node_toml_path=toml)
+        finally:
+            toml.chmod(0o600)
+
+        assert rotated.self_node_toml_updated is False
+        assert "写入 node.toml 失败" in (rotated.self_node_toml_error or "")
+        assert load_node_config(toml).token == "stale-token"
+        assert _authenticates(db_path, rotated.plaintext)
+
+    def test_force_remove_reports_failed_unlink(self, db_path: Path, tmp_path: Path) -> None:
+        _register_self(db_path)
+        holder = tmp_path / "locked"
+        holder.mkdir()
+        toml = holder / "node.toml"
+        _seed_self_toml(toml, token="placeholder")
+        holder.chmod(0o500)
+        try:
+            removed = remove_node(db_path=db_path, node_id=NODE_SELF, force=True, self_node_toml_path=toml)
+        finally:
+            holder.chmod(0o700)
+
+        assert removed.node.is_self is True
+        assert "删除 node.toml 失败" in (removed.self_node_toml_error or "")
+        assert toml.exists()
+
+    def test_successful_paths_carry_no_error(self, db_path: Path, tmp_path: Path) -> None:
+        _register_self(db_path)
+        toml = tmp_path / "node.toml"
+        _seed_self_toml(toml, token="stale-token")
+        assert rotate_token(db_path=db_path, node_id=NODE_SELF, self_node_toml_path=toml).self_node_toml_error is None
+        removed = remove_node(db_path=db_path, node_id=NODE_SELF, force=True, self_node_toml_path=toml)
+        assert removed.self_node_toml_error is None
 
 
 class TestRotatePreservesAllFields:

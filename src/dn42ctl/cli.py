@@ -1305,7 +1305,7 @@ def cmd_node_remove(
     from dn42ctl.services import remove_node
 
     try:
-        node = remove_node(
+        removed = remove_node(
             db_path=appctx.db_path,
             node_id=node_id,
             force=force,
@@ -1316,9 +1316,13 @@ def cmd_node_remove(
     except DatabaseError as exc:
         typer.echo(_db_open_hint(appctx.db_path), err=True)
         raise typer.Exit(code=1) from exc
+    node = removed.node
     typer.echo(f"已删除: {node.node_id} ({node.name})")
     if node.is_self:
-        typer.echo("self 节点的 node.toml 已清理;下次 dn42ctl serve 启动会重新注册")
+        if removed.self_node_toml_error:
+            typer.echo(f"警告: {removed.self_node_toml_error}", err=True)
+        else:
+            typer.echo("self 节点的 node.toml 已清理;下次 dn42ctl serve 启动会重新注册")
 
 
 token_app = typer.Typer(help="节点 token 管理")
@@ -1350,6 +1354,10 @@ def cmd_node_token_rotate(
     typer.echo(f"token (明文,仅显示一次): {rotated.plaintext}")
     if rotated.self_node_toml_updated:
         typer.echo(f"已同步更新 self node.toml: {rotated.self_node_toml_path}")
+    elif rotated.self_node_toml_error:
+        # hash 已经换掉了,这台机器的 agent 从现在起认证失败,直到文件被更新。
+        typer.echo(f"警告: 未能更新 self node.toml: {rotated.self_node_toml_error}", err=True)
+        typer.echo(f"请手工把上面的明文写进 {rotated.self_node_toml_path} 的 token 字段", err=True)
 
 
 node_app.add_typer(token_app, name="token")

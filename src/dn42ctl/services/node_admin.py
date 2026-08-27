@@ -5,7 +5,6 @@ input validation. Used by both CLI (`dn42ctl node ...`) and admin REST API
 
 from __future__ import annotations
 
-import contextlib
 import dataclasses
 import secrets
 import uuid
@@ -36,7 +35,7 @@ def _resolve_self_toml(self_node_toml_path: Path | None) -> Path:
     return self_node_toml_path if self_node_toml_path is not None else NODE_CONFIG_PATH
 
 
-def _rewrite_self_node_toml(*, path: Path, plaintext: str, node_id: str) -> bool:
+def _rewrite_self_node_toml(*, path: Path, plaintext: str, node_id: str) -> str | None:
     """Update token (and node_id) of an existing self node.toml.
 
     Uses `dataclasses.replace` rather than rebuilding the dataclass field by field:
@@ -44,14 +43,20 @@ def _rewrite_self_node_toml(*, path: Path, plaintext: str, node_id: str) -> bool
     that is exactly how `agent` and `reload_policy` got reset to their defaults on
     every token rotation. Only the two fields we mean to change are named here.
 
-    Returns True if the file existed and was rewritten, False if it was missing.
+    Returns None on success, or a human-readable reason on failure. Failure must not
+    raise: the DB hash is already rotated by the time we get here and the plaintext
+    exists only in this one response, so aborting would strand the caller without it.
+    The caller surfaces the reason instead — see docs/commands/node.md.
     """
     try:
         existing = load_node_config(path)
-    except NodeConfigError:
-        return False
-    save_node_config(path, dataclasses.replace(existing, node_id=node_id, token=plaintext))
-    return True
+    except NodeConfigError as exc:
+        return str(exc)
+    try:
+        save_node_config(path, dataclasses.replace(existing, node_id=node_id, token=plaintext))
+    except OSError as exc:
+        return f"写入 node.toml 失败: {path} ({exc})"
+    return None
 
 
 @dataclass(frozen=True)
@@ -60,6 +65,13 @@ class RotatedToken:
     plaintext: str
     self_node_toml_updated: bool = False
     self_node_toml_path: Path | None = None
+    self_node_toml_error: str | None = None
+
+
+@dataclass(frozen=True)
+class RemovedNode:
+    node: ManagedNode
+    self_node_toml_error: str | None = None
 
 
 def add_node(*, db_path: Path, node_id: str, name: str) -> ManagedNode:
@@ -105,7 +117,7 @@ def remove_node(
     node_id: str,
     force: bool = False,
     self_node_toml_path: Path | None = None,
-) -> ManagedNode:
+) -> RemovedNode:
     _validate_node_id(node_id)
     db, store = _store_for(db_path)
     try:
@@ -116,14 +128,20 @@ def remove_node(
         db.close()
     if removed is None:
         raise Dn42CtlError(f"节点不存在: {node_id}")
+    toml_error: str | None = None
     if removed.is_self:
         # When the central host's self node is force-removed, the matching
         # /etc/dn42ctl/node.toml is now stale — drop it so the next `dn42ctl serve`
-        # boot re-registers a fresh self.
+        # boot re-registers a fresh self. The row is already gone and cannot be put
+        # back, so a failed unlink is reported rather than raised.
         path = _resolve_self_toml(self_node_toml_path)
-        with contextlib.suppress(FileNotFoundError):
+        try:
             path.unlink()
-    return removed
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            toml_error = f"删除 node.toml 失败: {path} ({exc})"
+    return RemovedNode(node=removed, self_node_toml_error=toml_error)
 
 
 def rotate_token(
@@ -148,17 +166,18 @@ def rotate_token(
     finally:
         db.close()
 
-    toml_updated = False
+    toml_error = None
     toml_path = None
     if node.is_self:
         toml_path = _resolve_self_toml(self_node_toml_path)
-        toml_updated = _rewrite_self_node_toml(path=toml_path, plaintext=plaintext, node_id=node_id)
+        toml_error = _rewrite_self_node_toml(path=toml_path, plaintext=plaintext, node_id=node_id)
 
     return RotatedToken(
         node_id=node_id,
         plaintext=plaintext,
-        self_node_toml_updated=toml_updated,
+        self_node_toml_updated=node.is_self and toml_error is None,
         self_node_toml_path=toml_path,
+        self_node_toml_error=toml_error,
     )
 
 

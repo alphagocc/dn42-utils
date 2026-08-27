@@ -32,6 +32,7 @@
 注销节点。删除 `managed_nodes` 行，级联清空 `config_proposals` / `node_reports` / `config_revisions`。
 
 - 若 `is_self=1`，默认拒绝并提示用 `--force`。强制删除会同时清空 `/etc/dn42ctl/node.toml` 的 `server/node_id/token` 并打 warning（下次 `dn42ctl serve` 启动会自动重新注册 self 节点）。
+- 删除 `node.toml` 失败（权限不足等）不会让整条命令失败——`managed_nodes` 行已经删掉了，回滚不了。失败原因通过 `self_node_toml_error` 返回，CLI 打 warning，REST 响应带该字段。
 
 ### `dn42ctl node token rotate <node-id>`
 
@@ -43,6 +44,14 @@
 4. 若 `is_self=1`：同步重写中心主机的 `/etc/dn42ctl/node.toml`。
 
 旧 token 立即失效。中心会写一条 `access_revoked` 事件，watcher 随即用关闭码 `4003` 断开该节点的 WS 连接；agent 进入 300 秒长退避，更新 `node.toml` 后自动恢复。
+
+#### 第 4 步失败必须说出来
+
+hub 以非 root 的 `dn42ctl` 用户运行，而 `node.toml` 是 `0600 root:root`——读写它失败是**标准部署下就会发生**的事，不是异常状态。此时第 2 步已经提交，DB 里的 hash 已经换掉，等于把 hub 自己的 agent 锁在门外。
+
+所以第 4 步失败**不能**回滚（明文只存在于这一次响应里，回滚会把它丢掉），也**不能**沉默。`RotatedToken` 带 `self_node_toml_updated` 与 `self_node_toml_error` 两个字段，CLI 打 warning，`POST /api/admin/nodes/{id}/token` 的响应体一并返回，供 Web UI 提示管理员手工更新文件。
+
+> 即使漏了，`dn42ctl serve` 下次启动时会发现 `node.toml` 与库中 hash 对不上并自动重签（见 [`sync_hub_spoke.md`](../architecture/sync_hub_spoke.md)）。但那要等到下一次重启，中间这段时间 hub 是不收敛的，所以仍然要当场告警。
 
 ### `dn42ctl node policy set <node-id> [选项]`
 

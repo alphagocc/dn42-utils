@@ -14,6 +14,7 @@ from .ibgp import create_ibgp_peer, delete_ibgp_peer, modify_ibgp_peer
 from .init_sys import genconf, init_node
 from .node_admin import (
     NodeStatus,
+    RemovedNode,
     RotatedToken,
     add_node,
     get_node,
@@ -46,6 +47,7 @@ __all__ = [
     "Dn42CtlError",
     "DummyResult",
     "NodeStatus",
+    "RemovedNode",
     "RotatedToken",
     "SystemInstallResult",
     "accept_proposal",

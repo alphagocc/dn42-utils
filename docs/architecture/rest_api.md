@@ -96,7 +96,7 @@ desired state JSON schema 详见 `docs/architecture/sync_hub_spoke.md`。
 | `GET` | `/api/admin/nodes/{node_id}` | `node show` | 查看单节点详情 |
 | `PATCH` | `/api/admin/nodes/{node_id}` | `node set-address` | 修改 `name` / `enabled` / 三个地址字段，并按需传播到 mesh |
 | `DELETE` | `/api/admin/nodes/{node_id}` | `node remove` | 注销节点（self 节点需 `?force=true`） |
-| `POST` | `/api/admin/nodes/{node_id}/token` | `node token rotate` | 重签 node token，返回明文一次 |
+| `POST` | `/api/admin/nodes/{node_id}/token` | `node token rotate` | 重签 node token，返回明文一次；对 self 节点另带 `self_node_toml_updated` / `self_node_toml_error` |
 | `PATCH` | `/api/admin/nodes/{node_id}/policy` | `node policy set` | 修改 `write_policy` JSON |
 | `GET` | `/api/admin/nodes/{node_id}/proposals` | `node proposals` | 列出该节点的提案 |
 | `POST` | `/api/admin/proposals/{proposal_id}/accept` | `node accept-proposal` | 接受提案，走 service 校验 |
