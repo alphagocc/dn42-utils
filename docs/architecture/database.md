@@ -12,7 +12,7 @@
 - 启动/初始化时应自动执行迁移，保证旧库可直接升级。
 - 迁移是 `(version, step)` 列表，逐版本执行 + commit。`step` 可以是 **SQL 字符串**（走 `executescript`，SQL 必须**幂等**：`IF NOT EXISTS` / 条件 UPDATE），也可以是 **`Callable[[sqlite3.Connection], None]`**。
 - **`ALTER TABLE ... ADD COLUMN` 必须走 callable 分支。** SQLite 没有 `ADD COLUMN IF NOT EXISTS`，而 `executescript` 在执行前**隐式 COMMIT**、语句不在调用方事务内：脚本中途失败会留下"前几列已提交、版本号没写、`rollback()` 对它们无效"的状态，重跑直接 duplicate column，**库永久卡死**。callable 分支跑在连接的隐式事务里，与 `schema_migrations` 插入真正原子。用 `migrations.ensure_column()`（先查 `PRAGMA table_info` 再决定是否 ALTER）。
-- **版本号不连续是有意的。** v1 是合并后的建表脚本，v2–v7 已在 2026-05-31 的清理中并入 v1；v8 是 `nm` → `networkd` 的数据回填（编号跳到 8 是为了避开生产库里已应用的旧 v2）。**当前最大版本是 v11**（作废存量 node token hash），新迁移从 v12 开始。
+- **版本号不连续是有意的。** v1 是合并后的建表脚本，v2–v7 已在 2026-05-31 的清理中并入 v1；v8 是 `nm` → `networkd` 的数据回填（编号跳到 8 是为了避开生产库里已应用的旧 v2）。**当前最大版本是 v12**（清理多余的 `is_self` 行），新迁移从 v13 开始。
 
 ## 连接 PRAGMA
 
@@ -106,7 +106,9 @@ CREATE TABLE managed_nodes (
   - `peer_add` ∈ {`review`, `auto_accept`}：节点 push 新增 peer 时的处理。
   - `peer_modify` / `peer_delete` ∈ {`review`}：修改 / 删除**始终** review，schema 不接受 `auto_accept`（防止节点被入侵后篡改/抹除权威记录）。
   - `report` ∈ {`auto`, `review`}：节点上报状态进 `node_reports` 是否需要管理员审核。注意 report 永远不直接改业务表，`auto` 仅免去入队审核步骤。
-- `is_self = 1`：标记为中心主机自身（self 节点）。仅用于 `dn42ctl node list` 显示 `[self]` 与 `dn42ctl node remove` 默认拒绝。
+- `is_self = 1`：标记为中心主机自身（self 节点）。**全表至多一行**——`upsert_self` 先把其它行清零再写入，`get_self()` 带确定性排序兜底，v12 迁移清理存量的多 self 行（保留 `updated_at` 最新的一行，其余降级为普通节点）。
+  - 这一列不只是显示用：`api.py` 的 `_resolve_target_node` 用它决定每一次 admin 写入落到哪个分区（见 [`rest_api.md`](rest_api.md)），`services/auto_peer.py` 用它决定 auto-peer 提案写给谁，`node adopt-self` 用它确定搬迁目标。出现两行时 `get_self()` 会返回其中一行且没有任何排序保证，上面这三处会一起指向错误的分区。
+  - 出现两行的现实路径是 `/var/lib/dn42ctl/self_node_id` 丢失后重新生成（容器没挂持久卷、磁盘恢复、误删）：`upsert_self` 写入新 id 却不动旧行。降级而不是删除旧行，是因为旧分区里的 peer 全都还在，删掉等于丢配置；降级后它作为普通受管节点出现在 `node list` 里，可以用 `node adopt-self` 把 peer 搬过来。
 - `last_seen_at`：最近一次该节点的 pull / push / report 时间，由 server 在请求处理时更新。WS 长连接下由节点每 60 秒发起的 `ping` 触发（每连接节流到最多 60 秒一次，避免心跳放大写入）。
 
 ### 6) config_proposals
@@ -220,4 +222,4 @@ CREATE INDEX idx_sync_events_node ON sync_events(node_id, id);
 - `write_policy` 采用 JSON 字段存储：字段少、读多写少、按节点单值，无需独立的策略子表。
 - `sync_events` 采用轮询小表方案，取代"server 定时重算内容哈希"与"CLI kick loopback 端点"两个候选：写入与业务变更同事务、不要求 CLI 能访问 server、漏埋点不会静默失效。轮询没有消失，但它从跨网络 10 分钟粒度变成了 hub 本机 1 秒粒度的一条带索引 SELECT。
 - `config_revisions` 第一阶段就建表，但写入与回滚实现在阶段 5。schema 一次到位避免再加迁移。
-- `is_self` 不放索引：值集小 + 只在 CLI 显示时按 PK 已知 node_id 查询。
+- `is_self` 不放索引：全表至多一行为 1，扫描代价与索引查找相当。

@@ -208,8 +208,10 @@ class ManagedNodeStore:
 
     def get_self(self) -> ManagedNode | None:
         try:
+            # ORDER BY 是防御性的:upsert_self 保证至多一行,但没有排序的 LIMIT 1 会在
+            # 不变量万一被破坏时静默返回任意一行,而这一列决定所有 admin 写入的分区。
             row = self._conn.execute(
-                "SELECT * FROM managed_nodes WHERE is_self=1 LIMIT 1",
+                "SELECT * FROM managed_nodes WHERE is_self=1 ORDER BY updated_at DESC, node_id DESC LIMIT 1",
             ).fetchone()
         except sqlite3.Error as exc:
             raise DatabaseError("查询 self 节点失败") from exc
@@ -223,9 +225,19 @@ class ManagedNodeStore:
         """Insert or update the row marking this node as the central host's self node.
 
         Idempotent. Does not touch api_token_hash.
+
+        Demotes any other `is_self=1` row first. Losing `/var/lib/dn42ctl/self_node_id`
+        mints a fresh UUID, and without the demotion the old row keeps its flag: two
+        self rows, and `get_self()` — which decides the partition every admin write
+        lands in — has nothing to choose between them. Demote rather than delete; the
+        old partition still holds every peer it ever had.
         """
         now = _now_iso()
         try:
+            self._conn.execute(
+                "UPDATE managed_nodes SET is_self=0, updated_at=? WHERE is_self=1 AND node_id<>?",
+                (now, node_id),
+            )
             self._conn.execute(
                 """
                 INSERT INTO nodes(node_id, created_at, updated_at) VALUES (?,?,?)

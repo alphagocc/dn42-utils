@@ -105,6 +105,25 @@ class TestUpsertSelf:
         store.upsert_self(NODE_SELF)
         assert store.get_self() is not None
 
+    def test_new_self_demotes_previous(self, store: ManagedNodeStore, mem_db: Database) -> None:
+        """self_node_id 丢失后会生成新 UUID;旧行不清零就会留下两个 self。"""
+        store.upsert_self(NODE_A)
+        store.upsert_self(NODE_SELF)
+
+        flagged = [r[0] for r in mem_db.connection.execute("SELECT node_id FROM managed_nodes WHERE is_self=1")]
+        assert flagged == [NODE_SELF]
+        assert store.get_self().node_id == NODE_SELF
+
+    def test_demoted_row_survives_as_normal_node(self, store: ManagedNodeStore) -> None:
+        """降级而不是删除:旧分区里的 peer 全都还在,删掉等于丢配置。"""
+        store.upsert_self(NODE_A)
+        store.upsert_self(NODE_SELF)
+
+        demoted = store.get(NODE_A)
+        assert demoted is not None
+        assert demoted.is_self is False
+        assert demoted.enabled is True
+
 
 class TestDelete:
     def test_delete_normal(self, store: ManagedNodeStore) -> None:
@@ -174,6 +193,35 @@ class TestTokens:
     def test_legacy_hash_never_verifies(self) -> None:
         """迁移漏掉某行时必须认证失败,而不是抛异常把 401 变成 500。"""
         assert verify_token("$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQ$xxxx", "tok") is False
+
+
+class TestMigrationV12:
+    def test_keeps_only_the_most_recent_self(self, tmp_path: Path) -> None:
+        """存量库里可能已经有两行 is_self=1,迁移必须收敛到一行且不删数据。"""
+        db_path = tmp_path / "multiself.sqlite3"
+        db = Database.open(db_path)
+        try:
+            store = ManagedNodeStore(db.connection)
+            store.add(NODE_A, "stale-self")
+            store.add(NODE_B, "current-self")
+            db.connection.execute(
+                "UPDATE managed_nodes SET is_self=1, updated_at=? WHERE node_id=?",
+                ("2020-01-01T00:00:00+00:00", NODE_A),
+            )
+            db.connection.execute(
+                "UPDATE managed_nodes SET is_self=1, updated_at=? WHERE node_id=?",
+                ("2026-08-27T00:00:00+00:00", NODE_B),
+            )
+            db.connection.execute("DELETE FROM schema_migrations WHERE version=12")
+            db.connection.commit()
+
+            db.migrate()
+
+            assert store.get(NODE_A).is_self is False
+            assert store.get(NODE_B).is_self is True
+            assert store.get(NODE_A) is not None  # 降级,不是删除
+        finally:
+            db.close()
 
 
 class TestMigrationV11:

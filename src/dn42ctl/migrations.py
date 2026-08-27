@@ -200,4 +200,18 @@ MIGRATIONS: list[tuple[int, MigrationStep]] = [
          WHERE api_token_hash IS NOT NULL AND api_token_hash NOT LIKE 'sha256$%';
         """.strip(),
     ),
+    (
+        12,
+        # 存量的多 self 行:保留 updated_at 最新的一行,其余降级为普通受管节点。
+        # upsert_self 每次 serve 启动都会刷新当前 self 的 updated_at,所以"最新"就是
+        # 当前 self_node_id 指向的那行。降级而非删除——旧分区里的 peer 一条没少。
+        """
+        UPDATE managed_nodes SET is_self = 0
+         WHERE is_self = 1
+           AND node_id NOT IN (
+             SELECT node_id FROM managed_nodes WHERE is_self = 1
+              ORDER BY updated_at DESC, node_id DESC LIMIT 1
+           );
+        """.strip(),
+    ),
 ]
