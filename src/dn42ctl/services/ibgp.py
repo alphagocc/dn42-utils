@@ -214,8 +214,15 @@ def delete_ibgp_peer(
         net_backend = str(row["net_backend"])
         row_has_wg = bool(row["has_wg"])
 
+        # DB 优先,理由同 delete_bgp_peer。
+        try:
+            db.delete_ibgp_peer(node_id, peer_name)
+        except DatabaseError as exc:
+            raise Dn42CtlError(str(exc)) from exc
+
         deleted: list[str] = []
         missing: list[str] = []
+        failed: list[str] = []
         if render_files:
             if row_has_wg:
                 files = peer_files_for_backend(
@@ -230,12 +237,7 @@ def delete_ibgp_peer(
             else:
                 bird_peer_path = Path(config.bird_peers_dir) / f"ibgp_{peer_name}.conf"
                 files = [bird_peer_path]
-            deleted, missing = delete_files_and_collect_status(files)
-
-        try:
-            db.delete_ibgp_peer(node_id, peer_name)
-        except DatabaseError as exc:
-            raise Dn42CtlError(str(exc)) from exc
+            deleted, missing, failed = delete_files_and_collect_status(files)
 
         regenerated: list[str] = []
         if render_files and row_has_wg:
@@ -250,6 +252,7 @@ def delete_ibgp_peer(
             deleted_files=deleted,
             missing_files=missing,
             regenerated_files=regenerated,
+            failed_files=failed,
         )
     finally:
         db.close()

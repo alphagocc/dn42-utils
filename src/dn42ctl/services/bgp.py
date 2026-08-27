@@ -255,16 +255,19 @@ def delete_bgp_peer(
         ifname = str(row["ifname"])
         net_backend = str(row["net_backend"])
 
-        deleted: list[str] = []
-        missing: list[str] = []
-        if render_files:
-            files = peer_files_for_backend(config=config, ifname=ifname, net_backend=net_backend, kind="bgp")
-            deleted, missing = delete_files_and_collect_status(files)
-
+        # DB 优先:先删权威记录,再删派生文件。反过来的话删文件成功、删行失败会留下一条
+        # 记录,genconf --all 下次就把 peer 复活。见 docs/architecture/database.md。
         try:
             db.delete_bgp_peer(node_id, peer_asn)
         except DatabaseError as exc:
             raise Dn42CtlError(str(exc)) from exc
+
+        deleted: list[str] = []
+        missing: list[str] = []
+        failed: list[str] = []
+        if render_files:
+            files = peer_files_for_backend(config=config, ifname=ifname, net_backend=net_backend, kind="bgp")
+            deleted, missing, failed = delete_files_and_collect_status(files)
 
         return DeleteResult(
             kind="bgp",
@@ -273,6 +276,7 @@ def delete_bgp_peer(
             deleted_files=deleted,
             missing_files=missing,
             regenerated_files=[],
+            failed_files=failed,
         )
     finally:
         db.close()

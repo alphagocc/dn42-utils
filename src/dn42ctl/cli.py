@@ -709,6 +709,8 @@ def cmd_bgp_peer_del(
         typer.echo(f"删除: {p}")
     for p in res.missing_files:
         typer.echo(f"缺失: {p}")
+    for p in res.failed_files:
+        typer.echo(f"警告: 未能删除 {p}", err=True)
 
 
 ibgp_app = typer.Typer()
@@ -995,6 +997,8 @@ def cmd_ibgp_peer_del(
         typer.echo(f"缺失: {p}")
     for p in res.regenerated_files:
         typer.echo(f"重生成: {p}")
+    for p in res.failed_files:
+        typer.echo(f"警告: 未能删除 {p}", err=True)
 
 
 show_app = typer.Typer(invoke_without_command=True)

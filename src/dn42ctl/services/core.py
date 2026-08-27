@@ -100,6 +100,9 @@ class DeleteResult:
     deleted_files: list[str]
     missing_files: list[str]
     regenerated_files: list[str]
+    # 删不掉的文件(权限等)。删除是 DB 优先的,行已经没了,中止也退不回去;而 bird.conf
+    # 的 include 仍在加载这些文件,必须让用户看见。见 docs/architecture/database.md。
+    failed_files: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -302,37 +305,34 @@ def peer_files_for_backend(
     return files
 
 
-def _unlink_best_effort(path: Path) -> bool:
-    """Return True if deleted, False if missing."""
-    try:
-        path.unlink(missing_ok=True)
-        return True
-    except PermissionError as exc:
-        raise Dn42CtlError(f"权限不足: 无法删除 {path}。{permission_hint()}") from exc
-    except IsADirectoryError as exc:
-        raise Dn42CtlError(f"删除失败: {path} 是目录") from exc
-    except OSError as exc:
-        raise Dn42CtlError(f"删除失败: {path} ({exc})") from exc
-
-
 def delete_files_and_collect_status(
     files: list[Path],
-) -> tuple[list[str], list[str]]:
-    """Delete each path in *files*; return (deleted, missing) string lists."""
+) -> tuple[list[str], list[str], list[str]]:
+    """Delete each path in *files*; return (deleted, missing, failed) string lists.
+
+    Never raises. Callers run this *after* the DB row is gone, and the row cannot be
+    put back — aborting would leave the operator with a peer that BIRD still loads and
+    a `del` command that now answers "该 peer 不存在". Failures are reported instead.
+    """
     deleted: list[str] = []
     missing: list[str] = []
+    failed: list[str] = []
     for p in files:
         existed = False
         try:
             existed = p.exists()
         except OSError:
             existed = False
-        _unlink_best_effort(p)
+        try:
+            p.unlink(missing_ok=True)
+        except OSError as exc:
+            failed.append(f"{p} ({exc})")
+            continue
         if existed:
             deleted.append(str(p))
         else:
             missing.append(str(p))
-    return deleted, missing
+    return deleted, missing, failed
 
 
 def regenerate_babel_conf(*, config: AppConfig, db: Database, node_id: str) -> Path:

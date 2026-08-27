@@ -14,6 +14,25 @@
 - **`ALTER TABLE ... ADD COLUMN` 必须走 callable 分支。** SQLite 没有 `ADD COLUMN IF NOT EXISTS`，而 `executescript` 在执行前**隐式 COMMIT**、语句不在调用方事务内：脚本中途失败会留下"前几列已提交、版本号没写、`rollback()` 对它们无效"的状态，重跑直接 duplicate column，**库永久卡死**。callable 分支跑在连接的隐式事务里，与 `schema_migrations` 插入真正原子。用 `migrations.ensure_column()`（先查 `PRAGMA table_info` 再决定是否 ALTER）。
 - **版本号不连续是有意的。** v1 是合并后的建表脚本，v2–v7 已在 2026-05-31 的清理中并入 v1；v8 是 `nm` → `networkd` 的数据回填（编号跳到 8 是为了避开生产库里已应用的旧 v2）。**当前最大版本是 v12**（清理多余的 `is_self` 行），新迁移从 v13 开始。
 
+## DB 与配置文件的写入顺序
+
+**两个方向都以 DB 为先。** 创建时先提交行、再渲染文件；删除时先删行、再删文件。
+
+理由是 DB 是唯一权威，文件是派生物：任何一步失败之后，剩下的状态都应当是"DB 是对的，
+文件可能落后"，而不是反过来。反过来的那一半没法自动收敛——没有任何东西会去读文件
+再往 DB 里补记录。
+
+删除方向此前是先删文件再删行，于是文件删完、删行失败时会留下一条 DB 记录，`genconf
+--all` 下次就把文件重新生成出来，peer 悄悄复活。
+
+**改成 DB 优先之后，文件删除必须是尽力而为、不中止。** 先删行再让文件删除抛异常的话，
+DB 里已经没有这条 peer，而 `bird.conf` 的 `include "<peers_dir>/*";` 仍在加载那个文件
+——会话还活着；再跑一次 `del` 只会得到"该 peer 不存在"，工具救不回来。所以删不掉的
+文件进 `DeleteResult.failed_files` 报给用户，命令本身照常成功。
+
+> 只有 spoke 侧的 `node apply` 会主动清扫陈旧文件（`_collect_stale`）。hub 上的
+> `genconf --all` 只重建、不删除，所以孤儿文件在那里不会被自动收走。
+
 ## 事务纪律
 
 **每一条离开 DB 层的异常路径都必须先 `rollback()`。**

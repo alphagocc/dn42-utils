@@ -137,14 +137,33 @@ class TestDeleteFilesAndCollectStatus:
     def test_deletes_existing(self, tmp_path: Path) -> None:
         f = tmp_path / "test.txt"
         f.write_text("hello")
-        deleted, missing = delete_files_and_collect_status([f])
+        deleted, _missing, failed = delete_files_and_collect_status([f])
         assert str(f) in deleted
+        assert failed == []
         assert not f.exists()
 
     def test_missing_file(self, tmp_path: Path) -> None:
         f = tmp_path / "nonexistent.txt"
-        deleted, missing = delete_files_and_collect_status([f])
+        _deleted, missing, failed = delete_files_and_collect_status([f])
         assert str(f) in missing
+        assert failed == []
+
+    def test_undeletable_file_is_reported_not_raised(self, tmp_path: Path) -> None:
+        """调用方已经删掉了 DB 行,抛异常退不回去,只能报告。"""
+        holder = tmp_path / "locked"
+        holder.mkdir()
+        f = holder / "peer.conf"
+        f.write_text("x")
+        holder.chmod(0o500)
+        try:
+            deleted, missing, failed = delete_files_and_collect_status([f])
+        finally:
+            holder.chmod(0o700)
+        assert deleted == []
+        assert missing == []
+        assert len(failed) == 1
+        assert str(f) in failed[0]
+        assert f.exists()
 
 
 class TestOpenDbAndEnsureNode:
