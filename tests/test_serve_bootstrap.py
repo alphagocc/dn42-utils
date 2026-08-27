@@ -1,22 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
 from pathlib import Path
-
-import pytest
-from argon2 import PasswordHasher
 
 from dn42ctl.db import Database
 from dn42ctl.db_managed import ManagedNodeStore
 from dn42ctl.node_config import load_node_config
 from dn42ctl.serve_bootstrap import run_self_registration
-
-
-@pytest.fixture(autouse=True)
-def _fast_argon2(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    cheap = PasswordHasher(time_cost=1, memory_cost=8, parallelism=1)
-    monkeypatch.setattr("dn42ctl.db_managed._password_hasher", cheap)
-    yield
 
 
 def _paths(tmp_path: Path) -> tuple[Path, Path, Path]:

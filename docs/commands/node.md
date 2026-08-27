@@ -38,7 +38,7 @@
 重签 node token：
 
 1. 生成 `secrets.token_urlsafe(32)`。
-2. argon2id hash 写 `managed_nodes.api_token_hash`。
+2. SHA-256 hash 写 `managed_nodes.api_token_hash`。
 3. **明文 token 仅在此命令返回时打印一次**。
 4. 若 `is_self=1`：同步重写中心主机的 `/etc/dn42ctl/node.toml`。
 
@@ -146,7 +146,7 @@ reconcile_interval_seconds = 900.0    # 全量对账间隔
 heartbeat_interval_seconds = 60.0     # 心跳间隔
 ```
 
-鉴权类致命关闭（token 被轮换、节点被删除、协议版本不匹配等）使用固定的 `auth_retry_seconds`，避免过期 token 演变成对中心的高频 argon2 请求。退避策略的完整设计见 `docs/architecture/sync_ws_protocol.md`。
+鉴权类致命关闭（token 被轮换、节点被删除、协议版本不匹配等）使用固定的 `auth_retry_seconds`，避免过期 token 演变成对中心的高频重连。退避策略的完整设计见 `docs/architecture/sync_ws_protocol.md`。
 
 退出码：`node.toml` 缺失或非法 → `2`；重试循环救不回来的运行时故障 → `1`；`SIGTERM` / `Ctrl-C` → `0`（让 `systemctl stop` 干净收尾）。
 

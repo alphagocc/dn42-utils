@@ -14,7 +14,6 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
@@ -47,13 +46,6 @@ NODE_A = "11111111-1111-4111-8111-111111111111"
 NODE_B = "22222222-2222-4222-8222-222222222222"
 FAKE_PRIV = "cFYxMU1qZEdOcUI3RHBOS0FRUUVMVmR3aFNTa1F3VT0="
 FAKE_PUB = "dGVzdHB1YmxpY2tleWZvcnVuaXR0ZXN0aW5nMTIzNA=="
-
-
-@pytest.fixture(autouse=True)
-def _fast_argon2(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    cheap = PasswordHasher(time_cost=1, memory_cost=8, parallelism=1)
-    monkeypatch.setattr("dn42ctl.db_managed._password_hasher", cheap)
-    yield
 
 
 def _seed_node(db_path: Path, node_id: str, name: str) -> str:
@@ -195,10 +187,10 @@ class TestHandshakeAuth:
             ws.receive_json()
         assert exc.value.code == CLOSE_UNAUTHORIZED
 
-    def test_argon2_verified_once_per_connection(
+    def test_token_verified_once_per_connection(
         self, client: TestClient, tokens: dict[str, str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The whole point of a long-lived connection: never pay argon2 per frame."""
+        """The whole point of a long-lived connection: never re-authenticate per frame."""
         calls = {"n": 0}
         real = ws_hub._authenticate_sync
 

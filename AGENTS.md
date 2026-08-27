@@ -43,6 +43,7 @@ Notes:
 
 ## How to extend safely
 
+- **Do not overdesign.** Pick the simplest primitive that meets the actual requirement — a 256-bit random token needs a plain hash, not a password KDF.
 - Add/change a CLI command: update `src/dn42ctl/cli.py` + implement logic in `src/dn42ctl/services/` (keep CLI thin).
 - Change persistent state: add a migration in `src/dn42ctl/migrations.py` (idempotent, versioned).
 - Change config outputs: update the corresponding renderer in `src/dn42ctl/render.py` and template(s) together.

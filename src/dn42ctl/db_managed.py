@@ -1,13 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import secrets
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-
-from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError
 
 from dn42ctl.constants import SYNC_EVENT_ACCESS_REVOKED, SYNC_EVENT_DESIRED, UNSET, _Unset
 from dn42ctl.db import DatabaseError, emit_sync_event
@@ -122,22 +121,15 @@ def _row_to_managed_node(row: sqlite3.Row) -> ManagedNode:
     )
 
 
-# argon2id with library defaults (memory_cost=64 MiB, time_cost=3, parallelism=4).
-# For tests, callers can swap _password_hasher with a faster instance if needed.
-_password_hasher = PasswordHasher()
+_TOKEN_HASH_PREFIX = "sha256$"  # noqa: S105 — 算法标签,不是密码
 
 
 def hash_token(token: str) -> str:
-    return _password_hasher.hash(token)
+    return _TOKEN_HASH_PREFIX + hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def verify_token(stored_hash: str, token: str) -> bool:
-    try:
-        return _password_hasher.verify(stored_hash, token)
-    except VerifyMismatchError:
-        return False
-    except Exception:  # noqa: BLE001 — any hash parse error means invalid
-        return False
+    return secrets.compare_digest(stored_hash, hash_token(token))
 
 
 class ManagedNodeStore:
@@ -314,9 +306,9 @@ class ManagedNodeStore:
     def authenticate(self, token: str) -> ManagedNode | None:
         """Look up a node by Bearer token.
 
-        Walks all enabled nodes with a non-null hash; argon2 verify is constant-time
-        per row. The number of nodes is small (<100 in practice), so a linear scan
-        is fine and avoids leaking timing about which node_id is registered.
+        Walks all enabled nodes with a non-null hash. The request carries no node
+        identity, so there is nothing to index on; scanning every row also avoids
+        leaking timing about which node_id is registered.
         """
         try:
             rows = self._conn.execute(

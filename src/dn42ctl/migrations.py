@@ -190,4 +190,14 @@ MIGRATIONS: list[tuple[int, MigrationStep]] = [
         """.strip(),
     ),
     (10, _migration_10),
+    (
+        11,
+        # 作废所有非 sha256$ 前缀的 token hash。旧格式无法转换(哈希不可逆),只能让
+        # 管理员重签。self 节点由 serve_bootstrap 在下次启动时自动补上,远程节点需
+        # 人工 rotate —— 这是一次有感知的中断,升级步骤见 docs/architecture/deployment.md。
+        """
+        UPDATE managed_nodes SET api_token_hash = NULL
+         WHERE api_token_hash IS NOT NULL AND api_token_hash NOT LIKE 'sha256$%';
+        """.strip(),
+    ),
 ]

@@ -5,7 +5,6 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
 
 from dn42ctl.api import app, configure
@@ -19,13 +18,6 @@ NODE_A = "11111111-1111-4111-8111-111111111111"
 
 SECRET_KEY = "SECRET-WG-PRIVATE-KEY-MUST-NOT-LEAK"
 SECRET_TOKEN = "secret-node-token"  # noqa: S105 — 测试用固定值
-
-
-@pytest.fixture(autouse=True)
-def _fast_argon2(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    cheap = PasswordHasher(time_cost=1, memory_cost=8, parallelism=1)
-    monkeypatch.setattr("dn42ctl.db_managed._password_hasher", cheap)
-    yield
 
 
 @pytest.fixture
@@ -107,7 +99,7 @@ class TestRedaction:
         resp = admin_client.get("/api/admin/db/tables/managed_nodes", headers=ADMIN_H)
         row = next(r for r in resp.json()["rows"] if r["node_id"] == NODE_A)
         assert row["api_token_hash"] == "***"
-        assert "$argon2" not in resp.text
+        assert "sha256$" not in resp.text
 
     def test_revision_payload_never_returned(self, admin_client: TestClient) -> None:
         """config_revisions.payload_json 内含每一个 WireGuard 私钥。"""
@@ -122,7 +114,7 @@ class TestRedaction:
             resp = admin_client.get(f"/api/admin/db/tables/{table}?limit=500", headers=ADMIN_H)
             assert resp.status_code == 200, (table, resp.text)
             assert SECRET_KEY not in resp.text, table
-            assert "$argon2" not in resp.text, table
+            assert "sha256$" not in resp.text, table
 
 
 class TestPagination:

@@ -148,7 +148,7 @@ class TestRedaction:
         assert SECRET_BGP_KEY not in json.dumps(page.rows)
 
     def test_no_prefix_leaked(self, db_path: Path) -> None:
-        """绝不给前缀:argon2 前缀泄露参数,WG 私钥前缀缩小密钥空间。"""
+        """绝不给前缀:token 摘要前缀让离线比对可行,WG 私钥前缀缩小密钥空间。"""
         page = browse_table(db_path=db_path, table="bgp_peers")
         value = page.rows[0]["wg_private_key"]
         assert value == REDACTED

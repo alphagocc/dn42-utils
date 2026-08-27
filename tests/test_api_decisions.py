@@ -5,7 +5,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from argon2 import PasswordHasher
 from conftest import VALID_ENDPOINT, VALID_PEER_LLA, VALID_PUBKEY
 from fastapi.testclient import TestClient
 
@@ -15,13 +14,6 @@ from dn42ctl.config import AppConfig
 ADMIN_TOKEN = "admin-secret"
 ADMIN_H = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
 NODE_A = "11111111-1111-4111-8111-111111111111"
-
-
-@pytest.fixture(autouse=True)
-def _fast_argon2(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    cheap = PasswordHasher(time_cost=1, memory_cost=8, parallelism=1)
-    monkeypatch.setattr("dn42ctl.db_managed._password_hasher", cheap)
-    yield
 
 
 @pytest.fixture(autouse=True)

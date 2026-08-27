@@ -21,7 +21,7 @@ dn42ctl serve [--host ::1] [--port 4242] [--sync-poll-interval 1.0]
 | 主体 | token 来源 | 可访问 |
 |------|-----------|--------|
 | **admin** | 环境变量 `DN42CTL_API_TOKEN`（部署时随机生成） | `/api/...` 全部既有路由 + `/api/admin/...` |
-| **node** | `dn42ctl node token rotate <id>` 签发；argon2id hash 存 `managed_nodes.api_token_hash`，明文只在签发时返回一次 | 仅 `/api/v1/nodes/{node_id}/...`，且 path 中的 `node_id` 必须等于 token 绑定的 node_id |
+| **node** | `dn42ctl node token rotate <id>` 签发；SHA-256 hash 存 `managed_nodes.api_token_hash`，明文只在签发时返回一次 | 仅 `/api/v1/nodes/{node_id}/...`，且 path 中的 `node_id` 必须等于 token 绑定的 node_id |
 | **peer-session** | `/api/public/auto-peer/verify` 校验通过后签发，TTL 15 分钟、in-memory、绑定到 verified_asn | 仅 `/api/public/auto-peer/submit`，且 `peer_asn` 必须等于 token 绑定的 ASN |
 
 错误码：
@@ -83,7 +83,7 @@ desired state JSON schema 详见 `docs/architecture/sync_hub_spoke.md`。
 
 完整协议（信封、消息目录、关闭码全表、生命周期、`sync_events` 变更检测）见 `docs/architecture/sync_ws_protocol.md`。与 REST 相关的三点：
 
-- **握手鉴权**：`Authorization: Bearer <node token>` 请求头，与 HTTP 路由使用同一个 token、同一个 `ManagedNodeStore.authenticate` 实现。argon2 验证**每连接只做一次**，之后所有帧读缓存的 principal。
+- **握手鉴权**：`Authorization: Bearer <node token>` 请求头，与 HTTP 路由使用同一个 token、同一个 `ManagedNodeStore.authenticate` 实现。token 验证**每连接只做一次**，之后所有帧读缓存的 principal。
 - **失败通过关闭码表达**：服务端先 `accept()` 再鉴权，失败时发一个 `error` 帧后用 RFC 6455 私有段关闭码关闭。其中 `4401` / `4403` / `4404` 与 HTTP 的 401 / 403 / 404 一一对应。
 - **nginx 需要额外配置**：`Upgrade` / `Connection` 头透传与长 `proxy_read_timeout`，且必须用正则 location 精确匹配 `/ws`。配置示例与原因见 `docs/architecture/deployment.md`。
 
@@ -136,7 +136,7 @@ desired state JSON schema 详见 `docs/architecture/sync_hub_spoke.md`。
 
 peer-session bearer 与 admin / node token 使用完全独立的解析实现，作用域仅限 `/api/public/auto-peer/submit`，由 in-memory TTL store 管理。
 
-独立解析有三个原因。三种凭据的后端各不相同：admin token 是环境变量中的静态串，node token 是 SQLite 里的 argon2id hash，peer-session 是进程内的 TTL 字典。`_resolve_principal` 对任何非 admin 的 token 都要遍历全部 enabled 节点做 argon2id 验证，若公共端点共用这套解析，任何人发一个无效 Bearer 就能触发 O(nodes) 次 argon2 计算。`Principal.kind` 的类型是 `Literal["admin", "node"]`，peer-session 不构造 `Principal`，因而在类型层面就无法出现在 admin 或 node 路由上。
+独立解析有两个原因。其一，三种凭据的后端各不相同：admin token 是环境变量中的静态串，node token 是 SQLite 里的 SHA-256 摘要，peer-session 是进程内的 TTL 字典，共用一套解析只会把三条互不相干的查找路径缠在一起。其二，`Principal.kind` 的类型是 `Literal["admin", "node"]`，peer-session 不构造 `Principal`，因而在类型层面就无法出现在 admin 或 node 路由上。
 
 ### 未提供 API 的命令
 
@@ -159,5 +159,5 @@ peer-session bearer 与 admin / node token 使用完全独立的解析实现，�
 - 框架：FastAPI
 - ASGI 服务器：Uvicorn
 - 请求/响应模型：Pydantic v2
-- token hash：argon2id（`argon2-cffi`）
+- token hash：SHA-256（标准库 `hashlib`）
 - WebSocket：Starlette 原生（服务端）/ `websockets`（节点 agent 客户端）

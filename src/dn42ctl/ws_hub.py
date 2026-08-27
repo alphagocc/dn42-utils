@@ -90,12 +90,6 @@ logger = logging.getLogger("dn42ctl.ws_hub")
 # reconnect storm from leaking file descriptors.
 MAX_CONNECTIONS_PER_NODE = 4
 
-# Bounds CPU during a fleet-wide reconnect after a hub restart. `authenticate`
-# linear-scans every enabled node doing an argon2 verify per row, so N nodes
-# reconnecting at once is O(N^2) hashes; serialize the burst rather than thrash
-# anyio's thread limiter.
-_auth_semaphore = anyio.Semaphore(4)
-
 # Heartbeats are per-minute per node; without this the last_seen write would be
 # amplified across every connection a node holds.
 LAST_SEEN_THROTTLE_SECONDS = 60.0
@@ -263,8 +257,7 @@ async def serve_node_connection(
         await _reject(websocket, CLOSE_UNAUTHORIZED, ERR_UNAUTHORIZED, "缺少 Bearer token")
         return
 
-    async with _auth_semaphore:
-        auth = await _to_thread(_authenticate_sync, db_path=db_path, token=token, node_id=node_id)
+    auth = await _to_thread(_authenticate_sync, db_path=db_path, token=token, node_id=node_id)
     if not auth.ok:
         await _reject(websocket, auth.close_code, auth.err_code, auth.message)
         return

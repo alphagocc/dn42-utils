@@ -21,7 +21,6 @@ from pathlib import Path
 
 import anyio
 import pytest
-from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
@@ -47,13 +46,6 @@ FAKE_PRIV = "cFYxMU1qZEdOcUI3RHBOS0FRUUVMVmR3aFNTa1F3VT0="
 FAKE_PUB = "dGVzdHB1YmxpY2tleWZvcnVuaXR0ZXN0aW5nMTIzNA=="
 
 POLL = 0.02
-
-
-@pytest.fixture(autouse=True)
-def _fast_argon2(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    cheap = PasswordHasher(time_cost=1, memory_cost=8, parallelism=1)
-    monkeypatch.setattr("dn42ctl.db_managed._password_hasher", cheap)
-    yield
 
 
 def _seed_node(db_path: Path, node_id: str, name: str) -> str:

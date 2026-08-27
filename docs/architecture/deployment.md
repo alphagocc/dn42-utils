@@ -180,12 +180,30 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now dn42ctl-node-agent.service
 
 # 中心主机额外:
-sudo systemctl restart dn42ctl-server            # 跑 migration v9 + 起 watcher
+sudo systemctl restart dn42ctl-server            # 跑 migration + 起 watcher
 # nginx 加上 WS location 后
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
 `dn42ctl node once` / `pull` / `push` / `report` / `status` 这些一次性命令**保留可用**，用于人工排障。
+
+## 升级到 migration v11：全部 node token 必须重签
+
+v11 把 `managed_nodes.api_token_hash` 中所有旧格式的 hash 置为 `NULL`。**所有远程节点的现有 token 立即失效**，它们会拿到 401 并按 `auth_retry_seconds`（默认 300s）退避重试，直到管理员为其重签。
+
+hub 自身的 self 节点不需要人工介入：`dn42ctl serve` 启动时会发现 hash 为 NULL，自动重签并改写 `/etc/dn42ctl/node.toml`。
+
+远程节点逐个处理：
+
+```bash
+# 在 hub 上,为每个远程节点重签:
+dn42ctl node token rotate <node-id>          # 明文只在这里返回一次
+
+# 把明文写进该节点的 /etc/dn42ctl/node.toml 的 token 字段
+# agent 每轮重连都会重读该文件,无需 systemctl restart
+```
+
+`dn42ctl node list` 的 `TOKEN` 列会把尚未重签的节点显示为 `no`，可据此确认是否处理完。建议在维护窗口内执行，或先 rotate 再更新文件以缩短各节点的失联时间。
 
 ## self node 自动注册
 

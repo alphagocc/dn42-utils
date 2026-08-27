@@ -184,7 +184,7 @@ class TestManagedNodeMutationsEmit:
     def test_disable_revokes_access(self, mem_db: Database) -> None:
         """禁用节点必须撤销它**已经建立**的连接。
 
-        authenticate 过滤 enabled=1,但 WS 握手只验一次 argon2、之后整条连接吃缓存
+        authenticate 过滤 enabled=1,但 WS 握手只验一次 token、之后整条连接吃缓存
         principal —— 不发事件的话被禁用的节点会无限期保持授权。
         """
         store = ManagedNodeStore(mem_db.connection)

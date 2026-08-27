@@ -129,7 +129,6 @@ with TestClient(app) as client:
 ```
 
 - **现有测试不受影响**：它们用裸 `TestClient(app)`（未作为 context manager 使用），lifespan 不会跑，watcher 也就不会起。只有新的 WS 测试用 `with`。
-- **argon2 必须放慢速度之外还要变便宜**：沿用 `_fast_argon2` autouse fixture（monkeypatch `dn42ctl.db_managed._password_hasher`）。
 
 ### Spoke 侧：注入缝 + 裸 `asyncio.run()`
 

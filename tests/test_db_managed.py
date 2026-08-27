@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
-from argon2 import PasswordHasher
 
 from dn42ctl.db import Database, DatabaseError
 from dn42ctl.db_managed import (
@@ -12,24 +11,12 @@ from dn42ctl.db_managed import (
     ManagedNodeStore,
     hash_token,
     validate_write_policy,
+    verify_token,
 )
 
 NODE_A = "11111111-1111-4111-8111-111111111111"
 NODE_B = "22222222-2222-4222-8222-222222222222"
 NODE_SELF = "33333333-3333-4333-8333-333333333333"
-
-
-@pytest.fixture(autouse=True)
-def _fast_argon2(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Swap the module-level PasswordHasher with the cheapest legal config.
-
-    argon2 defaults take ~50ms per hash; over many tests that's seconds. The
-    parameters here are well below production strength but still exercise the
-    same code paths.
-    """
-    cheap = PasswordHasher(time_cost=1, memory_cost=8, parallelism=1)
-    monkeypatch.setattr("dn42ctl.db_managed._password_hasher", cheap)
-    yield
 
 
 @pytest.fixture
@@ -177,6 +164,41 @@ class TestTokens:
     def test_set_token_hash_missing_node(self, store: ManagedNodeStore) -> None:
         with pytest.raises(DatabaseError, match="不存在"):
             store.set_token_hash(NODE_A, hash_token("x"))
+
+    def test_hash_is_prefixed_and_deterministic(self) -> None:
+        """前缀是 v11 迁移用来识别旧格式的唯一依据。"""
+        assert hash_token("tok").startswith("sha256$")
+        assert hash_token("tok") == hash_token("tok")
+        assert hash_token("tok") != hash_token("tok ")
+
+    def test_legacy_hash_never_verifies(self) -> None:
+        """迁移漏掉某行时必须认证失败,而不是抛异常把 401 变成 500。"""
+        assert verify_token("$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQ$xxxx", "tok") is False
+
+
+class TestMigrationV11:
+    def test_nulls_legacy_hashes_and_keeps_new_ones(self, tmp_path: Path) -> None:
+        """旧格式哈希不可逆,只能作废让管理员重签;新格式的行不能被误伤。"""
+        db_path = tmp_path / "legacy.sqlite3"
+        db = Database.open(db_path)
+        try:
+            store = ManagedNodeStore(db.connection)
+            store.add(NODE_A, "legacy")
+            store.add(NODE_B, "current")
+            db.connection.execute(
+                "UPDATE managed_nodes SET api_token_hash=? WHERE node_id=?",
+                ("$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQ$xxxx", NODE_A),
+            )
+            store.rotate_token(NODE_B, "fresh-token")
+            db.connection.execute("DELETE FROM schema_migrations WHERE version=11")
+            db.connection.commit()
+
+            db.migrate()
+
+            assert store.get(NODE_A).api_token_hash is None
+            assert store.authenticate("fresh-token") is not None
+        finally:
+            db.close()
 
 
 class TestPolicy:

@@ -39,7 +39,7 @@ GET /api/admin/db/tables/{table}?limit=100&offset=0&node_id=<可选>
 |---|---|---|
 | `bgp_peers.wg_private_key` | 是 | WireGuard 私钥 |
 | `ibgp_peers.wg_private_key` | 是 | 同上 |
-| `managed_nodes.api_token_hash` | 是 | argon2id hash |
+| `managed_nodes.api_token_hash` | 是 | node token 的 SHA-256 摘要 |
 | `config_revisions.payload_json` | 是 | **存的是完整 desired-state 快照，内含每一个 `wg_private_key`。** 现有的 `_revision_to_dict` 刻意从不返回它 |
 | `config_proposals.payload_json` | 否 | 已被 `GET /api/admin/nodes/{id}/proposals` 全量返回 |
 | `node_reports.payload_json` | 否 | 已被 `GET /api/admin/nodes/{id}/reports` 全量返回 |
@@ -53,7 +53,7 @@ GET /api/admin/db/tables/{table}?limit=100&offset=0&node_id=<可选>
 - 非 NULL → `"***"`
 - NULL → `null`
 
-**绝不给前缀**（`hash[:8]…` 之类）：argon2 前缀会泄露参数，WireGuard 私钥前缀是实打实的密钥空间缩减。
+**绝不给前缀**（`hash[:8]…` 之类）：WireGuard 私钥前缀是实打实的密钥空间缩减，token 摘要前缀则让离线比对候选变得可行。
 
 保留 NULL / 非 NULL 的区分是有意的——那正是 Nodes 页已经在用的 `has_token` 语义，管理员需要知道"有没有签发过 token"，但不需要知道 hash 本身。
 

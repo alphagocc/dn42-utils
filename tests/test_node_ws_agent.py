@@ -502,7 +502,7 @@ class TestNextDelay:
 
     @pytest.mark.parametrize("code", [CLOSE_UNAUTHORIZED, CLOSE_REVOKED])
     def test_auth_fatal_uses_fixed_long_wait(self, code: int) -> None:
-        """A stale token retrying every second would be an argon2 DoS on the hub."""
+        """A stale token retrying every second would be a reconnect storm on the hub."""
         settings = AgentOptions(reconnect_max_seconds=60.0, auth_retry_seconds=300.0)
         delay, attempt = _next_delay(settings, attempt=9, close_code=code, rng=_rng(0))
         assert delay == 300.0

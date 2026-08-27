@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from dn42ctl.db import BgpPeerRecord, Database, DatabaseError, IbgpPeerRecord
+from dn42ctl.migrations import MIGRATIONS
 
 
 class TestMigrations:
@@ -36,8 +37,7 @@ class TestMigrations:
         mem_db.migrate()
         mem_db.migrate()
         rows = mem_db._conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
-        assert len(rows) == 4
-        assert [r[0] for r in rows] == [1, 8, 9, 10]
+        assert [r[0] for r in rows] == [v for v, _ in MIGRATIONS]
 
     def test_migrate_reruns_on_partially_applied_db(self, mem_db: Database) -> None:
         """v10 的列已存在但版本号缺失时,重跑不能因 duplicate column 而炸。
@@ -49,7 +49,7 @@ class TestMigrations:
         mem_db._conn.commit()
         mem_db.migrate()  # 不应抛异常
         versions = [r[0] for r in mem_db._conn.execute("SELECT version FROM schema_migrations ORDER BY version")]
-        assert versions == [1, 8, 9, 10]
+        assert versions == [v for v, _ in MIGRATIONS]
 
     def test_v2_converts_nm_to_networkd(self) -> None:
         """Migration v8 must convert existing net_backend='nm' rows to 'networkd'.
@@ -62,8 +62,6 @@ class TestMigrations:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         # Apply only migration v1 (simulate pre-v8 database)
-        from dn42ctl.migrations import MIGRATIONS
-
         v1_sql = MIGRATIONS[0][1]
         conn.executescript(v1_sql)
         # Simulate production: old migrations v1-v7 recorded

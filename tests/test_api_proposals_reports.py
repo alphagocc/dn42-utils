@@ -4,7 +4,6 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
 
 from dn42ctl.api import app, configure
@@ -15,13 +14,6 @@ ADMIN_TOKEN = "admin-secret"
 ADMIN_H = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
 NODE_A = "11111111-1111-4111-8111-111111111111"
 NODE_B = "22222222-2222-4222-8222-222222222222"
-
-
-@pytest.fixture(autouse=True)
-def _fast_argon2(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    cheap = PasswordHasher(time_cost=1, memory_cost=8, parallelism=1)
-    monkeypatch.setattr("dn42ctl.db_managed._password_hasher", cheap)
-    yield
 
 
 @pytest.fixture

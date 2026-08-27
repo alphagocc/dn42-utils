@@ -1,0 +1,57 @@
+  ## 高优先级
+
+  1. 提案接受路径可以绕过参数校验
+
+     提案 payload 只是任意 dict，接受时直接强制转换并写入，没有完整验证 ASN、WireGuard 公钥、IPv6 地址等字段：src/dn42ctl/services/proposal_decisions.py:61、src/dn42ctl/services/bgp.py:52、src/
+     dn42ctl/services/ibgp.py:75。
+
+     实测自动接受了 peer_asn=-1、空公钥和 peer_lla="not-ip"，并成功落库。之后生成的 WireGuard/BIRD 配置会无效。
+
+  2. 自身节点身份和 token 状态可能永久失配
+
+     启动检查只确认 token 文件存在且非空，不验证它与数据库里的 hash 是否匹配：src/dn42ctl/serve_bootstrap.py:52。
+
+     同时，注册新的 self 节点不会清除旧记录的 is_self，查询还使用无排序的 LIMIT 1：src/dn42ctl/db_managed.py:217、src/dn42ctl/db_managed.py:230。
+
+     实测可同时出现两个 self 节点，或者 token 文件永远无法通过认证，重启也不会自动修复。
+
+  3. 认证接口存在明显的 CPU 放大攻击面
+
+     每个无效 bearer token 都会遍历全部启用节点，并逐一执行昂贵的 Argon2 校验：src/dn42ctl/db_managed.py:314、src/dn42ctl/api.py:182。
+
+     默认一次校验约使用 64 MiB 内存、3 轮计算；节点越多，单个恶意请求成本越高。REST API 没有 WebSocket 路径已有的并发限制，容易被远程耗尽 CPU。
+
+  ## 中优先级
+
+  4. Peer 的数据库与配置文件更新不是原子的
+
+     BGP 创建先提交数据库，之后才写配置文件：src/dn42ctl/services/bgp.py:88。删除则反过来先删文件再删数据库：src/dn42ctl/services/bgp.py:249。iBGP 有同样问题：src/dn42ctl/services/ibgp.py:125。
+
+     故障注入实测：文件写入失败后，peer 已留在数据库里，再次创建只会提示已存在。
+
+  5. 提案接受和报告导入可能只完成一半
+
+     接受提案分为“读取状态、创建 peer、更新状态”三个独立事务：src/dn42ctl/services/proposal_decisions.py:187。实测状态更新失败后，peer 已创建，但提案仍是 pending，可以被再次处理。
+
+     报告导入也逐条提交 peer，最后才标记报告：src/dn42ctl/services/report_import.py:87。中途遇到坏数据会留下部分导入结果；非对象 peer 甚至会被静默跳过，报告仍标记为已导入。
+
+  6. 更新不存在的记录后会残留 SQLite 写事务
+
+     多个 update 方法发现记录不存在时直接抛自定义异常，但没有 rollback：src/dn42ctl/db.py:227、src/dn42ctl/db_managed.py:451。
+
+     实测异常后 connection.in_transaction == True，另一个连接写入会得到 database is locked。
+
+  7. Auto-peer 的一次性 challenge/session 可以并发重放
+
+     challenge 在验证完成后才删除，中间释放了锁：src/dn42ctl/services/auto_peer.py:229。并发复现实测，一个 challenge 能换出两个有效 session。session 提交提案也存在相同的检查后删除竞态。
+
+  8. 管理员可以把配置写进不存在的节点分区
+
+     显式传入 node_id 时只检查非空，不确认节点是否已注册：src/dn42ctl/api.py:153。随后服务层会创建普通 nodes 行，但不会创建 managed_nodes：src/dn42ctl/services/core.py:365。
+
+     一个 UUID 拼写错误就会生成没有 agent 能拉取、管理界面也不显示的“孤儿配置”。
+
+  9. 几个公共校验器会接受无效配置
+      - IPv6 校验忽略 / 后面的前缀内容，因此 fd00::1/not-a-prefix 会通过：src/dn42ctl/validators.py:63。
+      - 整数校验接受 bool，例如 own_asn=true 会被当作 ASN 1：src/dn42ctl/config.py:56。
+      - WireGuard 公钥正则允许非 32 字节的 key：src/dn42ctl/validators.py:39。

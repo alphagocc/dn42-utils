@@ -63,9 +63,9 @@ dn42ctl 自身**不处理 TLS 证书**。`dn42ctl serve` 仅监听 `[::1]:4242`�
 
 ## 鉴权模型
 
-统一 Bearer token。admin 主体来自 `DN42CTL_API_TOKEN` 环境变量；node 主体由 `dn42ctl node token rotate <id>` 签发，argon2id hash 存入 `managed_nodes.api_token_hash`，作用域严格限制在 `/api/v1/nodes/{node_id}/...`，且 path 中的 `node_id` 必须等于 token 绑定的 node_id。完整主体表（含 auto-peer 的 peer-session）与 401 / 403 的语义划分见 `docs/architecture/rest_api.md`。
+统一 Bearer token。admin 主体来自 `DN42CTL_API_TOKEN` 环境变量；node 主体由 `dn42ctl node token rotate <id>` 签发，SHA-256 hash 存入 `managed_nodes.api_token_hash`，作用域严格限制在 `/api/v1/nodes/{node_id}/...`，且 path 中的 `node_id` 必须等于 token 绑定的 node_id。完整主体表（含 auto-peer 的 peer-session）与 401 / 403 的语义划分见 `docs/architecture/rest_api.md`。
 
-WS 通道在**握手时**验一次 argon2，之后每一帧读缓存的 principal，不再触碰 DB。
+WS 通道在**握手时**验一次 token，之后每一帧读缓存的 principal，不再触碰 DB。
 
 连接期间的 token 轮换、节点删除与禁用由 `sync_events` 的 `access_revoked` 事件驱动，server 随即用关闭码 `4003` 或 `4004` 断开该节点的连接。完整处理流程与 agent 的恢复行为见 `docs/architecture/sync_ws_protocol.md`。
 
@@ -73,7 +73,7 @@ WS 通道在**握手时**验一次 argon2，之后每一帧读缓存的 principa
 
 `dn42ctl serve` 启动序列（幂等，可重复执行）：
 
-1. 跑迁移（至 v9，含 `sync_events`）。
+1. 跑迁移（至 v11）。
 2. 读 `/var/lib/dn42ctl/self_node_id`，不存在则生成 UUIDv4 写入（`0600`，owner=dn42ctl）。
 3. `managed_nodes` UPSERT：`(node_id=<self>, name='self', is_self=1, enabled=1, write_policy=<默认 JSON>)`。
 4. 检查 `/etc/dn42ctl/node.toml` 与 `managed_nodes.api_token_hash` 是否一致：
