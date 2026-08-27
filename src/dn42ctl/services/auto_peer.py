@@ -96,6 +96,9 @@ class _Challenge:
     auth_raw: str  # full auth-line value (without `auth:` prefix)
     fingerprint: str | None
     expires_at: float  # time.monotonic() deadline
+    # 已被某个请求认领。验证要跑 ssh-keygen / gpg 子进程,不能持锁,所以用标记代替
+    # 长时间持锁:第一个请求认领,其余立刻被拒。见 docs/architecture/auto_peer.md。
+    in_flight: bool = False
 
 
 @dataclass
@@ -104,6 +107,7 @@ class _Session:
     asn: int
     mntner: str
     expires_at: float
+    in_flight: bool = False
 
 
 _lock = threading.Lock()
@@ -213,12 +217,51 @@ def start_challenge(*, config: AppConfig, asn: int, mntner: str, auth_index: int
 # --- step 3: verify ---
 
 
+def _release_challenge(challenge_id: str) -> None:
+    """清除 in-flight 标记,让用户可以重试。"""
+    with _lock:
+        challenge = _challenges.get(challenge_id)
+        if challenge is not None:
+            challenge.in_flight = False
+
+
+def _run_verification(challenge: _Challenge, signature: str, registry_path: str) -> bool:
+    if challenge.scheme == "ssh":
+        # auth_raw is the full ssh pubkey line ("ssh-ed25519 AAAA... comment").
+        identity = f"dn42@AS{challenge.asn}-{challenge.mntner}"
+        return verify_ssh(
+            message=challenge.nonce.hex().encode("ascii"),
+            signature=signature,
+            allowed_pubkey=challenge.auth_raw,
+            namespace=challenge.namespace,
+            identity=identity,
+        )
+    if challenge.scheme == "pgp":
+        if not challenge.fingerprint:
+            raise AutoPeerError("PGP 挑战缺少 fingerprint")
+        try:
+            ascii_key = read_pgp_key(registry_path, challenge.fingerprint)
+        except RegistryError as exc:
+            raise AutoPeerError(str(exc)) from exc
+        return verify_pgp(
+            message=challenge.nonce.hex().encode("ascii"),
+            signature=signature,
+            ascii_key=ascii_key,
+        )
+    raise AutoPeerError(f"未知 challenge scheme: {challenge.scheme}")  # pragma: no cover
+
+
 def verify_challenge(*, config: AppConfig, challenge_id: str, signature: str) -> VerifyResult:
     """Validate the user's signature against the stored challenge.
 
     On success: burn the challenge, issue a peer_session_token.
     On failure: leave the challenge in place (until TTL) so the user can retry.
     On expired/missing challenge: raise AutoPeerExpiredError.
+
+    Verification runs a subprocess, far longer than the lock should be held, so the
+    challenge is claimed with an in-flight flag instead: concurrent callers would
+    otherwise all read the same challenge, all verify successfully, and each walk away
+    with its own session.
     """
     registry_path = config.dn42_registry_path
     if not registry_path:
@@ -230,37 +273,21 @@ def verify_challenge(*, config: AppConfig, challenge_id: str, signature: str) ->
     with _lock:
         _purge_expired_locked(now)
         challenge = _challenges.get(challenge_id)
-    if challenge is None:
-        raise AutoPeerExpiredError("挑战不存在或已过期")
-    if challenge.expires_at <= now:
-        raise AutoPeerExpiredError("挑战已过期")
+        if challenge is None:
+            raise AutoPeerExpiredError("挑战不存在或已过期")
+        if challenge.expires_at <= now:
+            raise AutoPeerExpiredError("挑战已过期")
+        if challenge.in_flight:
+            raise AutoPeerError("该挑战正在校验中，请稍候重试")
+        challenge.in_flight = True
 
-    if challenge.scheme == "ssh":
-        # auth_raw is the full ssh pubkey line ("ssh-ed25519 AAAA... comment").
-        identity = f"dn42@AS{challenge.asn}-{challenge.mntner}"
-        ok = verify_ssh(
-            message=challenge.nonce.hex().encode("ascii"),
-            signature=signature,
-            allowed_pubkey=challenge.auth_raw,
-            namespace=challenge.namespace,
-            identity=identity,
-        )
-    elif challenge.scheme == "pgp":
-        if not challenge.fingerprint:
-            raise AutoPeerError("PGP 挑战缺少 fingerprint")
-        try:
-            ascii_key = read_pgp_key(registry_path, challenge.fingerprint)
-        except RegistryError as exc:
-            raise AutoPeerError(str(exc)) from exc
-        ok = verify_pgp(
-            message=challenge.nonce.hex().encode("ascii"),
-            signature=signature,
-            ascii_key=ascii_key,
-        )
-    else:  # pragma: no cover
-        raise AutoPeerError(f"未知 challenge scheme: {challenge.scheme}")
-
+    try:
+        ok = _run_verification(challenge, signature, registry_path)
+    except Exception:
+        _release_challenge(challenge_id)
+        raise
     if not ok:
+        _release_challenge(challenge_id)
         raise AutoPeerError("签名校验失败")
 
     session_token = secrets.token_urlsafe(32)
@@ -285,16 +312,27 @@ def verify_challenge(*, config: AppConfig, challenge_id: str, signature: str) ->
 # --- step 4: submit ---
 
 
-def _resolve_session(token: str) -> _Session:
+def _claim_session(token: str) -> _Session:
+    """认领 session。同一个 token 的并发提交只有第一个能拿到。"""
     if not token:
         raise AutoPeerSessionError("缺少 peer-session token")
     now = _now()
     with _lock:
         _purge_expired_locked(now)
         session = _sessions.get(token)
-    if session is None or session.expires_at <= now:
-        raise AutoPeerExpiredError("peer-session 已过期或无效")
-    return session
+        if session is None or session.expires_at <= now:
+            raise AutoPeerExpiredError("peer-session 已过期或无效")
+        if session.in_flight:
+            raise AutoPeerError("该 peer-session 正在处理中，请稍候重试")
+        session.in_flight = True
+        return session
+
+
+def _release_session(token: str) -> None:
+    with _lock:
+        session = _sessions.get(token)
+        if session is not None:
+            session.in_flight = False
 
 
 def submit_peer(
@@ -309,38 +347,42 @@ def submit_peer(
     listen_port: int | None = None,
 ) -> SubmitResult:
     """Resolve the session, look up the self node_id, submit a peer_add proposal."""
-    session = _resolve_session(session_token)
+    session = _claim_session(session_token)
 
-    db = Database.open(db_path)
     try:
-        self_node = ManagedNodeStore(db.connection).get_self()
-    finally:
-        db.close()
-    if self_node is None:
-        raise AutoPeerError("self 节点尚未注册：先启动一次 `dn42ctl serve` 让 bootstrap 跑完")
+        db = Database.open(db_path)
+        try:
+            self_node = ManagedNodeStore(db.connection).get_self()
+        finally:
+            db.close()
+        if self_node is None:
+            raise AutoPeerError("self 节点尚未注册：先启动一次 `dn42ctl serve` 让 bootstrap 跑完")
 
-    payload = build_peer_add_payload(
-        peer_kind="bgp",
-        peer={
-            "peer_asn": session.asn,
-            "peer_public_key": wg_public_key,
-            "endpoint": endpoint,
-            "peer_lla": peer_lla,
-            "net_backend": net_backend,
-            "listen_port": listen_port,
-        },
-    )
+        payload = build_peer_add_payload(
+            peer_kind="bgp",
+            peer={
+                "peer_asn": session.asn,
+                "peer_public_key": wg_public_key,
+                "endpoint": endpoint,
+                "peer_lla": peer_lla,
+                "net_backend": net_backend,
+                "listen_port": listen_port,
+            },
+        )
 
-    proposal = submit_proposal(
-        db_path=db_path,
-        node_id=self_node.node_id,
-        source="push",
-        kind="peer_add",
-        payload=payload,
-        config=None,
-    )
+        proposal = submit_proposal(
+            db_path=db_path,
+            node_id=self_node.node_id,
+            source="push",
+            kind="peer_add",
+            payload=payload,
+            config=None,
+        )
+    except Exception:
+        # 失败保留 session,让用户改字段重交(与 challenge 的重试语义一致)。
+        _release_session(session_token)
+        raise
 
-    # Single-use: consume the session on successful submission.
     with _lock:
         _sessions.pop(session_token, None)
 

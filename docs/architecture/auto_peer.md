@@ -106,6 +106,23 @@
 - **一次性 session**：`submit_peer` 成功后 `pop`；失败保留以让用户改字段重交。
 - 进程重启即清空所有挑战/会话（设计如此，节点重启等价于强制重新认证）。
 
+### 「一次性」在并发下也要成立
+
+"成功后 pop、失败保留"这个语义要求在 pop 之前先做完验证，而验证是 `ssh-keygen` /
+`gpg` 子进程，比锁的持有时间长得多。直接在锁外做验证，就退化成典型的
+check-then-act：N 个并发请求都读到同一个 challenge、都验签成功、都换出各自的
+session。实测 8 线程一次就能拿到 8 个 token，session 换 proposal 那步同理。
+
+修法不是把子进程放进锁里（那会让一个慢验证阻塞所有其它请求），而是**在锁内打
+in-flight 标记**：第一个请求认领，其余立刻拿到「正在校验中」。验证失败或抛异常时
+在锁内清除标记，重试语义原样保留；成功则 `pop`。
+
+**这不是认证绕过。** 所有 session 携带同一个 `(asn, mntner)`，而赢下竞态的前提是
+已经持有针对那个随机 nonce 的合法签名——有这个能力的人本来就能把公开流程重跑 N
+遍。实际收益只是重复的 pending 提案，`submit_peer` 传 `config=None` 又让 auto-accept
+在 `services/proposals.py` 那里短路，所以任何情况下都到不了权威表。修它是为了
+「一次性」这个说法名副其实，不是在堵一个安全漏洞。
+
 ## 签名验证
 
 `services/crypto_verify.py` 提供两个纯 stdlib subprocess 封装：
