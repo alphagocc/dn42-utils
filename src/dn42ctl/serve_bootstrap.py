@@ -19,7 +19,7 @@ from pathlib import Path
 from dn42ctl.config import AppConfig
 from dn42ctl.constants import FILE_MODE_PRIVATE
 from dn42ctl.db import Database
-from dn42ctl.db_managed import ManagedNodeStore, hash_token
+from dn42ctl.db_managed import ManagedNodeStore, hash_token, verify_token
 from dn42ctl.fs import chmod_best_effort
 from dn42ctl.node_config import NodeConfig, load_node_config, save_node_config
 
@@ -49,7 +49,9 @@ def _read_or_create_self_node_id(self_node_id_path: Path) -> tuple[str, bool]:
     return new_id, True
 
 
-def _needs_new_token(node_toml_path: Path, expected_node_id: str) -> bool:
+def _needs_new_token(node_toml_path: Path, expected_node_id: str, stored_hash: str | None) -> bool:
+    if stored_hash is None:
+        return True
     if not node_toml_path.exists():
         return True
     try:
@@ -58,7 +60,13 @@ def _needs_new_token(node_toml_path: Path, expected_node_id: str) -> bool:
         return True
     if existing.node_id != expected_node_id:
         return True
-    return not existing.token
+    if not existing.token:
+        return True
+    # node.toml 的明文与 api_token_hash 是同一凭据的两半,分别落在 /etc 与 /var/lib。
+    # 只检查文件存在无法发现两侧已经分叉(DB 从旧备份恢复、rotate 写库成功但改文件
+    # 失败……),而分叉后 hub 自己的 agent 会永久 401 且重启不自愈。见
+    # docs/architecture/sync_hub_spoke.md。
+    return not verify_token(stored_hash, existing.token)
 
 
 def run_self_registration(
@@ -84,23 +92,21 @@ def run_self_registration(
         store = ManagedNodeStore(db.connection)
         existing_self = store.get_self()
         # upsert_self always writes; we report True for clarity.
-        store.upsert_self(self_node_id, name="self")
+        self_node = store.upsert_self(self_node_id, name="self")
         upserted = existing_self is None or existing_self.node_id != self_node_id
 
         if app_config is not None:
-            current = store.get(self_node_id)
-            if current is not None:
-                pending: dict[str, str] = {}
-                if current.own_ipv6 is None and app_config.own_ipv6:
-                    pending["own_ipv6"] = app_config.own_ipv6
-                if current.router_id is None and app_config.router_id:
-                    pending["router_id"] = app_config.router_id
-                if pending:
-                    store.set_addresses(self_node_id, **pending)  # type: ignore[arg-type]
-                    seeded = sorted(pending)
+            pending: dict[str, str] = {}
+            if self_node.own_ipv6 is None and app_config.own_ipv6:
+                pending["own_ipv6"] = app_config.own_ipv6
+            if self_node.router_id is None and app_config.router_id:
+                pending["router_id"] = app_config.router_id
+            if pending:
+                store.set_addresses(self_node_id, **pending)  # type: ignore[arg-type]
+                seeded = sorted(pending)
 
         rotated = False
-        if _needs_new_token(node_toml_path, self_node_id):
+        if _needs_new_token(node_toml_path, self_node_id, self_node.api_token_hash):
             plaintext = secrets.token_urlsafe(32)
             store.set_token_hash(self_node_id, hash_token(plaintext))
             cfg = NodeConfig(

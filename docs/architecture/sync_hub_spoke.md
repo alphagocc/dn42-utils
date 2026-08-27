@@ -76,19 +76,32 @@ WS 通道在**握手时**验一次 argon2，之后每一帧读缓存的 principa
 1. 跑迁移（至 v9，含 `sync_events`）。
 2. 读 `/var/lib/dn42ctl/self_node_id`，不存在则生成 UUIDv4 写入（`0600`，owner=dn42ctl）。
 3. `managed_nodes` UPSERT：`(node_id=<self>, name='self', is_self=1, enabled=1, write_policy=<默认 JSON>)`。
-4. 检查 `/etc/dn42ctl/node.toml`：
-   - 文件不存在 / `node_id` 不匹配 / `token` 缺失 → 生成 `secrets.token_urlsafe(32)`，hash 入库，明文写 `node.toml`（`0600`，owner=root，因为 node-agent.service 需要读）：
+4. 检查 `/etc/dn42ctl/node.toml` 与 `managed_nodes.api_token_hash` 是否一致：
+   - 文件不存在 / `node_id` 不匹配 / `token` 缺失 / **token 与库中 hash 不符（含 hash 为 NULL）** → 生成 `secrets.token_urlsafe(32)`，hash 入库，明文写 `node.toml`（`0600`，owner=root，因为 node-agent.service 需要读）：
      ```toml
      server  = "http://[::1]:4242"
      node_id = "<self_node_id>"
      token   = "<明文 token>"
      ```
-   - 已存在且匹配 → 不改动。
+   - 两侧一致 → 不改动。
 5. uvicorn 监听 `[::1]:4242`。
 
 `--no-self-register` 关闭步骤 2-4（测试 / 不希望中心机自管的部署）。
 
 self token 轮换：`dn42ctl node token rotate <self-id>` 同时更新 hash 与 self 的 `node.toml`。
+
+### 步骤 4 必须真的比对 hash，不能只看文件是否存在
+
+`node.toml` 的明文与 `api_token_hash` 是同一个凭据的两半，分别落在 `/etc` 与 `/var/lib`。任何只动其中一半的操作都会让它们分叉：
+
+- SQLite 文件丢失后重建（`/etc` 与 `/var/lib` 常来自不同的备份快照）。
+- 从**早于上一次 token 轮换**的备份恢复 DB。
+- `dn42ctl node token rotate <self-id>` 已写库、但 `node.toml` 改写失败。
+- `node remove --force` 删掉了行、`node.toml` 却没能删掉。
+
+分叉之后 hub 自身的 agent 永久 401，并按 `auth_retry_seconds`（默认 300s）无限退避重试——hub 主机就此停止收敛，且 `api_token_hash` 非 NULL 的那两种场景没有任何外部信号。
+
+把幂等性实现成"文件在就不管"，等于让 `serve` 永远发现不了这种分叉，重启也修不好。代价只是每次 `serve` 启动多做一次哈希校验，因此这里选择真的比对。
 
 ## 节点本地状态
 

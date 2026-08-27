@@ -27,6 +27,22 @@ def _paths(tmp_path: Path) -> tuple[Path, Path, Path]:
     )
 
 
+def _authenticate(db_path: Path, token: str):  # noqa: ANN202 — ManagedNode | None
+    d = Database.open(db_path)
+    try:
+        return ManagedNodeStore(d.connection).authenticate(token)
+    finally:
+        d.close()
+
+
+def _set_token_hash(db_path: Path, node_id: str, plaintext: str) -> None:
+    d = Database.open(db_path)
+    try:
+        ManagedNodeStore(d.connection).rotate_token(node_id, plaintext)
+    finally:
+        d.close()
+
+
 class TestRunSelfRegistration:
     def test_first_run_creates_everything(self, tmp_path: Path) -> None:
         db, sid, ncfg = _paths(tmp_path)
@@ -139,6 +155,49 @@ class TestAddressSeeding:
         result = run_self_registration(db_path=db, self_node_id_path=sid, node_toml_path=ncfg)
         assert result.seeded_addresses == []
         assert result.config_node_id_mismatch is False
+
+
+class TestSelfTokenHashDivergence:
+    """node.toml 与 api_token_hash 分叉后,serve 必须能自动重签。
+
+    这两半分别落在 /etc 与 /var/lib,任何只恢复其中一半的运维动作都会让它们分开;
+    分叉后 hub 自己的 agent 永久 401 且重启不自愈。见 sync_hub_spoke.md。
+    """
+
+    def test_regenerates_when_db_hash_is_null(self, tmp_path: Path) -> None:
+        """DB 文件丢失后重建:node.toml 还在,但库里已经没有 hash 了。"""
+        db, sid, ncfg = _paths(tmp_path)
+        run_self_registration(db_path=db, self_node_id_path=sid, node_toml_path=ncfg)
+        stale_token = load_node_config(ncfg).token
+        db.unlink()
+
+        result = run_self_registration(db_path=db, self_node_id_path=sid, node_toml_path=ncfg)
+
+        assert result.rotated_token is True
+        assert load_node_config(ncfg).token != stale_token
+        assert _authenticate(db, load_node_config(ncfg).token) is not None
+
+    def test_regenerates_when_db_hash_is_stale(self, tmp_path: Path) -> None:
+        """DB 从早于上次轮换的备份恢复:hash 非 NULL,但对不上 node.toml。"""
+        db, sid, ncfg = _paths(tmp_path)
+        first = run_self_registration(db_path=db, self_node_id_path=sid, node_toml_path=ncfg)
+        _set_token_hash(db, first.node_id, "some-other-token")
+
+        result = run_self_registration(db_path=db, self_node_id_path=sid, node_toml_path=ncfg)
+
+        assert result.rotated_token is True
+        assert _authenticate(db, load_node_config(ncfg).token) is not None
+
+    def test_leaves_matching_token_alone(self, tmp_path: Path) -> None:
+        """比对通过时不得轮换 —— 否则每次 serve 启动都会踢掉 hub 自己的连接。"""
+        db, sid, ncfg = _paths(tmp_path)
+        run_self_registration(db_path=db, self_node_id_path=sid, node_toml_path=ncfg)
+        token_before = load_node_config(ncfg).token
+
+        result = run_self_registration(db_path=db, self_node_id_path=sid, node_toml_path=ncfg)
+
+        assert result.rotated_token is False
+        assert load_node_config(ncfg).token == token_before
 
 
 class TestConfigNodeIdMismatch:
