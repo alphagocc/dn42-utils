@@ -9,9 +9,11 @@ nodes are registered ahead of time, then the agent connects.
 
 from __future__ import annotations
 
+import itertools
 import secrets
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -353,6 +355,27 @@ class TestPingAndResilience:
             pong = ws.receive_json()
             assert pong["type"] == MSG_PONG
             assert pong["re"] == env.id
+        assert client.get(f"/api/admin/nodes/{NODE_A}", headers=ADMIN_H).json()["last_seen_at"] is not None
+
+    def test_last_seen_written_on_freshly_booted_host(
+        self, client: TestClient, tokens: dict[str, str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """开机不足一分钟的机器上,首次心跳同样要写入数据库。
+
+        `time.monotonic()` 从开机起算,CI runner 是全新虚拟机,这个值可能只有几十秒。
+        限流哨兵一旦用 0.0 表示从未写入过,首次心跳就会被判定为刚写入过而静默跳过;
+        开发机开机已久,本地无法重现。
+        """
+        clock = itertools.count(30.0, 0.001)
+        # 只替换 ws_hub 模块内的 time 名称。修改全局 time.monotonic 会连带影响 asyncio
+        # 事件循环的 loop.time(),扰乱调度。
+        monkeypatch.setattr(ws_hub, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+
+        with _connected(client, NODE_A, tokens[NODE_A]) as ws:
+            _handshake(ws)
+            ws.receive_json()
+            ws.send_text(encode(Envelope(type="ping")))
+            assert ws.receive_json()["type"] == MSG_PONG
         assert client.get(f"/api/admin/nodes/{NODE_A}", headers=ADMIN_H).json()["last_seen_at"] is not None
 
     def test_unknown_type_keeps_connection_open(self, client: TestClient, tokens: dict[str, str]) -> None:

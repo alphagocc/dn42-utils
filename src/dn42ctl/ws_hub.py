@@ -123,7 +123,10 @@ class NodeConnection:
     # Content digest of the last desired state we actually sent on THIS socket.
     # The comparison against it is what makes repeated wakeups idempotent.
     last_pushed_hash: str | None = None
-    last_seen_touched_at: float = 0.0
+    # None 表示从未写入过。0.0 无法充当哨兵:`time.monotonic()` 的零点是开机时刻,
+    # 刚启动的机器上它本身就小于 LAST_SEEN_THROTTLE_SECONDS,`now - 0.0` 会被判定为
+    # 刚写入过,于是开机一分钟内的首次心跳被静默丢弃。
+    last_seen_touched_at: float | None = None
     agent_version: str = ""
 
     async def send(self, envelope: Envelope) -> None:
@@ -510,7 +513,7 @@ async def _handle_report(conn: NodeConnection, env: Envelope, *, db_path: Path) 
 
 async def _touch_last_seen(conn: NodeConnection, *, db_path: Path) -> None:
     now = time.monotonic()
-    if now - conn.last_seen_touched_at < LAST_SEEN_THROTTLE_SECONDS:
+    if conn.last_seen_touched_at is not None and now - conn.last_seen_touched_at < LAST_SEEN_THROTTLE_SECONDS:
         return
     conn.last_seen_touched_at = now
 

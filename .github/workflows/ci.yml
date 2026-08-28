@@ -47,6 +47,11 @@ jobs:
       - name: Set up Python 3.11
         run: uv python install 3.11
 
+      - name: Install wireguard-tools
+        # bgp/ibgp peer 建立隧道时需要 `wg genkey` 生成密钥,API 用例会实际执行该命令。
+        # 开发机普遍安装了 wg,CI 镜像没有;缺少该命令时这些用例会返回 400。
+        run: sudo apt-get update && sudo apt-get install -y wireguard-tools
+
       - name: Install dependencies
         run: uv sync --group dev
 
