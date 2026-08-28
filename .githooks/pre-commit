@@ -1,0 +1,18 @@
+#!/bin/sh
+# 提交前按 AGENTS.md 的 Chinese Language Policy 校验 staged 文件。
+# 启用方式:git config core.hooksPath .githooks
+
+set -e
+
+repo_root=$(git rev-parse --show-toplevel)
+checker="$repo_root/scripts/check_language.py"
+
+[ -f "$checker" ] || exit 0
+
+# 仓库约定用 uv 运行 Python;hook 可能在没有 uv 的环境下触发,故回退到 python3。
+# 校验器只用标准库,两种方式行为一致。
+if command -v uv >/dev/null 2>&1; then
+    uv run --project "$repo_root" python "$checker"
+else
+    python3 "$checker"
+fi

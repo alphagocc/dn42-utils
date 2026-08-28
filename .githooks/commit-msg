@@ -1,0 +1,16 @@
+#!/bin/sh
+# 按 AGENTS.md 的 Chinese Language Policy 校验提交信息。
+# 启用方式:git config core.hooksPath .githooks
+
+set -e
+
+repo_root=$(git rev-parse --show-toplevel)
+checker="$repo_root/scripts/check_language.py"
+
+[ -f "$checker" ] || exit 0
+
+if command -v uv >/dev/null 2>&1; then
+    uv run --project "$repo_root" python "$checker" --commit-msg "$1"
+else
+    python3 "$checker" --commit-msg "$1"
+fi

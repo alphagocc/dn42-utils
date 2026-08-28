@@ -53,6 +53,7 @@
 | [`architecture/deployment.md`](architecture/deployment.md) | 部署（systemd + nginx） |
 | [`architecture/validation.md`](architecture/validation.md) | 输入校验 |
 | [`architecture/testing.md`](architecture/testing.md) | 测试基础设施 |
+| [`architecture/language_check.md`](architecture/language_check.md) | 中文语言规范的提交前校验 |
 | [`architecture/web_ui.md`](architecture/web_ui.md) | Web UI（admin + peer，React + Vite） |
 | [`architecture/auto_peer.md`](architecture/auto_peer.md) | Auto-peer 公共 API |
 

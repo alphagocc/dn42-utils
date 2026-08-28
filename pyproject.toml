@@ -57,6 +57,8 @@ ignore = ["S101"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S106", "S105"]
+# 校验器是命令行工具:打印命中结果是它的产出,调用 git 取待查文件是它的输入。
+"scripts/check_language.py" = ["T201", "S603", "S607"]
 "src/dn42ctl/cli.py" = ["B008", "UP037"]
 "src/dn42ctl/api.py" = ["B008"]
 "src/dn42ctl/fs.py" = ["SIM105"]
