@@ -26,6 +26,7 @@ def render_bird_main_conf(
     bird_babel_conf_path: Path,
     bird_peers_dir: Path,
     bird_roa_v6_conf_path: Path,
+    bird_extra_conf_path: Path,
 ) -> str:
     return _render_template(
         "bird.conf.j2",
@@ -37,7 +38,17 @@ def render_bird_main_conf(
         bird_babel_conf_path=bird_babel_conf_path,
         bird_roa_v6_conf_path=bird_roa_v6_conf_path,
         bird_peers_include=(bird_peers_dir / "*"),
+        bird_extra_conf_path=bird_extra_conf_path,
     )
+
+
+def render_bird_extra_conf_placeholder() -> str:
+    """The comment-only file written when extra.conf is missing.
+
+    Only ever written when the target does not exist; user content is never
+    overwritten. See docs/architecture/bird_extra_conf.md.
+    """
+    return _render_template("bird_extra.conf.j2")
 
 
 def render_bird_bgp_peer_conf(*, ifname: str, peer_lla: str, peer_asn: int) -> str:

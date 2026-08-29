@@ -10,6 +10,7 @@ The schema:
     bird_conf_path = "..."         # all optional; override default paths returned
     peers_dir      = "..."         # by central server's desired-state response.
     babel_conf_path = "..."
+    bird_extra_conf_path = "..."   # 用户自定义 Bird 配置,中心只下发位置,内容由本机维护
     networkd_dir = "..."
     nm_dir = "..."
     config_path = "..."            # 本机 /etc/dn42ctl/config.toml,仅在中心下发

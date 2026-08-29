@@ -102,6 +102,7 @@ B→A 的端口其实可以从 A 侧反向行的 `listen_port` 推出。**不做
    > `save_config` 用 `tomli_w` 整体重写，**注释和未知键会丢**。这正是"比较优先"的理由。
 2. **重渲 `bird.conf`** —— 使用与 peer 文件相同的原子写 + diff 管线，所以 `--dry-run` 看得到。
    > `include` 的 peers 目录与 babel 路径取自**解析后的路径**（desired-state `paths` + `node.toml [apply]` 覆盖），不是 `config.toml` 里的值——peer 文件正是按前者写出去的，用后者会让 bird 去 include 一个空目录。
+   > `extra.conf` 的位置同样取自解析后的值。该文件**仅在缺失时**作为占位文件进入写入列表：它的内容属于用户，让它进入常规 diff 管线会让每 900 秒一次的 reconcile 反复覆盖用户配置。见 [`bird_extra_conf.md`](bird_extra_conf.md)。
 3. **重写 `dn42-dummy.netdev` / `.network`** —— 同样作为普通文件条目进列表。**不调用 `ensure_dummy_interface`**：它自己 shell out 到 `networkctl`/`nmcli`，会绕过 diff/dry-run 机制。生效交给 reload 步骤。
    > **仅当 `dummy_backend = "networkd"`。** 该接口由 NetworkManager 管理时，写 networkd 的 `.netdev`/`.network` 会造出一份与 NM 冲突的配置；而 apply 刻意不 shell out（`nmcli` 是 `ensure_dummy_interface` 的事）。此时跳过并告警，该节点需要本机跑一次 `dn42ctl genconf` 让新 `own_ipv6` 生效。`config.toml` 与 `bird.conf` 仍照常更新。
 

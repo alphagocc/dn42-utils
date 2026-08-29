@@ -23,6 +23,9 @@ node_modules/
 # Editors
 .vscode/
 
+# Claude Code 的临时 worktree,本身就是本仓库的一份 checkout
+.claude/worktrees/
+
 # Coverage
 coverage.xml
 htmlcov/

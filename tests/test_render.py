@@ -7,6 +7,7 @@ import pytest
 from dn42ctl.render import (
     render_babel_conf,
     render_bird_bgp_peer_conf,
+    render_bird_extra_conf_placeholder,
     render_bird_ibgp_peer_conf,
     render_bird_main_conf,
     render_networkd_netdev,
@@ -76,6 +77,7 @@ class TestRenderBirdMainConf:
             bird_babel_conf_path=Path("/etc/bird/babel.conf"),
             bird_peers_dir=Path("/etc/bird/peers"),
             bird_roa_v6_conf_path=Path("/etc/bird/roa_dn42_v6.conf"),
+            bird_extra_conf_path=Path("/etc/bird/extra.conf"),
         )
         assert "4242421234" in result
         assert "172.23.0.1" in result
@@ -84,6 +86,31 @@ class TestRenderBirdMainConf:
         assert "/etc/bird/babel.conf" in result
         assert "/etc/bird/peers/*" in result
         assert "/etc/bird/roa_dn42_v6.conf" in result
+        assert 'include "/etc/bird/extra.conf";' in result
+
+    def test_extra_conf_include_comes_last(self) -> None:
+        """extra.conf 位于末尾,才能引用前面的 define 与 BGP template。"""
+        result = render_bird_main_conf(
+            own_asn=4242421234,
+            router_id="172.23.0.1",
+            own_ipv6="fd42:4242:1234::1",
+            ownnet_v6="fd42:4242:1234::/48",
+            ownnetset_v6="[fd42:4242:1234::/48+]",
+            bird_babel_conf_path=Path("/etc/bird/babel.conf"),
+            bird_peers_dir=Path("/etc/bird/peers"),
+            bird_roa_v6_conf_path=Path("/etc/bird/roa_dn42_v6.conf"),
+            bird_extra_conf_path=Path("/etc/bird/extra.conf"),
+        )
+        assert result.index("/etc/bird/extra.conf") > result.index("template bgp dnpeers")
+        assert result.index("/etc/bird/extra.conf") > result.index("/etc/bird/peers/*")
+
+
+class TestRenderBirdExtraConfPlaceholder:
+    def test_is_comments_only(self) -> None:
+        """占位文件必须是空配置:任何指令都会成为用户没要求过的行为。"""
+        result = render_bird_extra_conf_placeholder()
+        assert result.strip()
+        assert all(not line.strip() or line.lstrip().startswith("#") for line in result.splitlines())
 
 
 class TestRenderNetworkdNetdev:

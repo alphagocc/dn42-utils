@@ -44,6 +44,7 @@ def _make_payload(tmp_path: Path, bgp: list[dict] | None = None, ibgp: list[dict
         "bird_conf_path": str(tmp_path / "bird/bird.conf"),
         "peers_dir": str(tmp_path / "bird/peers"),
         "babel_conf_path": str(tmp_path / "bird/babel.conf"),
+        "bird_extra_conf_path": str(tmp_path / "bird/extra.conf"),
         "networkd_dir": str(tmp_path / "networkd"),
         "nm_dir": str(tmp_path / "nm"),
     }
@@ -327,6 +328,7 @@ def _app_config_toml(tmp_path: Path, *, own_ipv6: str = "fd42:4242:1234::1", rou
             bird_peers_dir=str(tmp_path / "bird/peers"),
             bird_babel_conf_path=str(tmp_path / "bird/babel.conf"),
             bird_roa_v6_conf_path=str(tmp_path / "bird/roa_dn42_v6.conf"),
+            bird_extra_conf_path=str(tmp_path / "bird/extra.conf"),
             networkd_dir=str(tmp_path / "networkd"),
             nm_system_connections_dir=str(tmp_path / "nm"),
             dummy_backend="networkd",
@@ -492,6 +494,42 @@ class TestEmptyPeerIpIsSkipped:
         assert {"wg_alpha.netdev", "dn42_1234.conf", "babel.conf"} <= names
 
 
+class TestExtraConfPlaceholder:
+    """bird.conf include 了 extra.conf,该文件必须存在;而它的内容属于用户。"""
+
+    def test_creates_placeholder_when_missing(self, tmp_path: Path) -> None:
+        config_path = _app_config_toml(tmp_path)
+        cfg = _cfg_with_config_path(tmp_path, config_path)
+        payload = _make_payload(tmp_path)
+        payload["node"] = {"own_ipv6": "fd42:4242:1234::9"}
+        _seed_cache(cfg.cache_db_path, payload)
+
+        apply(node_config=cfg)
+
+        extra = tmp_path / "bird" / "extra.conf"
+        assert extra.exists()
+        assert all(not line.strip() or line.lstrip().startswith("#") for line in extra.read_text().splitlines())
+        assert str(extra) in (tmp_path / "bird" / "bird.conf").read_text()
+
+    def test_reconcile_never_overwrites_user_content(self, tmp_path: Path) -> None:
+        """agent 每 900 秒 reconcile 一次,占位内容进常规 diff 管线就会反复抹掉用户配置。"""
+        config_path = _app_config_toml(tmp_path)
+        cfg = _cfg_with_config_path(tmp_path, config_path)
+        payload = _make_payload(tmp_path)
+        payload["node"] = {"own_ipv6": "fd42:4242:1234::9"}
+        _seed_cache(cfg.cache_db_path, payload)
+
+        extra = tmp_path / "bird" / "extra.conf"
+        extra.parent.mkdir(parents=True, exist_ok=True)
+        extra.write_text("protocol static custom { ipv6; }\n")
+
+        result = apply(node_config=cfg)
+
+        assert extra.read_text() == "protocol static custom { ipv6; }\n"
+        assert extra not in result.written
+        assert all(d.path != extra for d in result.diffs)
+
+
 class TestReload:
     @staticmethod
     def _recording_runner(seen: list[list[str]]):
@@ -591,6 +629,7 @@ class TestNodeBlockPathsAndBackend:
                 bird_peers_dir=str(stale / "peers"),
                 bird_babel_conf_path=str(stale / "babel.conf"),
                 bird_roa_v6_conf_path=str(stale / "roa.conf"),
+                bird_extra_conf_path=str(stale / "extra.conf"),
                 networkd_dir=str(stale / "networkd"),
                 nm_system_connections_dir=str(stale / "nm"),
                 dummy_backend="networkd",
@@ -605,8 +644,10 @@ class TestNodeBlockPathsAndBackend:
         bird_conf = (tmp_path / "bird" / "bird.conf").read_text()
         assert str(tmp_path / "bird" / "peers") in bird_conf
         assert str(tmp_path / "bird" / "babel.conf") in bird_conf
+        assert str(tmp_path / "bird" / "extra.conf") in bird_conf
         assert str(stale / "peers") not in bird_conf
         assert str(stale / "babel.conf") not in bird_conf
+        assert str(stale / "extra.conf") not in bird_conf
 
     def test_nm_dummy_backend_skips_networkd_dummy_files(self, tmp_path: Path) -> None:
         """dummy_backend=nm 时写 networkd 的 dn42-dummy.* 会造出与 NM 冲突的配置。"""
@@ -626,6 +667,7 @@ class TestNodeBlockPathsAndBackend:
                 bird_peers_dir=str(tmp_path / "bird/peers"),
                 bird_babel_conf_path=str(tmp_path / "bird/babel.conf"),
                 bird_roa_v6_conf_path=str(tmp_path / "bird/roa.conf"),
+                bird_extra_conf_path=str(tmp_path / "bird/extra.conf"),
                 networkd_dir=str(tmp_path / "networkd"),
                 nm_system_connections_dir=str(tmp_path / "nm"),
                 dummy_backend="nm",

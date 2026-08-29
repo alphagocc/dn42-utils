@@ -37,6 +37,7 @@ def _init_node_helper(tmp_path: Path, bird_conf_path: Path | None = None):
             bird_peers_dir=peers_dir,
             bird_babel_conf_path=bird_dir / "babel.conf",
             bird_roa_v6_conf_path=bird_dir / "roa_dn42_v6.conf",
+            bird_extra_conf_path=bird_dir / "extra.conf",
             networkd_dir=tmp_path / "networkd",
             nm_system_connections_dir=tmp_path / "nm",
         )
@@ -77,6 +78,30 @@ class TestGenconf:
         assert result.bird_conf_path.exists()
         assert result.bird_babel_conf_path.exists()
         assert result.bird_roa_v6_conf_path.exists()
+        assert result.bird_extra_conf_path.exists()
+        assert str(result.bird_extra_conf_path) in result.bird_conf_path.read_text()
+
+    def test_extra_conf_content_is_never_overwritten(self, tmp_path: Path) -> None:
+        """extra.conf 的内容属于用户,重跑 genconf 覆盖它等于删掉用户的配置。"""
+        init_result, db_path = _init_node_helper(tmp_path)
+        extra_path = Path(init_result.config.bird_extra_conf_path)
+        extra_path.write_text("protocol static custom { ipv6; }\n")
+
+        roa_path = Path(init_result.config.bird_roa_v6_conf_path)
+        roa_path.write_text("# ROA placeholder\n")
+
+        with (
+            patch("dn42ctl.services.init_sys.ensure_dummy_interface", return_value=None),
+            patch("sys.platform", "linux"),
+        ):
+            genconf(
+                config=init_result.config,
+                db_path=db_path,
+                overwrite_bird_conf=True,
+                overwrite_babel_conf=True,
+            )
+
+        assert extra_path.read_text() == "protocol static custom { ipv6; }\n"
 
     def test_no_overwrite_raises(self, tmp_path: Path) -> None:
         bird_dir = tmp_path / "bird"

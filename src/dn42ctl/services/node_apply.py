@@ -38,6 +38,7 @@ from dn42ctl.paths import DEFAULT_CONFIG_PATH
 from dn42ctl.render import (
     render_babel_conf,
     render_bird_bgp_peer_conf,
+    render_bird_extra_conf_placeholder,
     render_bird_ibgp_peer_conf,
     render_bird_main_conf,
     render_dummy_netdev,
@@ -62,6 +63,7 @@ class ResolvedPaths:
     networkd_dir: Path
     nm_dir: Path  # kept for stale-file cleanup of legacy .nmconnection files
     bird_conf_path: Path
+    bird_extra_conf_path: Path
     config_path: Path
 
 
@@ -88,7 +90,7 @@ def _resolve_paths(payload: dict[str, Any], node_config: NodeConfig) -> Resolved
 
     Override key names (in node.toml [apply]) shadow the server's defaults.
     Recognized keys: bird_peers_dir, babel_conf_path, networkd_dir, nm_dir,
-    bird_conf_path, config_path.
+    bird_conf_path, bird_extra_conf_path, config_path.
     """
     defaults = payload.get("paths") or {}
     overrides = node_config.apply_overrides
@@ -105,6 +107,7 @@ def _resolve_paths(payload: dict[str, Any], node_config: NodeConfig) -> Resolved
         networkd_dir=Path(pick("networkd_dir", "/etc/systemd/network/")),
         nm_dir=Path(pick("nm_dir", "/etc/NetworkManager/system-connections/")),
         bird_conf_path=Path(pick("bird_conf_path", "/etc/bird/bird.conf")),
+        bird_extra_conf_path=Path(pick("bird_extra_conf_path", "/etc/bird/extra.conf")),
         config_path=Path(pick("config_path", str(DEFAULT_CONFIG_PATH))),
     )
 
@@ -279,12 +282,19 @@ def _render_node_config_files(
                 # make bird.conf include an empty directory.
                 bird_babel_conf_path=paths.babel_conf_path,
                 bird_peers_dir=paths.bird_peers_dir,
+                bird_extra_conf_path=paths.bird_extra_conf_path,
                 # The ROA file is not managed by apply, so it has no ResolvedPaths entry.
                 bird_roa_v6_conf_path=Path(merged.bird_roa_v6_conf_path),
             ),
             FILE_MODE_PRIVATE,
         )
     )
+
+    # bird.conf now includes extra.conf, so the file has to exist. Its content belongs to
+    # the operator: putting the placeholder in the list unconditionally would let every
+    # 900-second reconcile diff it against whatever they wrote and overwrite it.
+    if not paths.bird_extra_conf_path.exists():
+        files.append((paths.bird_extra_conf_path, render_bird_extra_conf_placeholder(), FILE_MODE_PRIVATE))
 
     if merged.dummy_backend != NET_BACKEND_NETWORKD:
         # When dn42-dummy is managed by NetworkManager, writing networkd's
@@ -479,7 +489,7 @@ def apply(
                     touched=touched,
                     networkd_dir=paths.networkd_dir,
                     bird_peers_dir=paths.bird_peers_dir,
-                    bird_files=[paths.babel_conf_path, paths.bird_conf_path],
+                    bird_files=[paths.babel_conf_path, paths.bird_conf_path, paths.bird_extra_conf_path],
                 ),
                 runner=runner,
             )

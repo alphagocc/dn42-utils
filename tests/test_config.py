@@ -21,6 +21,7 @@ class TestSaveAndLoadRoundtrip:
         assert loaded.ownnetset_v6 == sample_config.ownnetset_v6
         assert loaded.bird_conf_path == sample_config.bird_conf_path
         assert loaded.bird_peers_dir == sample_config.bird_peers_dir
+        assert loaded.bird_extra_conf_path == sample_config.bird_extra_conf_path
         assert loaded.networkd_dir == sample_config.networkd_dir
         assert loaded.dummy_backend == sample_config.dummy_backend
 
@@ -50,6 +51,18 @@ class TestLoadConfig:
         )
         with pytest.raises(ConfigError, match="paths"):
             load_config(cfg_path)
+
+    def test_missing_bird_extra_conf_derives_from_bird_conf(self, tmp_path: Path, sample_config: AppConfig) -> None:
+        """该键晚于其余路径引入,旧配置里没有,缺失时不应报错,也不应指向 /etc/bird。"""
+        cfg_path = tmp_path / "config.toml"
+        save_config(cfg_path, sample_config)
+        content = "\n".join(
+            line for line in cfg_path.read_text().splitlines() if not line.startswith("bird_extra_conf = ")
+        )
+        cfg_path.write_text(content + "\n")
+
+        loaded = load_config(cfg_path)
+        assert loaded.bird_extra_conf_path == str(Path(sample_config.bird_conf_path).parent / "extra.conf")
 
     def test_invalid_asn(self, tmp_path: Path, sample_config: AppConfig) -> None:
         cfg_path = tmp_path / "config.toml"

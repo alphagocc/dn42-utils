@@ -36,6 +36,7 @@ class AppConfig:
     bird_peers_dir: str
     bird_babel_conf_path: str
     bird_roa_v6_conf_path: str
+    bird_extra_conf_path: str
     networkd_dir: str
     nm_system_connections_dir: str
     dummy_backend: str = "networkd"
@@ -109,6 +110,8 @@ def load_config(path: Path) -> AppConfig:
     except ValidationError as exc:
         raise ConfigError(f"配置项不合法: {exc}") from exc
 
+    bird_conf_path = _require_str(paths, "bird_conf")
+
     return AppConfig(
         node_id=_require_str(raw, "node_id"),
         own_asn=own_asn,
@@ -116,10 +119,14 @@ def load_config(path: Path) -> AppConfig:
         own_ipv6=own_ipv6,
         ownnet_v6=ownnet_v6,
         ownnetset_v6=ownnetset_v6,
-        bird_conf_path=_require_str(paths, "bird_conf"),
+        bird_conf_path=bird_conf_path,
         bird_peers_dir=_require_str(paths, "bird_peers_dir"),
         bird_babel_conf_path=_require_str(paths, "bird_babel_conf"),
         bird_roa_v6_conf_path=_require_str(paths, "bird_roa_v6_conf"),
+        # 该键晚于其余路径引入,旧配置里没有,缺失时按 bird.conf 的同级目录推导,
+        # 让升级后无需重跑 init。用 bird_conf 推导而非固定 /etc/bird,是为了让把
+        # 配置指向可写目录的开发与测试环境保持自洽。
+        bird_extra_conf_path=_optional_str(paths, "bird_extra_conf") or str(Path(bird_conf_path).parent / "extra.conf"),
         networkd_dir=_require_str(paths, "networkd_dir"),
         nm_system_connections_dir=_require_str(paths, "nm_system_connections_dir"),
         dummy_backend=dummy_backend,
@@ -148,6 +155,7 @@ def dumps_config(config: AppConfig) -> str:
             "bird_peers_dir": config.bird_peers_dir,
             "bird_babel_conf": config.bird_babel_conf_path,
             "bird_roa_v6_conf": config.bird_roa_v6_conf_path,
+            "bird_extra_conf": config.bird_extra_conf_path,
             "networkd_dir": config.networkd_dir,
             "nm_system_connections_dir": config.nm_system_connections_dir,
         },

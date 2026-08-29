@@ -30,6 +30,7 @@
 ### 路径覆盖参数
 
 - `--bird-conf` / `--bird-peers-dir` / `--bird-babel-conf` / `--bird-roa-v6-conf`
+- `--bird-extra-conf`：用户自定义 Bird 配置的位置，详见 [`../architecture/bird_extra_conf.md`](../architecture/bird_extra_conf.md)
 - `--networkd-dir` / `--nm-system-connections-dir`
 
 ### 生成配置开关

@@ -17,6 +17,7 @@ from dn42ctl.db import Database, DatabaseError
 from dn42ctl.paths import (
     DEFAULT_BIRD_BABEL_CONF_PATH,
     DEFAULT_BIRD_CONF_PATH,
+    DEFAULT_BIRD_EXTRA_CONF_PATH,
     DEFAULT_BIRD_PEERS_DIR,
     DEFAULT_BIRD_ROA_V6_CONF_PATH,
     DEFAULT_CONFIG_PATH,
@@ -278,6 +279,11 @@ def cmd_init(
     bird_peers_dir: Path | None = typer.Option(None, "--bird-peers-dir", help="Bird peers 目录"),
     bird_babel_conf_path: Path | None = typer.Option(None, "--bird-babel-conf", help="babel.conf 输出路径"),
     bird_roa_v6_conf_path: Path | None = typer.Option(None, "--bird-roa-v6-conf", help="roa_dn42_v6.conf 路径"),
+    bird_extra_conf_path: Path | None = typer.Option(
+        None,
+        "--bird-extra-conf",
+        help="用户自定义 Bird 配置的路径（extra.conf，内容由用户维护）",
+    ),
     networkd_dir: Path | None = typer.Option(None, "--networkd-dir", help="systemd-networkd 配置目录"),
     nm_system_connections_dir: Path | None = typer.Option(
         None,
@@ -329,6 +335,8 @@ def cmd_init(
         bird_babel_conf_path = Path(existing.bird_babel_conf_path) if existing else DEFAULT_BIRD_BABEL_CONF_PATH
     if bird_roa_v6_conf_path is None:
         bird_roa_v6_conf_path = Path(existing.bird_roa_v6_conf_path) if existing else DEFAULT_BIRD_ROA_V6_CONF_PATH
+    if bird_extra_conf_path is None:
+        bird_extra_conf_path = Path(existing.bird_extra_conf_path) if existing else DEFAULT_BIRD_EXTRA_CONF_PATH
     if networkd_dir is None:
         networkd_dir = Path(existing.networkd_dir) if existing else DEFAULT_NETWORKD_DIR
     if nm_system_connections_dir is None:
@@ -369,6 +377,7 @@ def cmd_init(
             bird_peers_dir=bird_peers_dir,
             bird_babel_conf_path=bird_babel_conf_path,
             bird_roa_v6_conf_path=bird_roa_v6_conf_path,
+            bird_extra_conf_path=bird_extra_conf_path,
             networkd_dir=networkd_dir,
             nm_system_connections_dir=nm_system_connections_dir,
             dummy_backend=dummy_backend,
@@ -400,6 +409,7 @@ def cmd_init(
         typer.echo(f"Bird: {gen_res.bird_conf_path}")
         typer.echo(f"Babel: {gen_res.bird_babel_conf_path}")
         typer.echo(f"ROA v6: {gen_res.bird_roa_v6_conf_path}")
+        typer.echo(f"自定义配置: {gen_res.bird_extra_conf_path}")
 
         if gen_res.warnings:
             typer.echo("\n警告:")
@@ -437,6 +447,7 @@ def cmd_genconf(
     typer.echo(f"Bird: {res.bird_conf_path}")
     typer.echo(f"Babel: {res.bird_babel_conf_path}")
     typer.echo(f"ROA v6: {res.bird_roa_v6_conf_path}")
+    typer.echo(f"自定义配置: {res.bird_extra_conf_path}")
     if res.generated_peer_files:
         typer.echo(f"Peers: 已生成 {len(res.generated_peer_files)} 个文件")
     _print_dummy_result(res.dummy)

@@ -77,6 +77,8 @@ class TestBuildDesiredState:
         assert ds.node_id == NODE_A
         assert ds.revision
         assert "bird_conf_path" in ds.paths
+        # apply 渲染的 bird.conf 会 include 它,缺了这个键节点只能退回 /etc/bird/extra.conf。
+        assert "bird_extra_conf_path" in ds.paths
 
     def test_with_peers(self, db_path: Path) -> None:
         _seed_node_with_peers(db_path)

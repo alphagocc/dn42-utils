@@ -7,7 +7,7 @@ import urllib.request
 from pathlib import Path
 
 from dn42ctl.config import AppConfig, save_config
-from dn42ctl.render import render_bird_ibgp_peer_conf, render_bird_main_conf
+from dn42ctl.render import render_bird_extra_conf_placeholder, render_bird_ibgp_peer_conf, render_bird_main_conf
 from dn42ctl.services.core import (
     Dn42CtlError,
     GenConfResult,
@@ -39,6 +39,7 @@ def init_node(
     bird_peers_dir: Path,
     bird_babel_conf_path: Path,
     bird_roa_v6_conf_path: Path,
+    bird_extra_conf_path: Path,
     networkd_dir: Path,
     nm_system_connections_dir: Path,
     dummy_backend: str = "networkd",
@@ -54,6 +55,7 @@ def init_node(
         bird_peers_dir=str(bird_peers_dir),
         bird_babel_conf_path=str(bird_babel_conf_path),
         bird_roa_v6_conf_path=str(bird_roa_v6_conf_path),
+        bird_extra_conf_path=str(bird_extra_conf_path),
         networkd_dir=str(networkd_dir),
         nm_system_connections_dir=str(nm_system_connections_dir),
         dummy_backend=dummy_backend,
@@ -89,6 +91,7 @@ def genconf(
     bird_peers_dir = Path(config.bird_peers_dir)
     bird_babel_conf_path = Path(config.bird_babel_conf_path)
     bird_roa_v6_conf_path = Path(config.bird_roa_v6_conf_path)
+    bird_extra_conf_path = Path(config.bird_extra_conf_path)
 
     db = open_db_and_ensure_node(db_path, node_id)
     try:
@@ -107,6 +110,7 @@ def genconf(
             bird_babel_conf_path=bird_babel_conf_path,
             bird_peers_dir=bird_peers_dir,
             bird_roa_v6_conf_path=bird_roa_v6_conf_path,
+            bird_extra_conf_path=bird_extra_conf_path,
         )
 
         if bird_conf_path.exists() and not overwrite_bird_conf:
@@ -114,6 +118,10 @@ def genconf(
         write_text(bird_conf_path, bird_conf_text)
 
         ensure_dir(bird_peers_dir)
+
+        # 内容属于用户,只在缺失时补一份注释占位文件,已存在时连覆盖确认都不问。
+        if not bird_extra_conf_path.exists():
+            write_text(bird_extra_conf_path, render_bird_extra_conf_placeholder())
 
         if bird_babel_conf_path.exists() and not overwrite_babel_conf:
             raise Dn42CtlError(f"babel.conf 已存在且未允许覆盖: {bird_babel_conf_path}")
@@ -239,6 +247,7 @@ def genconf(
             bird_conf_path=bird_conf_path,
             bird_babel_conf_path=bird_babel_conf_path,
             bird_roa_v6_conf_path=bird_roa_v6_conf_path,
+            bird_extra_conf_path=bird_extra_conf_path,
             dummy=dummy,
             warnings=warnings,
             generated_peer_files=generated_peer_files,

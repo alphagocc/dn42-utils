@@ -1,0 +1,12 @@
+# dn42ctl: 用户自定义 Bird 配置
+#
+# 本文件由 dn42ctl 在缺失时创建一次,此后永不改写,内容完全由你维护。
+#
+# bird.conf 在末尾 include 本文件,因此这里可以引用前面已定义的 OWNAS / OWNIPv6 /
+# OWNNETv6 / OWNNETSETv6 等 define,以及 dnpeers 与 ibgp_template 两个 BGP template。
+# 反过来,这里定义的 function 无法被 bird.conf 中的内置 filter 使用——那些 filter
+# 出现得更早。需要修改内置过滤逻辑时,应当修改 dn42ctl 的模板本身。
+#
+# 适合写在这里的内容:静态路由、额外的 protocol、面向特定邻居的 filter。
+#
+# 语法错误会让 birdc configure 加载整份配置失败,其中包括 dn42ctl 生成的部分。

@@ -156,6 +156,7 @@ class GenConfResult:
     bird_conf_path: Path
     bird_babel_conf_path: Path
     bird_roa_v6_conf_path: Path
+    bird_extra_conf_path: Path
     dummy: DummyResult | None
     warnings: list[str]
     generated_peer_files: list[Path] = field(default_factory=list)

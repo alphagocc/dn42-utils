@@ -46,6 +46,7 @@
 | [`architecture/db_browse.md`](architecture/db_browse.md) | 数据库只读浏览（白名单与脱敏） |
 | [`architecture/network_backends.md`](architecture/network_backends.md) | 网络后端（networkd / NetworkManager） |
 | [`architecture/babel.md`](architecture/babel.md) | Babel 配置生成（rxcost / interface type） |
+| [`architecture/bird_extra_conf.md`](architecture/bird_extra_conf.md) | Bird 自定义配置（extra.conf） |
 | [`architecture/rest_api.md`](architecture/rest_api.md) | REST API 路由表 |
 | [`architecture/sync_hub_spoke.md`](architecture/sync_hub_spoke.md) | 多节点中心化同步 |
 | [`architecture/node_addressing.md`](architecture/node_addressing.md) | 节点地址集中管理（传播、下发、reload） |

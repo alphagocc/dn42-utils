@@ -1008,6 +1008,7 @@ def api_genconf(body: GenconfRequest) -> dict:
         "bird_conf_path": str(result.bird_conf_path),
         "bird_babel_conf_path": str(result.bird_babel_conf_path),
         "bird_roa_v6_conf_path": str(result.bird_roa_v6_conf_path),
+        "bird_extra_conf_path": str(result.bird_extra_conf_path),
         "warnings": result.warnings,
     }
 

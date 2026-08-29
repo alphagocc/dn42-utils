@@ -10,6 +10,8 @@ DEFAULT_BIRD_CONF_PATH = DEFAULT_BIRD_DIR / "bird.conf"
 DEFAULT_BIRD_PEERS_DIR = DEFAULT_BIRD_DIR / "peers"
 DEFAULT_BIRD_BABEL_CONF_PATH = DEFAULT_BIRD_DIR / "babel.conf"
 DEFAULT_BIRD_ROA_V6_CONF_PATH = DEFAULT_BIRD_DIR / "roa_dn42_v6.conf"
+# 用户手工维护的 Bird 配置,工具只保证它存在并被 include。见 docs/architecture/bird_extra_conf.md。
+DEFAULT_BIRD_EXTRA_CONF_PATH = DEFAULT_BIRD_DIR / "extra.conf"
 
 DEFAULT_NETWORKD_DIR = Path("/etc/systemd/network")
 DEFAULT_NM_SYSTEM_CONNECTIONS_DIR = Path("/etc/NetworkManager/system-connections")

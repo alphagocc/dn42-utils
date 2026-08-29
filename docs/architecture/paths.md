@@ -28,10 +28,13 @@ dn42ctl 默认写入系统目录，因此大部分命令需要 root（例如 `su
 | Bird peers 目录 | `/etc/bird/peers/` | `--bird-peers-dir` |
 | Babel 配置 | `/etc/bird/babel.conf` | `--bird-babel-conf` |
 | ROA v6 include | `/etc/bird/roa_dn42_v6.conf` | `--bird-roa-v6-conf` |
+| Bird 自定义配置 | `/etc/bird/extra.conf` | `--bird-extra-conf` |
 | systemd-networkd | `/etc/systemd/network/` | `--networkd-dir` |
 | NetworkManager（仅 dummy_backend） | `/etc/NetworkManager/system-connections/` | `--nm-system-connections-dir` |
 
 路径覆盖参数在 `init` 时写入 `config.toml` 并保持稳定，详见 [`../commands/init.md`](../commands/init.md)。
+
+`extra.conf` 是用户手工维护的 Bird 配置，工具只保证它被 `include` 且文件存在，内容永不改写，详见 [`bird_extra_conf.md`](bird_extra_conf.md)。
 
 ## 权限不足时的行为
 

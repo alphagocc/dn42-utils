@@ -21,6 +21,7 @@ DEFAULT_PATHS = {
     "bird_conf_path": "/etc/bird/bird.conf",
     "peers_dir": "/etc/bird/peers/",
     "babel_conf_path": "/etc/bird/babel.conf",
+    "bird_extra_conf_path": "/etc/bird/extra.conf",
     "networkd_dir": "/etc/systemd/network/",
     "nm_dir": "/etc/NetworkManager/system-connections/",
 }

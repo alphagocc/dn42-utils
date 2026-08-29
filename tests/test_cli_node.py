@@ -194,6 +194,7 @@ class TestNodeAdoptSelf:
                 bird_peers_dir=str(tmp_path / "peers"),
                 bird_babel_conf_path=str(tmp_path / "babel.conf"),
                 bird_roa_v6_conf_path=str(tmp_path / "roa.conf"),
+                bird_extra_conf_path=str(tmp_path / "extra.conf"),
                 networkd_dir=str(tmp_path / "networkd"),
                 nm_system_connections_dir=str(tmp_path / "nm"),
                 dummy_backend="networkd",
