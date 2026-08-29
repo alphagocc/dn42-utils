@@ -1,6 +1,6 @@
 # Babel 配置生成（rxcost / interface type）
 
-`babel.conf` 由 dn42ctl **整体重生成**（确定性、幂等），不做增量编辑。每个有 WireGuard 隧道的 iBGP peer 对应一个 `interface` 段，其参数按 **iBGP peer 粒度**存储在 SQLite。
+`babel.conf` 由 dn42ctl **整体重生成**（确定性、幂等），不做增量编辑。每个有 WireGuard 隧道的 iBGP peer 对应一个 `interface` 段，其参数**以 iBGP peer 为单位**存储在 SQLite。
 
 ## rxcost
 

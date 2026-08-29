@@ -2,7 +2,7 @@
 
 节点的"IP"在本项目里从来不是一个字段，而是三件不同的东西。这份文档定义它们各自存在哪里、谁是权威、改动如何传播，以及为什么某些看起来该自动化的事情被刻意留给人工。
 
-相关：数据库 schema 见 [`database.md`](database.md)，同步链路见 [`sync_hub_spoke.md`](sync_hub_spoke.md)，路由见 [`rest_api.md`](rest_api.md)。
+相关：数据库 schema 见 [`database.md`](database.md)，同步机制见 [`sync_hub_spoke.md`](sync_hub_spoke.md)，路由见 [`rest_api.md`](rest_api.md)。
 
 ## 1. 三种"节点地址"
 
@@ -60,7 +60,7 @@
 
 ### 事务与事件
 
-写入在**一个事务**里完成：`managed_nodes` 的字段 + 每一条被传播的 `ibgp_peers` 行。然后为 A（自身地址块变了）和每个受影响的 B（peer 行变了）各发一条 `desired` 事件（去重）。剩下的推送链路完全复用现有机制。
+写入在**一个事务**里完成：`managed_nodes` 的字段 + 每一条被传播的 `ibgp_peers` 行。然后为 A（自身地址块变了）和每个受影响的 B（peer 行变了）各发一条 `desired` 事件（去重）。剩下的推送流程完全复用现有机制。
 
 ### 明确延后：互惠端口修复
 

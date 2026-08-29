@@ -58,13 +58,21 @@ class TestBlockingTerms:
         """「走 gpg」的规范写法是「使用 gpg」。"""
         assert "走" in terms("签名校验走 gpg。", level=BLOCK)
 
+    @pytest.mark.parametrize(
+        ("text", "term"),
+        [("按 peer 粒度存储", "粒度"), ("默认对齐到 self 节点", "对齐")],
+    )
+    def test_jargon_with_legitimate_homograph_blocks(self, text: str, term: str) -> None:
+        """这两个词有正当同形用法(内存对齐),靠 EXCLUSIONS 区分而非降级放行。"""
+        assert term in terms(text, level=BLOCK)
+
     def test_longest_phrase_wins(self) -> None:
         """长短语先匹配,短词不得把它拆开。"""
         assert "下面把你" in terms("下面把你现在的配置导出。", level=BLOCK)
 
 
 class TestWarningTerms:
-    @pytest.mark.parametrize("text", ["默认路径指向 /etc", "高丢包链路建议 wireless", "按 peer 粒度存储"])
+    @pytest.mark.parametrize("text", ["默认路径指向 /etc", "高丢包链路建议 wireless", "推送式收敛延迟 ≤1 秒"])
     def test_technical_terms_only_warn(self, text: str) -> None:
         assert terms(text, level=WARN)
         assert not terms(text, level=BLOCK)

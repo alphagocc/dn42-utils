@@ -265,6 +265,6 @@ CREATE INDEX idx_sync_events_node ON sync_events(node_id, id);
 ### 设计取舍
 
 - `write_policy` 采用 JSON 字段存储：字段少、读多写少、按节点单值，无需独立的策略子表。
-- `sync_events` 采用轮询小表方案，取代"server 定时重算内容哈希"与"CLI kick loopback 端点"两个候选：写入与业务变更同事务、不要求 CLI 能访问 server、漏埋点不会静默失效。轮询没有消失，但它从跨网络 10 分钟粒度变成了 hub 本机 1 秒粒度的一条带索引 SELECT。
+- `sync_events` 采用轮询小表方案，取代"server 定时重算内容哈希"与"CLI kick loopback 端点"两个候选：写入与业务变更同事务、不要求 CLI 能访问 server、漏埋点不会静默失效。轮询没有消失，但它从跨网络每 10 分钟一次变成了 hub 本机每秒一次的带索引 SELECT。
 - `config_revisions` 第一阶段就建表，但写入与回滚实现在阶段 5。schema 一次到位避免再加迁移。
 - `is_self` 不放索引：全表至多一行为 1，扫描代价与索引查找相当。

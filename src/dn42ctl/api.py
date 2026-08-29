@@ -160,7 +160,7 @@ def _resolve_target_node(node_id: str | None) -> str:
     self 节点 id 则由 `serve_bootstrap` 生成并保存在 `/var/lib/dn42ctl/self_node_id`，
     两者之间从不互相校验。早先 admin API 按前者写入 peer，而 desired-state 按后者读取
     peer，一旦两个 id 分叉，管理员在 UI 中添加的 peer 就永远不会下发，并且不会有任何
-    报错。默认对齐到 self 节点即可消除这条静默失败路径。
+    报错。默认解析到 self 节点即可消除这条静默失败路径。
 
     只有在 self 行不存在时（`--no-self-register` 部署）才回退到 `config.node_id`。
     该回退值**不做存在性校验**——这类部署本来就可能没有对应的 `managed_nodes` 行。

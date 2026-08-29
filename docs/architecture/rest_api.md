@@ -61,7 +61,7 @@ token hash 比对采用恒定时间。self 节点的 token 由 `dn42ctl serve` �
 
 上表中的 peer / wg / show 路由全部接受可选的 **`?node_id=<uuid>` query 参数**，用于指定操作哪个受管节点的行。POST / PUT 也统一用 query 参数（FastAPI 支持 query 与 body model 并存），一条规则胜过"写操作放 body、删除放 query"。
 
-**省略时默认解析到 hub 的 self 节点，即 `managed_nodes.is_self = 1` 那一行；`config.toml` 的 `node_id` 仅用于比对告警。** 这两个 UUID 互不校验，一旦分叉，admin 写入的 peer 会落在 desired state 读不到的分区里，且没有任何报错。默认对齐到 self 消除了这条静默失败路径；`/api/show/all` 额外返回 `self_node_id` / `config_node_id` / `node_id_mismatch` 供前端告警。详见 [`node_addressing.md`](node_addressing.md) §9。
+**省略时默认解析到 hub 的 self 节点，即 `managed_nodes.is_self = 1` 那一行；`config.toml` 的 `node_id` 仅用于比对告警。** 这两个 UUID 互不校验，一旦分叉，admin 写入的 peer 会落在 desired state 读不到的分区里，且没有任何报错。默认解析到 self 消除了这条静默失败路径；`/api/show/all` 额外返回 `self_node_id` / `config_node_id` / `node_id_mismatch` 供前端告警。详见 [`node_addressing.md`](node_addressing.md) §9。
 
 **显式传入的 `node_id` 必须是已注册的受管节点**，否则返回 400。不校验的话，`open_db_and_ensure_node` 会为这个 id 凭空建出一行 `nodes` 并把 peer 写进去，而 `managed_nodes` 里没有对应行：没有 agent 会来拉取它，`GET /api/admin/nodes` 与 `dn42ctl node list` 都读 `managed_nodes` 因而看不见它，`nodes` 那一行更是没有任何代码路径能删掉。节点侧的 `GET /desired` 与 WS 握手一直在用 `require_managed_node_exists`，管理侧用的是同一个校验。
 
