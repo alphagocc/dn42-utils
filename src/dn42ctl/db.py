@@ -89,7 +89,7 @@ class Database:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
         # hub 上 server 进程与 CLI 进程并发访问同一个库文件;没有 busy_timeout 时撞锁会
-        # 立刻抛 "database is locked" 而不是等待重试。不启用 WAL(见 docs/architecture/database.md)。
+        # 立刻抛 "database is locked",放弃等待重试。不启用 WAL(见 docs/architecture/database.md)。
         self._conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
 
     @property

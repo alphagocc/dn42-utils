@@ -16,7 +16,7 @@ dn42ctl serve [--host ::1] [--port 4242] [--sync-poll-interval 1.0]
 
 ## 鉴权（admin / node / peer-session 三类 principal）
 
-`/api/...` 与 `/api/admin/...` 与 `/api/v1/nodes/...` 走 `Authorization: Bearer <token>` 头；`/api/public/auto-peer/...` 中的前 3 步公开，仅 `submit` 需要一个短期 peer-session bearer。
+`/api/...` 与 `/api/admin/...` 与 `/api/v1/nodes/...` 使用 `Authorization: Bearer <token>` 头；`/api/public/auto-peer/...` 中的前 3 步公开，仅 `submit` 需要一个短期 peer-session bearer。
 
 | 主体 | token 来源 | 可访问 |
 |------|-----------|--------|
@@ -29,7 +29,7 @@ dn42ctl serve [--host ::1] [--port 4242] [--sync-poll-interval 1.0]
 - `401 Unauthorized`：缺 token / token 不可解析。
 - `403 Forbidden`：token 有效但越权（node token 试图访问其他 node_id，或访问 admin 路由）。
 
-token hash 比对走恒定时间。self 节点的 token 由 `dn42ctl serve` 启动时自动签发并明文写入 `/etc/dn42ctl/node.toml`；与远程节点 token 走同一套校验路径。
+token hash 比对采用恒定时间。self 节点的 token 由 `dn42ctl serve` 启动时自动签发并明文写入 `/etc/dn42ctl/node.toml`；与远程节点 token 使用同一套校验路径。
 
 ## 路由表
 
@@ -61,7 +61,7 @@ token hash 比对走恒定时间。self 节点的 token 由 `dn42ctl serve` 启�
 
 上表中的 peer / wg / show 路由全部接受可选的 **`?node_id=<uuid>` query 参数**，用于指定操作哪个受管节点的行。POST / PUT 也统一用 query 参数（FastAPI 支持 query 与 body model 并存），一条规则胜过"写操作放 body、删除放 query"。
 
-**省略时默认解析到 hub 的 self 节点（`managed_nodes.is_self = 1`），而不是 `config.toml` 的 `node_id`。** 这两个 UUID 互不校验，一旦分叉，admin 写入的 peer 会落在 desired state 读不到的分区里，且没有任何报错。默认对齐到 self 消除了这条静默失败路径；`/api/show/all` 额外返回 `self_node_id` / `config_node_id` / `node_id_mismatch` 供前端告警。详见 [`node_addressing.md`](node_addressing.md) §9。
+**省略时默认解析到 hub 的 self 节点，即 `managed_nodes.is_self = 1` 那一行；`config.toml` 的 `node_id` 仅用于比对告警。** 这两个 UUID 互不校验，一旦分叉，admin 写入的 peer 会落在 desired state 读不到的分区里，且没有任何报错。默认对齐到 self 消除了这条静默失败路径；`/api/show/all` 额外返回 `self_node_id` / `config_node_id` / `node_id_mismatch` 供前端告警。详见 [`node_addressing.md`](node_addressing.md) §9。
 
 **显式传入的 `node_id` 必须是已注册的受管节点**，否则返回 400。不校验的话，`open_db_and_ensure_node` 会为这个 id 凭空建出一行 `nodes` 并把 peer 写进去，而 `managed_nodes` 里没有对应行：没有 agent 会来拉取它，`GET /api/admin/nodes` 与 `dn42ctl node list` 都读 `managed_nodes` 因而看不见它，`nodes` 那一行更是没有任何代码路径能删掉。节点侧的 `GET /desired` 与 WS 握手一直在用 `require_managed_node_exists`，管理侧用的是同一个校验。
 
@@ -74,14 +74,14 @@ token hash 比对走恒定时间。self 节点的 token 由 `dn42ctl serve` 启�
 | 方法 | 路径 | 对应 CLI | 说明 |
 |------|------|---------|------|
 | `GET` | `/api/v1/nodes/{node_id}/desired` | `node pull` | 返回该节点的 desired state JSON |
-| `POST` | `/api/v1/nodes/{node_id}/proposals` | `node push` / `node scan` | 推送配置提案，依 `write_policy` 进队或自动走校验 |
+| `POST` | `/api/v1/nodes/{node_id}/proposals` | `node push` / `node scan` | 推送配置提案，依 `write_policy` 进队或自动进入校验 |
 | `POST` | `/api/v1/nodes/{node_id}/reports` | `node report` | 上报 apply 结果 / scan 结果 / live status / error |
 | `GET` | `/api/v1/nodes/{node_id}/status` | `node status` | 中心视角看到的该节点最近 revision / last_seen 等 |
 | `WS` | `/api/v1/nodes/{node_id}/ws` | `node agent` | 常驻 agent 的全双工同步通道 |
 
 desired state JSON schema 详见 `docs/architecture/sync_hub_spoke.md`。
 
-上面 4 条 HTTP 路由服务于**一次性 CLI 命令**（人工排障）；常驻 `dn42ctl node agent` 走 WebSocket。两条通道共用同一套 token 与同一套 service 层，语义等价。
+上面 4 条 HTTP 路由服务于**一次性 CLI 命令**（人工排障）；常驻 `dn42ctl node agent` 使用 WebSocket。两条通道共用同一套 token 与同一套 service 层，语义等价。
 
 ### WebSocket 通道
 
@@ -103,7 +103,7 @@ desired state JSON schema 详见 `docs/architecture/sync_hub_spoke.md`。
 | `POST` | `/api/admin/nodes/{node_id}/token` | `node token rotate` | 重签 node token，返回明文一次；对 self 节点另带 `self_node_toml_updated` / `self_node_toml_error` |
 | `PATCH` | `/api/admin/nodes/{node_id}/policy` | `node policy set` | 修改 `write_policy` JSON |
 | `GET` | `/api/admin/nodes/{node_id}/proposals` | `node proposals` | 列出该节点的提案 |
-| `POST` | `/api/admin/proposals/{proposal_id}/accept` | `node accept-proposal` | 接受提案，走 service 校验 |
+| `POST` | `/api/admin/proposals/{proposal_id}/accept` | `node accept-proposal` | 接受提案，经由 service 校验 |
 | `POST` | `/api/admin/proposals/{proposal_id}/reject` | `node reject-proposal` | 拒绝提案 |
 | `GET` | `/api/admin/nodes/{node_id}/reports` | `node reports` | 列出该节点的上报 |
 | `POST` | `/api/admin/reports/{report_id}/import` | `node import-report` | 从 scan_result 导入 peer |
@@ -125,7 +125,7 @@ desired state JSON schema 详见 `docs/architecture/sync_hub_spoke.md`。
 
 #### `/api/admin/db/*`
 
-只读。表名走白名单，未命中 404；私钥与 token hash 一律脱敏。端点形状、白名单与脱敏规则详见 [`db_browse.md`](db_browse.md)。**不提供通用行编辑端点**——权威写入必须走 service 层，否则会绕过"变更通知与业务写入同事务发射"的不变量。
+只读。表名取自白名单，未命中 404；私钥与 token hash 一律脱敏。端点形状、白名单与脱敏规则详见 [`db_browse.md`](db_browse.md)。**不提供通用行编辑端点**——权威写入必须经由 service 层，否则会绕过"变更通知与业务写入同事务发射"的不变量。
 
 ### 公共路由（无 bearer / peer-session bearer）
 

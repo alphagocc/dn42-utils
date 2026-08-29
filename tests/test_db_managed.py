@@ -116,7 +116,7 @@ class TestUpsertSelf:
         assert store.get_self().node_id == NODE_SELF
 
     def test_demoted_row_survives_as_normal_node(self, store: ManagedNodeStore) -> None:
-        """降级而不是删除:旧分区里的 peer 全都还在,删掉等于丢配置。"""
+        """旧行降级保留:旧分区里的 peer 全都还在,删掉等于丢配置。"""
         store.upsert_self(NODE_A)
         store.upsert_self(NODE_SELF)
 
@@ -192,7 +192,7 @@ class TestTokens:
         assert hash_token("tok") != hash_token("tok ")
 
     def test_legacy_hash_never_verifies(self) -> None:
-        """迁移漏掉某行时必须认证失败,而不是抛异常把 401 变成 500。"""
+        """迁移漏掉某行时必须认证失败并返回 401,异常泄漏会把它变成 500。"""
         assert verify_token("$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQ$xxxx", "tok") is False
 
 

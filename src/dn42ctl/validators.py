@@ -43,7 +43,7 @@ def validate_asn(value: int) -> int:
 def validate_pubkey(value: str) -> str:
     """WireGuard X25519 公钥:标准 base64,解码后恰好 32 字节。
 
-    按解码长度而不是字符数校验。字符数放不出这个约束——42~46 个 base64 字符能塞进
+    按解码长度校验。字符数放不出这个约束——42~46 个 base64 字符能塞进
     31 到 33 字节,而 `wg` 对非 32 字节的 key 一律报 "Key is not the correct length
     or format"。
     """
@@ -208,7 +208,7 @@ def validate_endpoint_host(value: str) -> str:
 
 def split_endpoint(value: str) -> tuple[str, int]:
     """`host:port` / `[v6]:port` -> (host, port)。host 不含方括号。"""
-    # 走一遍 validate_endpoint,顺带继承端口范围与位数检查;裸 int() 会漏 ValueError。
+    # 复用 validate_endpoint,顺带继承端口范围与位数检查;裸 int() 会漏 ValueError。
     m = _ENDPOINT_RE.match(validate_endpoint(value))
     if m is None:  # pragma: no cover — validate_endpoint 已经用同一个正则匹配过
         raise ValidationError(f"Endpoint 格式错误: {value!r}")

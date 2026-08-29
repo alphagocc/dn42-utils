@@ -47,7 +47,7 @@
 
 1. **端口永不自动改写。** NAT 端口映射下，`endpoint` 的端口与对端 `listen_port` 本就合法地不一致。在一次无关的地址编辑里顺手"修正"它，会精确地弄坏最难排查的那类部署。
 2. **传播只写非空值。** 把 `own_ipv6` 置空不传播、不改任何行——`render_bird_ibgp_peer_conf` 对空 `peer_ip` 直接抛异常，会让对端节点的整个 apply 失败。
-3. **只碰 `ibgp_peers`。** `router_id` 不传播（只影响 A 自己的 `bird.conf`）；`local_lla` / `peer_lla` 是隧道链路本地地址，与公网地址无关；`bgp_peers` 是别的运营者的 ASN，永不涉及。
+3. **只碰 `ibgp_peers`。** `router_id` 不传播（只影响 A 自己的 `bird.conf`）；`local_lla` / `peer_lla` 是隧道链路本地地址，与公网地址无关；`bgp_peers` 是别的运营者的 ASN，始终保持原样。
 
 ### 无法推导、留给人工的情况
 
@@ -100,10 +100,10 @@ B→A 的端口其实可以从 A 侧反向行的 `listen_port` 推出。**不做
 
 1. **重写 `config.toml`** —— 读本地 `AppConfig`，合并下发的字段，**先比较，有差异才写**。常规路径根本不碰文件。
    > `save_config` 用 `tomli_w` 整体重写，**注释和未知键会丢**。这正是"比较优先"的理由。
-2. **重渲 `bird.conf`** —— 走与 peer 文件同一条原子写 + diff 管线，所以 `--dry-run` 看得到。
+2. **重渲 `bird.conf`** —— 使用与 peer 文件相同的原子写 + diff 管线，所以 `--dry-run` 看得到。
    > `include` 的 peers 目录与 babel 路径取自**解析后的路径**（desired-state `paths` + `node.toml [apply]` 覆盖），不是 `config.toml` 里的值——peer 文件正是按前者写出去的，用后者会让 bird 去 include 一个空目录。
 3. **重写 `dn42-dummy.netdev` / `.network`** —— 同样作为普通文件条目进列表。**不调用 `ensure_dummy_interface`**：它自己 shell out 到 `networkctl`/`nmcli`，会绕过 diff/dry-run 机制。生效交给 reload 步骤。
-   > **仅当 `dummy_backend = "networkd"`。** 该接口由 NetworkManager 管理时，写 networkd 的 `.netdev`/`.network` 会造出一份与 NM 冲突的配置；而 apply 刻意不 shell out（`nmcli` 是 `ensure_dummy_interface` 的事）。此时跳过并告警，该节点需要本机跑一次 `dn42ctl genconf` 让新 `own_ipv6` 落地。`config.toml` 与 `bird.conf` 仍照常更新。
+   > **仅当 `dummy_backend = "networkd"`。** 该接口由 NetworkManager 管理时，写 networkd 的 `.netdev`/`.network` 会造出一份与 NM 冲突的配置；而 apply 刻意不 shell out（`nmcli` 是 `ensure_dummy_interface` 的事）。此时跳过并告警，该节点需要本机跑一次 `dn42ctl genconf` 让新 `own_ipv6` 生效。`config.toml` 与 `bird.conf` 仍照常更新。
 
 **本地 `config.toml` 缺失或损坏 → 记 warning 并跳过全部三步**，不伪造 `AppConfig`。纯 spoke 可能只跑过 `node init` 而从没有过 `config.toml`；而 `bird.conf` 还需要 `own_asn` / `ownnet_v6` / `ownnetset_v6` 这些不在下发范围内的 AS 级字段，缺了就渲染不出来（模板跑在 `StrictUndefined` 下）。
 
@@ -120,9 +120,9 @@ NULL 门控保证不会震荡：首次升级后 hub 采纳本机正在工作的�
 
 ## 8. reload
 
-在此之前 `node apply` 只落盘、从不 reload——改了地址会写进文件然后静静躺着不生效。
+在此之前 `node apply` 只写入文件、从不 reload——改了地址会写进文件然后静静躺着不生效。
 
-触发条件按**实际写入/删除的路径**判定，而不是"apply 跑过就 reload"：
+触发条件是本次 apply **实际写入或删除的路径**：
 
 | 条件 | 命令 |
 |---|---|
@@ -132,7 +132,7 @@ NULL 门控保证不会震荡：首次升级后 hub 采纳本机正在工作的�
 - **顺序固定**：先 `networkctl` 起接口，再 `birdc` 读到引用这些接口的 protocol。
 - 用 `birdc configure` 而非 `configure soft`——soft 不能正确加载新增的 protocol。
 - **什么都没变就一条都不跑。** 否则 agent 的 900 秒 reconcile 会让每个节点每天无谓地 `birdc configure` 96 次。
-- **best-effort，绝不抛异常。** 失败进 `ApplyResult.warnings` 并随 `apply_result` 上报。文件已经正确落盘的节点必须报 success-with-warnings，而不是对着 `/etc` 崩溃重试。
+- **best-effort，绝不抛异常。** 失败进 `ApplyResult.warnings` 并随 `apply_result` 上报。文件已经正确写入的节点必须报 success-with-warnings 并正常结束，避免对着 `/etc` 崩溃重试。
 
 退出开关（reload 是**节点本地决策**，hub 侧不设开关）：
 
@@ -141,7 +141,7 @@ NULL 门控保证不会震荡：首次升级后 hub 采纳本机正在工作的�
 
 > **不违反"禁止自动改路由表"约束**（见 [`../spec.md`](../spec.md)）。两条命令都只是让守护进程重读配置文件，不添加、不删除任何路由；`RouteTable=off` 仍然由 netdev 模板保证。
 
-sandbox 提示：`dn42ctl-node-agent.service` 有 `ProtectSystem=strict`，`/run` 仍可写，`networkctl`（AF_UNIX varlink）与 `birdc`（`/run/bird/bird.ctl`）应该都能用。个别发行版可能需要给 `ReadWritePaths` 加 `/run/bird`。best-effort 的设计正是为了让这种意外退化成一行日志而不是拖垮整个机群。
+sandbox 提示：`dn42ctl-node-agent.service` 有 `ProtectSystem=strict`，`/run` 仍可写，`networkctl`（AF_UNIX varlink）与 `birdc`（`/run/bird/bird.ctl`）应该都能用。个别发行版可能需要给 `ReadWritePaths` 加 `/run/bird`。best-effort 的设计正是为了让这种意外退化成一行日志，把影响限制在单个节点。
 
 ## 9. 两个 node_id 的分叉隐患
 
@@ -154,7 +154,7 @@ hub 上存在**两个互不校验的 UUID**：
 
 修法（不重新指向 `is_self`，那样反而可能孤立既有 peer 行）：
 
-1. **admin 路由的默认作用域解析到 `is_self` 行**，而不是 `config.node_id`。这直接消除了静默失败路径。
+1. **admin 路由的默认作用域解析到 `is_self` 行**，与 desired state 的读取来源统一。这直接消除了静默失败路径。
 2. `run_self_registration` 返回 `config_node_id_mismatch`，`serve` 启动时打醒目 warning。
 3. `/api/show/all` 暴露该标志，web Overview 页渲染警告横幅。
 4. 修复工具 `dn42ctl node adopt-self [--from <uuid>] [--dry-run]`：在一个事务里把 peer 行从失效分区重新挂到 self 节点，并对目标节点发一条 `desired`。目标分区非空时**拒绝执行**——那意味着已经有人在新分区下写过配置，合并策略只能由人来定，硬搬还会撞 `UNIQUE(node_id, ifname)`。

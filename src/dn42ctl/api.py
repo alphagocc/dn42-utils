@@ -154,7 +154,7 @@ def _resolve_target_node(node_id: str | None) -> str:
     """返回该 admin 请求应当操作的节点 id。
 
     显式传入的 `?node_id=` 优先，但必须是已注册的受管节点；未传时取 hub 的 self
-    节点（`managed_nodes.is_self=1`），而不是 `config.node_id`。
+    节点（`managed_nodes.is_self=1`）。
 
     这两个 id 的来源相互独立：`config.toml` 里的 `node_id` 由 `dn42ctl init` 写入，
     self 节点 id 则由 `serve_bootstrap` 生成并保存在 `/var/lib/dn42ctl/self_node_id`，

@@ -65,13 +65,13 @@
 
 | Scheme prefix | 实例 | 备注 |
 |---------------|------|------|
-| `ssh-ed25519` | `ssh-ed25519 AAAA...` | 走 `ssh-keygen -Y verify` |
+| `ssh-ed25519` | `ssh-ed25519 AAAA...` | 使用 `ssh-keygen -Y verify` |
 | `ssh-rsa` | `ssh-rsa AAAA...` | 同上 |
 | `ecdsa-sha2-nistp256` | `ecdsa-sha2-nistp256 AAAA...` | 同上 |
 | `ecdsa-sha2-nistp521` | `ecdsa-sha2-nistp521 AAAA...` | 同上 |
 | `sk-ssh-ed25519@openssh.com` | `sk-ssh-... AAAA...` | 同上（FIDO key） |
 | `sk-ecdsa-sha2-nistp256@openssh.com` | `sk-ecdsa-... AAAA...` | 同上 |
-| `pgp-fingerprint` | `pgp-fingerprint <40-hex>` | 走 gpg；读取 `data/key-cert/PGPKEY-<last8>` |
+| `pgp-fingerprint` | `pgp-fingerprint <40-hex>` | 使用 gpg；读取 `data/key-cert/PGPKEY-<last8>` |
 | `ed25519-pw` | `ed25519-pw <base64-hash>` | **当前不支持**；在 lookup 返回中标为 `unsupported`，无法选择 |
 
 `auth_index` 按出现顺序在 mntner 文件里递增（仅含**支持**的方案），并与 lookup 响应一致。
@@ -190,4 +190,4 @@ submit_proposal(
 - **subprocess 风险**：所有调用都禁用 stdin 解析用户控制字符，签名通过文件传入；不构造 shell 字符串，使用 list 形式调用。
 - **TOCTOU**：lookup -> challenge -> verify 期间 mntner 文件被替换的窗口存在但短（10 分钟挑战 TTL）；可以接受。
 - **PGP 密钥导入副作用**：每次 verify 用全新 `--homedir`，进程结束后清空，不会污染系统 keyring。
-- **没有 captcha**：任何 ASN 只要 mntner 私钥泄漏 / 持有就能提交 proposal，但 proposal 仍需运维 accept，没有自动落地写权限。
+- **没有 captcha**：任何 ASN 只要 mntner 私钥泄漏 / 持有就能提交 proposal，但 proposal 仍需运维 accept，没有自动写入权限。

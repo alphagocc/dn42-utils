@@ -135,7 +135,7 @@ hub 以非 root 的 `dn42ctl` 用户运行，而 `node.toml` 是 `0600 root:root
 
 ## 节点子命令（在 spoke 主机执行）
 
-> **稳态同步走 `dn42ctl node agent`**（常驻，WebSocket 长连接）。下面的 `pull` / `apply` / `once` / `push` / `report` / `status` 都是**一次性命令**，走 HTTP 路由，保留用于人工排障。两条通道共用同一套 token 与 service 层。
+> **稳态同步使用 `dn42ctl node agent`**（常驻，WebSocket 长连接）。下面的 `pull` / `apply` / `once` / `push` / `report` / `status` 都是**一次性命令**，使用 HTTP 路由，保留用于人工排障。两条通道共用同一套 token 与 service 层。
 
 ### `dn42ctl node agent [--node-config-path PATH]`
 

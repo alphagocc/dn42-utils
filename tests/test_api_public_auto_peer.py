@@ -68,7 +68,7 @@ def test_lookup_unknown_asn(client: TestClient) -> None:
 
 
 def test_lookup_rejects_out_of_range_asn(client: TestClient) -> None:
-    """超出 32 位的 AS 号在 pydantic 层就被挡掉,不会走到 registry 查询。"""
+    """超出 32 位的 AS 号在 pydantic 层就被挡掉,不会到达 registry 查询。"""
     r = client.post("/api/public/auto-peer/lookup", json={"asn": 9999999999})
     assert r.status_code == 422
 

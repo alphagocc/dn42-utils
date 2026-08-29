@@ -23,7 +23,7 @@ systemd/
 
 - **server 不碰系统配置**：`dn42ctl serve` 只读写权威 SQLite 与 self 的 `node.toml`。`/etc/bird` / `/etc/systemd/network` 等渲染目标由 `dn42ctl-node-agent.service` 处理。两者职责彻底分离，让 server unit 能用最严的 sandbox。
 - **server 只监听 loopback**：TLS / 对外暴露完全交给 nginx。dn42ctl 不接受 `--tls-cert` / `--tls-key`。
-- **self 节点不走 nginx**：`node.toml` 中 `server = "http://[::1]:4242"`，直连 uvicorn。
+- **self 节点绕过 nginx**：`node.toml` 中 `server = "http://[::1]:4242"`，直连 uvicorn。
 - **node-agent 自带重连退避**：不依赖 systemd 重试，因此 `StartLimitIntervalSec=0` 关掉 systemd 的熔断，让 `Restart=always` 永远生效。
 
 ## 安全姿态变化（从 timer 迁移到常驻 agent）

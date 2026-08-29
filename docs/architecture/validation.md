@@ -17,7 +17,7 @@ dn42ctl 对所有用户输入（CLI 参数、API 请求体、配置文件字段�
 
 ### 节点 payload 为什么需要单独一层
 
-`config_proposals.payload_json` 与 `node_reports.payload_json` 是**任意 JSON**，由持有 node token 的一方写入，中途没有任何 schema。接受提案与导入上报时，这些字段被强制转换后直接交给 service 层，而 service 层只校验 `listen_port` / `net_backend` / `allowed_ips`，其余字段原样落库。
+`config_proposals.payload_json` 与 `node_reports.payload_json` 是**任意 JSON**，由持有 node token 的一方写入，中途没有任何 schema。接受提案与导入上报时，这些字段被强制转换后直接交给 service 层，而 service 层只校验 `listen_port` / `net_backend` / `allowed_ips`，其余字段原样写入数据库。
 
 后果不局限于一条 peer：`bird.conf` 用 `include "<peers_dir>/*";` 加载全部 peer 文件，所以一条语法非法的 peer 会让该节点**整份 BIRD 配置**加载失败。
 

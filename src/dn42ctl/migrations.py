@@ -3,11 +3,11 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 
-# 迁移步骤要么是一段 SQL(走 executescript,必须幂等),要么是一个可调用对象。
+# 迁移步骤要么是一段 SQL(使用 executescript 执行,必须幂等),要么是一个可调用对象。
 #
-# ALTER TABLE ADD COLUMN **只能**走可调用分支:SQLite 没有 ADD COLUMN IF NOT EXISTS,
+# ALTER TABLE ADD COLUMN **只能**使用可调用分支:SQLite 没有 ADD COLUMN IF NOT EXISTS,
 # 而 executescript 会在执行前隐式 COMMIT —— 脚本中途失败会留下"前几列已提交、版本号
-# 没写、rollback() 对它们无效"的状态,重跑直接 duplicate column,库永久卡死。
+# 没写入、rollback() 也对它们无效"的状态,重新运行会有 duplicate column,导致库永久卡死。
 # 可调用分支跑在连接的隐式事务里,与 schema_migrations 插入真正原子。
 MigrationStep = str | Callable[[sqlite3.Connection], None]
 

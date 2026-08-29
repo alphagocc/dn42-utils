@@ -6,7 +6,7 @@
 |------|------|
 | 中心主机（hub） | 运行 `dn42ctl serve`，持有权威 SQLite，是**唯一** source of truth |
 | 远程节点（spoke） | 常驻 `dn42ctl node agent`，通过 WebSocket 长连接接收中心推送并应用配置 |
-| self 节点 | 中心主机本身**也作为被管节点**之一，与远程节点同走一套协议，仅 server URL 不同（`http://[::1]:4242`）|
+| self 节点 | 中心主机本身**也作为被管节点**之一，与远程节点使用同一套协议，仅 server URL 不同（`http://[::1]:4242`）|
 
 ## 总体拓扑
 
@@ -48,7 +48,7 @@ dn42ctl 自身**不处理 TLS 证书**。`dn42ctl serve` 仅监听 `[::1]:4242`�
 ## 数据所有权
 
 - 中心 SQLite 是**唯一权威**。所有 `bgp_peers` / `ibgp_peers` 写入必须经过中心 service 层校验。
-- 节点不能直接修改权威表。节点的 push / scan 进入 `config_proposals` 队列，等待管理员审核（或在 `write_policy.peer_add=auto_accept` 下立即走中心 service 校验并写入）。
+- 节点不能直接修改权威表。节点的 push / scan 进入 `config_proposals` 队列，等待管理员审核（或在 `write_policy.peer_add=auto_accept` 下立即经由中心 service 校验并写入）。
 - 节点的 apply / live status / error 进入 `node_reports`，仅事实陈述，**永远不直接修改业务表**。导入 `scan_result` 转为 peer 行是显式动作（`dn42ctl node import-report`）。
 
 ## 私钥策略（模式 A：中心托管）
@@ -58,7 +58,7 @@ dn42ctl 自身**不处理 TLS 证书**。`dn42ctl serve` 仅监听 `[::1]:4242`�
 - 安全前提：
   - 中心 SQLite 文件 `0600`，备份加密。
   - 节点 token 泄露**仅**暴露该 node_id 的私钥（详见鉴权章节）。
-  - HTTPS 必须由 nginx 启用（self 节点走 loopback 不在此约束内）。
+  - HTTPS 必须由 nginx 启用（self 节点经由 loopback 不在此约束内）。
 - 模式 B（节点本地私钥）作为未来高安全部署选项，**不在首版范围**。
 
 ## 鉴权模型
@@ -184,7 +184,7 @@ node ──proposal_submit (WS) / POST /proposals (HTTP)──> server
         review                       auto_accept
           │                                │
           ▼                                ▼
-  插入 config_proposals          走 service 层校验
+  插入 config_proposals          经由 service 层校验
   (status=pending)               ├─ ok    → 写权威表 + proposal=accepted
                                  └─ fail  → proposal=rejected(reason)
 ```
@@ -193,7 +193,7 @@ node ──proposal_submit (WS) / POST /proposals (HTTP)──> server
 
 ```
 dn42ctl node proposals <id>
-dn42ctl node accept-proposal <pid>   # 走相同 service 校验
+dn42ctl node accept-proposal <pid>   # 经由相同的 service 校验
 dn42ctl node reject-proposal <pid> --reason "..."
 ```
 
@@ -228,7 +228,7 @@ agent 每次 apply 完成后自动上报 `apply_result`（payload 形状与 `dn4
 - **采用 level-triggered 语义**：节点连上时读取的是**当前**内容，事件仅触发一次重新检查；hub 用内容指纹与该连接已推送的指纹比对，相同则跳过推送。因此"事件与新连接竞态"不会丢更新，连接与 watcher 之间也无需游标协调。完整正确性论证见 `docs/architecture/sync_ws_protocol.md`。
 - **兜底**：agent 每 900 秒主动发一次 `desired_request{reason:"reconcile"}` 做全量对账，防止长时间断连或指纹逻辑出错导致的漂移。
 - 没有事件日志、CRDT、冲突合并：所有"冲突"都退化为中心 service 校验 + SQLite 约束。
-- **提案 payload 在进入 service 层之前逐字段过一遍 validators**（`services/peer_payload.py`）。payload 是节点写入的任意 JSON，而 service 层只校验 `listen_port` / `net_backend` / `allowed_ips`——只靠后者的话，ASN、WireGuard 公钥、IPv6 地址会原样落库并渲染进该节点的 `bird.conf`，而 `include "<peers_dir>/*";` 会让一条非法 peer 拖垮整份配置。详见 [`validation.md`](validation.md)。
+- **提案 payload 在进入 service 层之前逐字段过一遍 validators**（`services/peer_payload.py`）。payload 是节点写入的任意 JSON，而 service 层只校验 `listen_port` / `net_backend` / `allowed_ips`——只靠后者的话，ASN、WireGuard 公钥、IPv6 地址会原样写入数据库并渲染进该节点的 `bird.conf`，而 `include "<peers_dir>/*";` 会让一条非法 peer 拖垮整份配置。详见 [`validation.md`](validation.md)。
 - `peer_modify` / `peer_delete` **始终** review，不支持 auto_accept（避免节点被入侵后污染权威表）。
 - 节点重启 / 重装：拿回 token 后 `dn42ctl node init` → agent 启动即恢复完整状态。
 

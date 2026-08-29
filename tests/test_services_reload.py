@@ -107,7 +107,7 @@ class TestRunReloads:
         assert result.warnings == []
 
     def test_failure_becomes_warning_not_exception(self) -> None:
-        """常驻 agent 不能因为缺 birdc 就崩溃重启;文件已正确落盘,应报 success-with-warnings。"""
+        """常驻 agent 不能因为缺 birdc 就崩溃重启;文件已正确写入,应报 success-with-warnings。"""
 
         def failing(cmd: list[str]) -> ReloadAction:
             return ReloadAction(cmd=cmd, ok=False, error="command not found")

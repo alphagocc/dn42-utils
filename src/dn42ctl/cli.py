@@ -76,7 +76,7 @@ _ValidatedT = TypeVar("_ValidatedT")
 def _cli_validate(fn: Callable[..., _ValidatedT], *args: Any, **kwargs: Any) -> _ValidatedT:
     """把 validators 抛出的 ValidationError 转换成 typer.BadParameter。
 
-    返回类型与 fn 保持一致，而不是 Any。validator 在校验的同时会对输入做归一化
+    返回类型与 fn 保持一致。validator 在校验的同时会对输入做归一化
     （转小写、去掉首尾空白），因此调用方普遍会把返回值赋回原变量；若这里返回 Any，
     这类赋值会让变量退回声明时的类型（例如 str | None），此前由 None 检查得到的
     类型收窄随之失效，再把它传给只接受 str 的函数就会报类型错误。

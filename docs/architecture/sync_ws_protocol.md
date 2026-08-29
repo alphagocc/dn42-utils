@@ -59,10 +59,10 @@ WS 握手请求携带 `Authorization: Bearer <node token>`，与 HTTP 路由完�
 
 （浏览器的 `WebSocket` API 无法设置 header，但这不构成约束：admin Web UI 不使用本通道，见 `docs/architecture/web_ui.md`。）
 
-两个实现上必须避开的坑：
+两个实现上必须避开的问题：
 
 - **不要在 WS 路由上用 `Depends(_resolve_principal)`。** 它靠 duck-typing 能跑通（`HTTPBearer.__call__` 在此收到的是 `WebSocket` 类型），但失败时抛 `HTTPException`，Starlette 在 WebSocket 连接上渲染不出来。应当手工读 `websocket.headers.get("authorization")`。
-- **先 `accept()` 再 `close()`。** 按 ASGI 规范，在 `accept()` 之前 `close()` 会让握手直接回 HTTP 403，客户端只能看到一个 `InvalidStatus`，无从得知失败原因。正确顺序是 `accept()` → 鉴权 → 失败时先发 `error` 帧、再 `close(code)`。握手前窗口要加硬超时（`4408`），防止未鉴权连接占坑。
+- **先 `accept()` 再 `close()`。** 按 ASGI 规范，在 `accept()` 之前 `close()` 会让握手直接回 HTTP 403，客户端只能看到一个 `InvalidStatus`，无从得知失败原因。正确顺序是 `accept()` → 鉴权 → 失败时先发 `error` 帧、再 `close(code)`。握手前窗口要加硬超时（`4408`），防止未鉴权连接长期占用。
 
 **token 校验每连接只做一次。** `ManagedNodeStore.authenticate` 是对所有 enabled 节点线性扫描 + 逐行比对。握手时验一次，把结果 `Principal` 缓存到连接对象上，之后每一帧的鉴权纯粹读缓存，零 DB。
 

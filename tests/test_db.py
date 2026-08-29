@@ -40,10 +40,10 @@ class TestMigrations:
         assert [r[0] for r in rows] == [v for v, _ in MIGRATIONS]
 
     def test_migrate_reruns_on_partially_applied_db(self, mem_db: Database) -> None:
-        """v10 的列已存在但版本号缺失时,重跑不能因 duplicate column 而炸。
+        """v10 的列已存在但版本号缺失时,重新运行不能因 duplicate column 而失败。
 
-        这正是 ALTER TABLE 必须走 callable 分支的理由:executescript 会隐式提交,一旦
-        脚本中途失败就会留下"列已加、版本号没写"的状态,裸 ALTER 重跑会把库永久卡死。
+        这正是 ALTER TABLE 必须使用 callable 分支的理由:executescript 会隐式提交,一旦
+        脚本中途失败就会留下"列已加、版本号没写入"的状态,裸 ALTER 重新运行会把库永久卡死。
         """
         mem_db._conn.execute("DELETE FROM schema_migrations WHERE version=10")
         mem_db._conn.commit()

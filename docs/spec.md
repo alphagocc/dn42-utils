@@ -12,7 +12,7 @@
 - CLI 功能：`init`、`genconf`、`bgp peer [add|modify|del]`、`ibgp peer [add|modify|del]`、`show`、`scan`、`serve`、`node`、`system`、`deploy`。
 - 网络后端：peer WireGuard 配置仅支持 `systemd-networkd`；`dummy_backend` 仍支持 `networkd` 与 `nm`。
 - 强制约束：WireGuard 的 AllowedIPs **必须写入**，但**禁止自动修改路由表**。
-- 数据落库：所有状态写入 SQLite，便于多端/多节点集中管理；以 `node_id` 区分节点。
+- 数据持久化：所有状态写入 SQLite，便于多端/多节点集中管理；以 `node_id` 区分节点。
 - 多节点中心化同步：hub-spoke 架构；节点侧常驻 agent 通过 WebSocket 长连接接收中心推送。
 - 分层：CLI / Service / Render / DB 解耦，Service 层可被 REST API 直接复用。
 
