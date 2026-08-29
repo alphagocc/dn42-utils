@@ -12,11 +12,11 @@
 
 轮询模型有三个固有问题：
 
-- **收敛延迟最坏 10 分钟。** 管理员在 hub 上 `bgp peer add` 之后要等下一个 timer 周期。
+- **配置同步最长延迟可达 10 分钟。** 管理员在 hub 上 `bgp peer add` 之后要等下一个 timer 周期。
 - **稳态下绝大多数请求是空转。** 配置没变时每次 pull 仍要跑一次 `build_desired_state`（含一次 `config_revisions` 写入）+ 一次全表扫描鉴权。
 - **中心无法主动下发。** rollback、token 轮换、节点禁用都只能等节点自己回来问。
 
-WebSocket 长连接把收敛延迟降到 ≤1s，并消除稳态空转。
+WebSocket 长连接将配置同步延迟降低至 1 秒以内，并消除了系统处于稳定状态时的无效轮询。
 
 ## 传输通道划分
 
@@ -140,11 +140,11 @@ DISCONNECTED ──(启动时先用本地 cache 跑一次 apply)──► HANDSH
 - **STEADY**：三个并发任务：reader 分发入站消息、heartbeat 每 60s 发 `ping`、reconcile 每 900s 发 `desired_request{reason:"reconcile"}`。
 - **BACKOFF**：见下方退避策略。
 
-### 开机收敛保证
+### 开机配置同步保证
 
 删掉 `node-once.timer` 的同时也删掉了它的 `OnBootSec=2min`。如果 spoke 重启时 hub 恰好不可达，就再没有任何东西会去渲染 `/etc/bird`。
 
-因此 **agent 必须在尝试第一次连接之前，先从本地缓存跑一次 `apply()`**（best-effort，失败只记日志）。这是"无 timer 兜底"这个设计能够成立的前提。
+因此 **agent 必须在尝试第一次连接之前，先从本地缓存执行一次 `apply()`**（尽力而为，失败只记日志）。这是"无 timer 兜底"这个设计能够成立的前提。
 
 ### 退避策略
 

@@ -4,7 +4,7 @@
 
 | 角色 | 说明 |
 |------|------|
-| 中心主机（hub） | 运行 `dn42ctl serve`，持有权威 SQLite，是**唯一** source of truth |
+| 中心主机（hub） | 运行 `dn42ctl serve`，持有权威 SQLite，是**唯一真实数据源** (source of truth) |
 | 远程节点（spoke） | 常驻 `dn42ctl node agent`，通过 WebSocket 长连接接收中心推送并应用配置 |
 | self 节点 | 中心主机本身**也作为被管节点**之一，与远程节点使用同一套协议，仅 server URL 不同（`http://[::1]:4242`）|
 
@@ -224,9 +224,9 @@ agent 每次 apply 完成后自动上报 `apply_result`（payload 形状与 `dn4
 
 ## 同步语义
 
-- 中心是 source of truth；节点向中心收敛。
-- **推送式收敛**：权威表变更时 DB 层在同一事务内写一条 `sync_events`，server 的 watcher（默认 1 秒轮询）把它转成对应节点连接上的 `desired_push`。收敛延迟 ≤1 秒。
-- **采用 level-triggered 语义**：节点连上时读取的是**当前**内容，事件仅触发一次重新检查；hub 用内容指纹与该连接已推送的指纹比对，相同则跳过推送。因此"事件与新连接竞态"不会丢更新，连接与 watcher 之间也无需游标协调。完整正确性论证见 `docs/architecture/sync_ws_protocol.md`。
+- 中心是唯一真实数据源；节点状态自动与中心同步。
+- **推送式同步**：权威表变更时 DB 层在同一事务内写一条 `sync_events`，server 的 watcher（默认 1 秒轮询）把它转成对应节点连接上的 `desired_push`。配置下发延迟 ≤1 秒。
+- **采用状态触发 (level-triggered) 语义**：节点连上时读取的是**当前**内容，事件仅触发一次重新检查；hub 用内容指纹与该连接已推送的指纹比对，相同则跳过推送。因此"事件与新连接竞态"不会丢更新，连接与 watcher 之间也无需游标协调。完整正确性论证见 `docs/architecture/sync_ws_protocol.md`。
 - **兜底**：agent 每 900 秒主动发一次 `desired_request{reason:"reconcile"}` 做全量对账，防止长时间断连或指纹逻辑出错导致的漂移。
 - 没有事件日志、CRDT、冲突合并：所有"冲突"都退化为中心 service 校验 + SQLite 约束。
 - **提案 payload 在进入 service 层之前逐字段过一遍 validators**（`services/peer_payload.py`）。payload 是节点写入的任意 JSON，而 service 层只校验 `listen_port` / `net_backend` / `allowed_ips`——只靠后者的话，ASN、WireGuard 公钥、IPv6 地址会原样写入数据库并渲染进该节点的 `bird.conf`，而 `include "<peers_dir>/*";` 会让一条非法 peer 拖垮整份配置。详见 [`validation.md`](validation.md)。

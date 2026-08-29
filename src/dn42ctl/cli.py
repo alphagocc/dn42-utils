@@ -1672,7 +1672,7 @@ def cmd_node_once(
                         "update": sum(1 for d in apply_res.diffs if d.action == "update"),
                         "unchanged": sum(1 for d in apply_res.diffs if d.action == "unchanged"),
                         "delete": sum(1 for d in apply_res.diffs if d.action == "delete"),
-                        # reload 是 best-effort 的:失败不影响 ok,但中心要看得到。
+                        # reload 是尽力而为的:失败不影响 ok,但中心要看得到。
                         "reloads": [{"cmd": " ".join(a.cmd), "ok": a.ok} for a in apply_res.reloads],
                         "warnings": list(apply_res.warnings),
                     },

@@ -133,7 +133,7 @@ NULL 门控保证不会震荡：首次升级后 hub 采纳本机正在工作的�
 - **顺序固定**：先 `networkctl` 起接口，再 `birdc` 读到引用这些接口的 protocol。
 - 用 `birdc configure` 而非 `configure soft`——soft 不能正确加载新增的 protocol。
 - **什么都没变就一条都不跑。** 否则 agent 的 900 秒 reconcile 会让每个节点每天无谓地 `birdc configure` 96 次。
-- **best-effort，绝不抛异常。** 失败进 `ApplyResult.warnings` 并随 `apply_result` 上报。文件已经正确写入的节点必须报 success-with-warnings 并正常结束，避免对着 `/etc` 崩溃重试。
+- **尽力而为，绝不抛异常。** 失败进 `ApplyResult.warnings` 并随 `apply_result` 上报。文件已经正确写入的节点必须报 success-with-warnings 并正常结束，避免对着 `/etc` 崩溃重试。
 
 退出开关（reload 是**节点本地决策**，hub 侧不设开关）：
 
@@ -142,7 +142,9 @@ NULL 门控保证不会震荡：首次升级后 hub 采纳本机正在工作的�
 
 > **不违反"禁止自动改路由表"约束**（见 [`../spec.md`](../spec.md)）。两条命令都只是让守护进程重读配置文件，不添加、不删除任何路由；`RouteTable=off` 仍然由 netdev 模板保证。
 
-sandbox 提示：`dn42ctl-node-agent.service` 有 `ProtectSystem=strict`，`/run` 仍可写，`networkctl`（AF_UNIX varlink）与 `birdc`（`/run/bird/bird.ctl`）应该都能用。个别发行版可能需要给 `ReadWritePaths` 加 `/run/bird`。best-effort 的设计正是为了让这种意外退化成一行日志，把影响限制在单个节点。
+### Sandbox 约束
+
+sandbox 提示：`dn42ctl-node-agent.service` 有 `ProtectSystem=strict`，`/run` 仍可写，`networkctl`（AF_UNIX varlink）与 `birdc`（`/run/bird/bird.ctl`）应该都能用。个别发行版可能需要给 `ReadWritePaths` 加 `/run/bird`。"尽力而为" 的设计正是为了让这种意外退化成一行日志，把影响限制在单个节点。
 
 ## 9. 两个 node_id 的分叉隐患
 

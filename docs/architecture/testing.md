@@ -108,7 +108,7 @@ Patch `generate_wg_keypair()` 返回固定密钥对，避免依赖系统 `wg` �
 - `subprocess.check_output`：用于 WireGuard、iproute2、Bird 等命令
 - `shutil.which`：用于命令探测（nmcli、systemctl、curl）
 - `urllib.request.urlopen`：用于 ROA 下载
-- `os.chmod` / `os.chown`：文件权限（best-effort 函数）
+- `os.chmod` / `os.chown`：文件权限（尽力而为执行）
 
 CI 环境不安装 wireguard-tools 等系统包。
 

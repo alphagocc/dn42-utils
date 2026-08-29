@@ -26,23 +26,21 @@ systemd/
 - **self 节点绕过 nginx**：`node.toml` 中 `server = "http://[::1]:4242"`，直连 uvicorn。
 - **node-agent 自带重连退避**：不依赖 systemd 重试，因此 `StartLimitIntervalSec=0` 关掉 systemd 的熔断，让 `Restart=always` 永远生效。
 
-## 安全姿态变化（从 timer 迁移到常驻 agent）
+## 常驻代理的安全特征
 
-原先的 `dn42ctl-node-once.timer` 每 10 分钟拉起一个约 1 秒的 root oneshot；现在是一个 7×24 的 root 常驻进程。这是一次**有意识的权衡**，必须明确认可：
+当前架构使用全天候运行的 root 权限常驻代理（`node-agent.service`）处理节点同步。该设计具备以下安全特征与风险控制策略。
 
-| | 之前（`node-once.timer`） | 之后（`node-agent.service`） |
-|---|---|---|
-| root 进程存活时间 | 每 10 分钟约 1 秒 | **7×24 常驻** |
-| hub→spoke 写入延迟 | ≤10 分钟，**spoke 发起** | ≤1 秒，**hub 发起** |
-| root 内存中常驻的秘密 | 瞬时 | node token + **全部 WG 私钥**，永久 |
-| hub 被攻陷的爆炸半径 | 延迟、有界的配置写入 | 每个 spoke 上近乎即时的 root 级配置写入，随时可用 |
-| 失败模式 | timer 下一轮重试 | `Restart=always` 崩溃循环触碰 `/etc`（由 `RestartSec=5s` 限速） |
+**生命周期与数据驻留**
+常驻进程维持持久连接，节点的 API 访问凭证与全部 WireGuard 私钥在服务运行期间持续驻留于内存。
 
-净效果是纵深防御的实质性降低，换取亚秒级收敛。配套缓解：
+**推送机制与影响范围**
+配置同步采用中心节点主动推送模式，同步延迟在 1 秒以内。该机制要求极高的中心侧安全保障：若中心节点沦陷，攻击者能够近乎实时地在各关联节点触发 root 级别的配置修改。
 
-- agent unit 的 sandbox 比原 `node-once.service` **更严**（见下）。
-- hub 仍是唯一权威，节点无法直接改权威表。
-- **后备指令**：`systemctl stop dn42ctl-node-agent` 之后仍可手动 `dn42ctl node once` / `pull` / `apply`（HTTP 路由保留）。
+**异常状态控制**
+服务崩溃后的恢复依赖 systemd 的 `Restart=always` 策略。为防止异常死循环引发对系统配置目录（`/etc`）的高频覆写，通过 `RestartSec=5s` 参数实施速率限制。
+
+**配套缓解措施**
+针对常驻高权限进程的风险，系统对 agent 服务配置了严格的系统级沙盒隔离。同时，中心节点始终保持唯一真实数据源的地位，节点无权修改权威数据表，确保单向信任边界。在需要隔离常驻进程的排查场景下，可以停止该服务，系统保留的 HTTP 路由依然支持通过手动命令完成状态拉取与配置应用。
 
 ## systemd unit 说明
 
@@ -72,7 +70,7 @@ systemd/
 
   没有它 agent 也能工作（退避重连会兜住），只是开机日志会干净一些。
 
-### 开机收敛
+### 开机配置同步保证
 
 原 timer 的 `OnBootSec=2min` 随之删除。作为补偿，agent 在尝试第一次连接之前会先用本地缓存（`/var/lib/dn42ctl/node-cache.sqlite3`）跑一次 `apply()`，因此即使 spoke 重启时 hub 不可达，`/etc/bird` 仍会被渲染。该设计的完整论证见 `docs/architecture/sync_ws_protocol.md`。
 
@@ -185,7 +183,7 @@ sudo systemctl restart dn42ctl-server            # 跑 migration + 起 watcher
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-`dn42ctl node once` / `pull` / `push` / `report` / `status` 这些一次性命令**保留可用**，用于人工排障。
+`dn42ctl node once` / `pull` / `push` / `report` / `status` 这些一次性命令**保留可用**，用于故障排查。
 
 ## 升级到 migration v11：全部 node token 必须重签
 

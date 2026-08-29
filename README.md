@@ -1,15 +1,15 @@
 # dn42ctl
 
-`dn42ctl` 是一个用于生成/维护 DN42 相关配置的 Python CLI 工具，支持多节点中心化管理。
+dn42ctl 是一个用于生成和维护 DN42 相关配置的 Python CLI 工具，支持多节点中心化管理。
 
 核心特性：
 
-- 业务逻辑与 CLI 解耦（Service 层可复用，REST API + Web UI 可选启用）。
-- 同时支持 `systemd-networkd`（peer WireGuard 配置）与 `NetworkManager`（dummy 接口）两种网络后端。
-- **强制约束**：WireGuard 的 `AllowedIPs` 必须写入，但工具 **禁止自动修改路由表**。
-- 所有状态写入 SQLite；用 `node_id` 区分节点，便于多节点集中管理。
-- **Hub-Spoke 多节点同步**：中心节点运行 `dn42ctl serve`，远程节点由常驻 agent 通过 WebSocket 长连接接收推送并自动应用配置。
-- **Auto-peer**：公共 Web 向导，持有合法 dn42 ASN 的用户可通过 SSH/PGP 签名验证身份后提交 peering 请求。
+- 业务逻辑与 CLI 解耦。提供独立的服务层，并支持可选的 REST API 和 Web UI。
+- 支持两种系统网络后端：使用 systemd-networkd 管理 WireGuard 对等节点，使用 NetworkManager 管理虚拟接口 (dummy)。
+- 核心约束：工具仅写入 WireGuard 的 AllowedIPs 配置，严禁自动修改系统路由表。
+- 使用 SQLite 存储状态。基于节点标识 (node_id) 区分状态，实现多节点集中管理。
+- 多节点同步：基于 Hub-Spoke 架构。中心节点运行 API 服务，远程节点通过 WebSocket 保持长连接，实时接收并应用配置推送。
+- 自动建立对等连接 (Auto-peer)：提供 Web 引导流程。持有合法 DN42 ASN 的用户在通过 SSH 或 PGP 签名验证身份后，可直接提交对等连接请求。
 
 > 详细规格见 `docs/spec.md`。
 

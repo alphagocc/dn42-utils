@@ -156,7 +156,7 @@ Tab 切换使用 React `useState`，刷新按钮递增 `refreshKey` 强制组件
 # 安装依赖
 cd web && pnpm install
 
-# 开发模式 (自动代理 /api/* 到 [::1]:4242)
+# 开发模式：自动代理 /api/* 到 [::1]:4242
 pnpm dev
 
 # 构建

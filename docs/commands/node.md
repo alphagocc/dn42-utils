@@ -143,7 +143,7 @@ hub 以非 root 的 `dn42ctl` 用户运行，而 `node.toml` 是 `0600 root:root
 
 行为：
 
-1. **启动时先用本地缓存跑一次 `apply()`**（best-effort），然后才尝试连接。这补回了删除 `node-once.timer` 时一并失去的开机收敛保证：hub 不可达时 `/etc/bird` 仍会被渲染。
+1. **启动时先用本地缓存执行一次 `apply()`**（尽力而为），然后才尝试连接。这弥补了删除 `node-once.timer` 时一同失去的开机配置同步保证：即使中心节点不可达，`/etc/bird` 依然能够基于本地缓存进行渲染。
 2. 连接 → 握手鉴权 → 发 `hello{cached_revision}` → 中心按需推送 desired。
 3. 稳态下三个并发任务：收消息、每 60 秒发心跳、每 900 秒发一次全量对账请求。
 4. 收到 `desired_push` 后：写缓存 → `apply()` → 上报 `apply_result`（payload 形状与 `node once` 完全一致）。apply 失败上报 `error` 并继续，不断连接。
@@ -175,8 +175,8 @@ server  = "https://center.example"
 node_id = "<id>"
 token   = "<token>"
 
-# [apply] / [cache] 段使用 paths.py 的默认值,可手工补充覆盖
-# [apply] 除路径覆盖外还认一个 reload = "auto" | "never"(默认 auto)
+# [apply] 与 [cache] 段使用 paths.py 的默认值，可手动覆盖
+# [apply] 段除路径覆盖外还支持 reload = "auto" 或 "never"（默认 auto）
 ```
 
 - self 节点**不需要**手工 `init`，`dn42ctl serve` 启动时已经自动写好（`server = "http://[::1]:4242"`）。
@@ -229,11 +229,11 @@ token   = "<token>"
 
 ### `dn42ctl node once`
 
-= `pull && apply && report (apply_result)`。**一次性排障命令**。
+= `pull && apply && report (apply_result)`。**一次性故障排查命令**。
 
-- 稳态同步由常驻 `dn42ctl node agent` 负责；本命令不再由任何 systemd timer 驱动（`dn42ctl-node-once.timer` 已删除）。
-- 适用场景：agent 被 `systemctl stop` 之后的手工收敛、验证 HTTP 通道是否可达、排查 agent 与手动 apply 结果是否一致。
-- 任一步失败：整个命令以非零退出；失败时尽量上报 `kind=error` 的 report（best-effort）。
+- 状态同步由常驻 `dn42ctl node agent` 负责；本命令不再由任何 systemd timer 驱动（`dn42ctl-node-once.timer` 已删除）。
+- 适用场景：agent 被 `systemctl stop` 之后的手动配置同步、验证 HTTP 通道是否可达、排查 agent 与手动 apply 结果是否一致。
+- 任一步失败：整个命令以非零状态退出；失败时尝试上报 `kind=error` 的状态报告（尽力而为）。
 - 不做指数退避（一次性命令，重试交给调用者）。
 - `--no-report` 关闭自动 apply_result 上报。
 - 与 agent 同时运行不会冲突：两者共用同一份缓存与同一套幂等的 `apply()`。

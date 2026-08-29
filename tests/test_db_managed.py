@@ -198,9 +198,10 @@ class TestTokens:
 
 class TestMigrationV12:
     def test_keeps_only_the_most_recent_self(self, tmp_path: Path) -> None:
-        """存量库里可能已经有两行 is_self=1,迁移必须收敛到一行且不删数据。
+        """1.2 -> 1.3 的中间态(v12 刚跑完、v13 的索引还没建)。
+        库里可能已经有两行 is_self=1,迁移必须合并为一行且不删数据。
 
-        按真实升级顺序构造:重复行先存在,v12 收敛,v13 的唯一索引最后建。
+        按真实升级顺序构造:重复行先存在,v12 合并,v13 的唯一索引最后建。
         """
         db_path = tmp_path / "multiself.sqlite3"
         db = Database.open(db_path)
@@ -231,7 +232,7 @@ class TestMigrationV12:
 
 class TestMigrationV13:
     def test_schema_rejects_a_second_self(self, mem_db: Database) -> None:
-        """应用路径之外还得有一道:直接写 SQL 也不能造出两个 self。"""
+        """应用逻辑之外还得有一道:直接写 SQL 也不能造出两个 self。"""
         store = ManagedNodeStore(mem_db.connection)
         store.upsert_self(NODE_SELF)
         store.add(NODE_A, "alpha")
