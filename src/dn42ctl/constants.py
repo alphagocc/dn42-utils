@@ -6,9 +6,8 @@ MAX_ASN = 4294967295
 # WireGuard 的 X25519 公私钥都是 32 字节,base64 后 44 字符。
 WG_KEY_BYTES = 32
 FILE_MODE_PRIVATE = 0o600
-FILE_MODE_NETDEV = 0o640
-# bird.conf 权限为 0600 root 会让 birdc configure 失败。
-FILE_MODE_BIRD = 0o644
+# 生成文件的权限与属组集中在 dn42ctl/file_policy.py,不在这里逐个开常量:
+# 分散声明正是 .netdev/.network 三处写法分叉的成因。
 BABEL_DEFAULT_RXCOST = 20
 BABEL_DEFAULT_TYPE = "tunnel"
 BABEL_VALID_TYPES = ("wired", "wireless", "tunnel")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import errno
 import json
 import sqlite3
@@ -9,9 +10,11 @@ from typing import Any
 
 import pytest
 
+from dn42ctl import file_policy
+from dn42ctl.config import load_config
 from dn42ctl.node_config import NodeConfig
 from dn42ctl.services import node_apply
-from dn42ctl.services.core import Dn42CtlError
+from dn42ctl.services.core import Dn42CtlError, write_bird_bgp_peer, write_net_backend_files
 from dn42ctl.services.node_apply import ApplyResult, apply, apply_diff_text, apply_summary
 
 NODE_ID = "node-1"
@@ -348,6 +351,113 @@ class TestFileModes:
         assert "PRIV" in netdev.read_text()
         assert netdev.stat().st_mode & 0o007 == 0
         assert config_path.stat().st_mode & 0o077 == 0
+
+    def test_networkd_files_are_readable_by_the_networkd_user(self, tmp_path: Path) -> None:
+        """systemd-networkd 以 systemd-network 用户运行,读不到 root 独占的文件。
+
+        它读不到时不会报错退出,而是逐个文件记一行 Permission denied 继续跑,接口
+        因此建起来却拿不到地址,BGP 与 Babel 全部失去承载。
+        """
+        cfg = _cfg(tmp_path)
+        payload = _make_payload(tmp_path, bgp=[_bgp_peer()], ibgp=[_ibgp_peer()])
+        payload["node"] = {"own_ipv6": "fd42:4242:1234::9", "router_id": "172.23.0.9"}
+        _seed_cache(cfg.cache_db_path, payload)
+        _apply(cfg, tmp_path)
+
+        networkd_dir = Path(_paths(tmp_path)["networkd_dir"])
+        for name in ("dn42_1234.network", "wg_alpha.network", "dn42-dummy.network"):
+            assert (networkd_dir / name).stat().st_mode & 0o004 == 0o004, name
+        # netdev 含私钥,networkd 靠属组读它,所以是组可读而非全局可读。
+        for name in ("dn42_1234.netdev", "wg_alpha.netdev", "dn42-dummy.netdev"):
+            assert (networkd_dir / name).stat().st_mode & 0o777 == 0o640, name
+
+    def test_netdev_policy_names_the_networkd_group(self) -> None:
+        """0640 本身不够:属组仍是 root 的话 networkd 依然读不到。"""
+        assert file_policy.NETDEV.group == "systemd-network"
+
+    def test_existing_extra_conf_gets_its_permissions_corrected(self, tmp_path: Path) -> None:
+        """extra.conf 只在缺失时进入写入列表,已存在的那份权限仍归工具管。
+
+        早先版本按 0600 创建过它,bird 打不开被 include 的文件会拒绝加载整份配置,
+        而它的内容归运维,不能靠重写文件顺带修好权限。
+        """
+        cfg = _cfg(tmp_path)
+        _seed_cache(cfg.cache_db_path, _make_payload(tmp_path, bgp=[_bgp_peer()]))
+        extra = Path(_paths(tmp_path)["bird_extra_conf_path"])
+        extra.parent.mkdir(parents=True, exist_ok=True)
+        extra.write_text("protocol static custom { ipv6; }\n")
+        extra.chmod(0o600)
+
+        _apply(cfg, tmp_path)
+
+        assert extra.stat().st_mode & 0o777 == 0o644
+        assert extra.read_text() == "protocol static custom { ipv6; }\n"
+
+    def test_dry_run_touches_no_permissions(self, tmp_path: Path) -> None:
+        cfg = _cfg(tmp_path)
+        _seed_cache(cfg.cache_db_path, _make_payload(tmp_path, bgp=[_bgp_peer()]))
+        extra = Path(_paths(tmp_path)["bird_extra_conf_path"])
+        extra.parent.mkdir(parents=True, exist_ok=True)
+        extra.write_text("protocol static custom { ipv6; }\n")
+        extra.chmod(0o600)
+
+        _apply(cfg, tmp_path, dry_run=True)
+
+        assert extra.stat().st_mode & 0o777 == 0o600
+
+
+class TestWritersAgree:
+    """genconf 与 agent 写同一个文件时权限必须一致。
+
+    两者曾各自声明过一份:agent 把 `.network` 写成 0600,networkd 重启后所有 wg 接口
+    失去地址。权限现在只在 `dn42ctl/file_policy.py` 声明一次,这里守住它不再分叉。
+    """
+
+    def _genconf_networkd_dir(self, tmp_path: Path, config_path: Path) -> Path:
+        out = tmp_path / "genconf-networkd"
+        peer = _bgp_peer()
+        write_net_backend_files(
+            config=dataclasses.replace(load_config(config_path), networkd_dir=str(out)),
+            node_id=NODE_ID,
+            backend="networkd",
+            ifname=peer["ifname"],
+            private_key=peer["wg_private_key"],
+            listen_port=peer["listen_port"],
+            peer_public_key=peer["peer_public_key"],
+            endpoint=peer["endpoint"],
+            allowed_ips=peer["allowed_ips"],
+            local_lla=peer["local_lla"],
+            peer_lla=peer["peer_lla"],
+            generated=[],
+        )
+        return out
+
+    def _genconf_peers_dir(self, tmp_path: Path, config_path: Path) -> Path:
+        out = tmp_path / "genconf-peers"
+        peer = _bgp_peer()
+        write_bird_bgp_peer(
+            config=dataclasses.replace(load_config(config_path), bird_peers_dir=str(out)),
+            ifname=peer["ifname"],
+            peer_lla=peer["peer_lla"],
+            peer_asn=peer["peer_asn"],
+            generated=[],
+        )
+        return out
+
+    def test_same_peer_files_get_the_same_modes(self, tmp_path: Path) -> None:
+        cfg = _cfg(tmp_path)
+        _seed_cache(cfg.cache_db_path, _make_payload(tmp_path, bgp=[_bgp_peer()]))
+        config_path = _local_config(tmp_path)
+        apply(node_config=cfg, config_path=config_path)
+
+        pairs = [
+            (Path(_paths(tmp_path)["networkd_dir"]), self._genconf_networkd_dir(tmp_path, config_path)),
+            (Path(_paths(tmp_path)["peers_dir"]), self._genconf_peers_dir(tmp_path, config_path)),
+        ]
+        for agent_dir, genconf_dir in pairs:
+            for genconf_file in sorted(genconf_dir.iterdir()):
+                agent_file = agent_dir / genconf_file.name
+                assert agent_file.stat().st_mode & 0o777 == genconf_file.stat().st_mode & 0o777, agent_file
 
 
 class TestAtomicWrite:

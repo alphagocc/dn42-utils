@@ -29,7 +29,7 @@ include "/etc/bird/extra.conf";
 
 旧版本写出的 `config.toml` 中没有这个键。读取配置时缺键按 `bird_peers_dir` 的上一级目录推导为其中的 `extra.conf`，因此升级 dn42ctl 之后无需重跑 `init`。
 
-锚点选择 peers 目录而非 `bird_conf`，是因为发行版编译内置的 bird 主配置位置在 `/etc/bird.conf`，按它的同级目录会推出 `/etc/extra.conf`——既不是用户期望的位置，也不在 agent 沙盒的可写范围内。锚点也没有固定成 `/etc/bird`，那样把配置指向可写目录的开发与测试环境就不自洽了。peers 目录同时满足这两点。主配置位于 `/etc/bird.conf` 的部署见 [`paths.md`](paths.md)。
+锚点选择 peers 目录而非 `bird_conf`，是因为发行版编译内置的 bird 主配置位置在 `/etc/bird.conf`，按它的同级目录会推出 `/etc/extra.conf`，该位置既不是用户期望的位置，也不在 agent 沙盒的可写范围内。锚点也没有固定成 `/etc/bird`，那样把配置指向可写目录的开发与测试环境就不自洽了。peers 目录同时满足这两点。主配置位于 `/etc/bird.conf` 的部署见 [`paths.md`](paths.md)。
 
 ## 生成规则
 
@@ -38,6 +38,14 @@ include "/etc/bird/extra.conf";
 占位文件的意义在于让 `include` 始终指向一个真实存在的文件。BIRD 对无匹配 `include` 的容忍程度取决于版本与实现细节，让 `bird.conf` 的可用性依赖这一行为并不可取；先写出空文件则任何版本都能启动。
 
 该文件不参与 `bird.conf` 与 `babel.conf` 的覆盖确认提问。那两个文件由工具完整拥有，重跑 `genconf` 时提示用户确认覆盖是必要的；`extra.conf` 的内容属于用户，永不覆盖是它的固有语义，多问一次没有意义。
+
+## 权限归工具
+
+内容与权限的归属不同。内容属于用户，权限由 bird 的读取需求决定：bird 以 `-u bird -g bird` 降权运行，打不开 `include` 指向的文件时整份配置加载失败，`bird -p` 因此在开机校验阶段就拒绝启动。
+
+`genconf` 与 `node apply` 每次都把该文件校正为 `0644`（`dn42ctl/file_policy.py` 的 `BIRD`），文件内容一个字节都不读也不写。仅在创建时套一次权限不够：`0.1` 早期版本按 `0600` 创建过它，那些文件不会因为后来改对了默认值而自行变好。`--dry-run` 不改权限。
+
+需要在 bird 配置里放置秘密时，`0600 root` 并不是可行的做法，bird 读不到它。
 
 ## 与多节点同步的关系
 

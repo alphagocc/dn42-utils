@@ -103,6 +103,30 @@ class TestGenconf:
 
         assert extra_path.read_text() == "protocol static custom { ipv6; }\n"
 
+    def test_extra_conf_permissions_are_corrected_in_place(self, tmp_path: Path) -> None:
+        """内容归用户,权限归工具:bird 打不开被 include 的文件就拒绝加载整份配置。"""
+        init_result, db_path = _init_node_helper(tmp_path)
+        extra_path = Path(init_result.config.bird_extra_conf_path)
+        extra_path.write_text("protocol static custom { ipv6; }\n")
+        extra_path.chmod(0o600)
+
+        roa_path = Path(init_result.config.bird_roa_v6_conf_path)
+        roa_path.write_text("# ROA placeholder\n")
+
+        with (
+            patch("dn42ctl.services.init_sys.ensure_dummy_interface", return_value=None),
+            patch("sys.platform", "linux"),
+        ):
+            genconf(
+                config=init_result.config,
+                db_path=db_path,
+                overwrite_bird_conf=True,
+                overwrite_babel_conf=True,
+            )
+
+        assert extra_path.stat().st_mode & 0o777 == 0o644
+        assert extra_path.read_text() == "protocol static custom { ipv6; }\n"
+
     def test_no_overwrite_raises(self, tmp_path: Path) -> None:
         bird_dir = tmp_path / "bird"
         bird_dir.mkdir(exist_ok=True)

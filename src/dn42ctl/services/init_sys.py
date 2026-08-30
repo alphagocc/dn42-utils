@@ -7,7 +7,7 @@ import urllib.request
 from pathlib import Path
 
 from dn42ctl.config import AppConfig, save_config
-from dn42ctl.constants import FILE_MODE_BIRD
+from dn42ctl.file_policy import BIRD, ensure_policy
 from dn42ctl.render import render_bird_extra_conf_placeholder, render_bird_ibgp_peer_conf, render_bird_main_conf
 from dn42ctl.services.core import (
     Dn42CtlError,
@@ -116,13 +116,16 @@ def genconf(
 
         if bird_conf_path.exists() and not overwrite_bird_conf:
             raise Dn42CtlError(f"Bird 主配置已存在且未允许覆盖: {bird_conf_path}")
-        write_text(bird_conf_path, bird_conf_text, mode=FILE_MODE_BIRD)
+        write_text(bird_conf_path, bird_conf_text, policy=BIRD)
 
         ensure_dir(bird_peers_dir)
 
         # 内容属于用户,只在缺失时补一份注释占位文件,已存在时连覆盖确认都不问。
+        # 权限仍归工具:bird 打不开被 include 的文件就拒绝加载整份配置。
         if not bird_extra_conf_path.exists():
-            write_text(bird_extra_conf_path, render_bird_extra_conf_placeholder(), mode=FILE_MODE_BIRD)
+            write_text(bird_extra_conf_path, render_bird_extra_conf_placeholder(), policy=BIRD)
+        else:
+            ensure_policy(bird_extra_conf_path, BIRD)
 
         if bird_babel_conf_path.exists() and not overwrite_babel_conf:
             raise Dn42CtlError(f"babel.conf 已存在且未允许覆盖: {bird_babel_conf_path}")
@@ -141,7 +144,7 @@ def genconf(
                     content = resp.read().decode("utf-8", errors="replace")
                 if not content.strip():
                     raise ValueError("empty ROA content")
-                write_text(bird_roa_v6_conf_path, content, mode=FILE_MODE_BIRD)
+                write_text(bird_roa_v6_conf_path, content, policy=BIRD)
             except (urllib.error.URLError, TimeoutError, ValueError) as exc:
                 warnings.append(f"ROA v6 下载失败: {exc}")
                 warnings.append(
@@ -150,7 +153,7 @@ def genconf(
                     f"请尽快手动获取: {DN42_ROA_V6_URL}"
                 )
                 placeholder = f"# dn42ctl: ROA v6 placeholder\n# 下载失败，请稍后手动获取: {DN42_ROA_V6_URL}\n"
-                write_text(bird_roa_v6_conf_path, placeholder, mode=FILE_MODE_BIRD)
+                write_text(bird_roa_v6_conf_path, placeholder, policy=BIRD)
 
         generated_peer_files: list[Path] = []
 
@@ -205,7 +208,7 @@ def genconf(
                         ifname=ifname,
                         peer_ip=peer_ip,
                     )
-                    write_text(bird_peer_path, bird_conf_text, mode=FILE_MODE_BIRD)
+                    write_text(bird_peer_path, bird_conf_text, policy=BIRD)
                     generated_peer_files.append(bird_peer_path)
                 else:
                     warnings.append(f"iBGP peer {peer_name!r}: peer_ip 为空，跳过 Bird conf 生成")

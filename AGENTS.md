@@ -47,6 +47,7 @@ Notes:
 - Add/change a CLI command: update `src/dn42ctl/cli.py` + implement logic in `src/dn42ctl/services/` (keep CLI thin).
 - Change persistent state: add a migration in `src/dn42ctl/migrations.py` (idempotent, versioned).
 - Change config outputs: update the corresponding renderer in `src/dn42ctl/render.py` and template(s) together.
+- Change a generated file's permissions or group: edit `src/dn42ctl/file_policy.py`. Never hardcode a mode at a write site — genconf, node apply and the dummy interface all write the same files, and declaring the mode three times is how `.network` ended up unreadable by systemd-networkd.
 - Auto-peer touches the registry parser: [`src/dn42ctl/services/registry.py`](src/dn42ctl/services/registry.py).
 
 ## Comment policy

@@ -30,13 +30,10 @@ from typing import Any
 
 from dn42ctl.config import AppConfig, ConfigError, dumps_config, load_config
 from dn42ctl.constants import (
-    FILE_MODE_BIRD,
-    FILE_MODE_NETDEV,
-    FILE_MODE_PRIVATE,
     NET_BACKEND_NETWORKD,
     RELOAD_POLICY_NEVER,
 )
-from dn42ctl.fs import chmod_best_effort
+from dn42ctl.file_policy import BIRD, NETDEV, NETWORK, PRIVATE, FilePolicy, apply_policy, ensure_policy
 from dn42ctl.node_config import NodeConfig
 from dn42ctl.paths import (
     DEFAULT_BIRD_BABEL_CONF_PATH,
@@ -123,7 +120,7 @@ def _resolve_paths(app_config: AppConfig | None, config_path: Path) -> ResolvedP
     return ResolvedPaths(config_path=config_path, **fields)
 
 
-def _write_in_place(path: Path, content: str, *, mode: int) -> None:
+def _write_in_place(path: Path, content: str, *, policy: FilePolicy) -> None:
     """Overwrite through the existing inode, for targets that cannot be replaced.
 
     `ReadWritePaths=` on a single file bind-mounts it over an otherwise read-only
@@ -144,34 +141,36 @@ def _write_in_place(path: Path, content: str, *, mode: int) -> None:
         os.fsync(fd)
     finally:
         os.close(fd)
-    chmod_best_effort(path, mode)
+    apply_policy(path, policy)
 
 
 # What mkstemp raises when the target's parent directory is read-only.
 _NO_TMPFILE_ERRNOS = frozenset({errno.EROFS, errno.EACCES, errno.EPERM})
 
 
-def _atomic_write(path: Path, content: str, *, mode: int) -> None:
+def _atomic_write(path: Path, content: str, *, policy: FilePolicy) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
     except OSError as exc:
         if exc.errno not in _NO_TMPFILE_ERRNOS or not path.exists():
             raise
-        _write_in_place(path, content, mode=mode)
+        _write_in_place(path, content, policy=policy)
         return
     tmp = Path(tmp_name)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
-        chmod_best_effort(tmp, mode)
+        # Permissions go on before the rename: the reader that picks up the new inode
+        # must never see it with mkstemp's 0600 root:root.
+        apply_policy(tmp, policy)
         try:
             os.replace(tmp, path)
         except OSError as exc:
             if exc.errno != errno.EBUSY or not path.exists():
                 raise
             tmp.unlink(missing_ok=True)
-            _write_in_place(path, content, mode=mode)
+            _write_in_place(path, content, policy=policy)
     except Exception:
         tmp.unlink(missing_ok=True)
         raise
@@ -195,17 +194,19 @@ def _diff(path: Path, new_content: str) -> ApplyDiff:
     return ApplyDiff(path=path, action="update", diff=diff)
 
 
-def _render_bgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths, node_id: str) -> list[tuple[Path, str, int]]:
-    """Return [(path, content, mode), ...] for this BGP peer."""
+def _render_bgp_peer_files(
+    peer: dict[str, Any], paths: ResolvedPaths, node_id: str
+) -> list[tuple[Path, str, FilePolicy]]:
+    """Return [(path, content, policy), ...] for this BGP peer."""
     ifname = peer["ifname"]
-    out: list[tuple[Path, str, int]] = []
+    out: list[tuple[Path, str, FilePolicy]] = []
 
     bird_path = paths.bird_peers_dir / f"{ifname}.conf"
     out.append(
         (
             bird_path,
             render_bird_bgp_peer_conf(ifname=ifname, peer_lla=peer["peer_lla"], peer_asn=int(peer["peer_asn"])),
-            FILE_MODE_BIRD,
+            BIRD,
         )
     )
 
@@ -220,7 +221,7 @@ def _render_bgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths, node_id: 
                 endpoint=peer.get("endpoint") or "",
                 allowed_ips=peer["allowed_ips"],
             ),
-            FILE_MODE_NETDEV,
+            NETDEV,
         )
     )
     out.append(
@@ -231,16 +232,18 @@ def _render_bgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths, node_id: 
                 local_lla=peer["local_lla"],
                 peer_lla=peer["peer_lla"],
             ),
-            FILE_MODE_PRIVATE,
+            NETWORK,
         )
     )
     return out
 
 
-def _render_ibgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths, node_id: str) -> list[tuple[Path, str, int]]:
+def _render_ibgp_peer_files(
+    peer: dict[str, Any], paths: ResolvedPaths, node_id: str
+) -> list[tuple[Path, str, FilePolicy]]:
     name = peer["name"]
     ifname = peer["ifname"]
-    out: list[tuple[Path, str, int]] = []
+    out: list[tuple[Path, str, FilePolicy]] = []
     # render_bird_ibgp_peer_conf raises when peer_ip is empty. Skip just this one file
     # rather than failing the entire apply; genconf handles it the same way.
     if peer.get("peer_ip"):
@@ -248,7 +251,7 @@ def _render_ibgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths, node_id:
             (
                 paths.bird_peers_dir / f"ibgp_{name}.conf",
                 render_bird_ibgp_peer_conf(name=name, ifname=ifname, peer_ip=peer["peer_ip"]),
-                FILE_MODE_BIRD,
+                BIRD,
             )
         )
     if not peer["has_wg"]:
@@ -264,7 +267,7 @@ def _render_ibgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths, node_id:
                 endpoint=peer.get("endpoint") or "",
                 allowed_ips=peer["allowed_ips"],
             ),
-            FILE_MODE_NETDEV,
+            NETDEV,
         )
     )
     out.append(
@@ -275,7 +278,7 @@ def _render_ibgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths, node_id:
                 local_lla=peer["local_lla"],
                 peer_lla=peer.get("peer_lla") or "",
             ),
-            FILE_MODE_PRIVATE,
+            NETWORK,
         )
     )
     return out
@@ -285,7 +288,7 @@ def _render_node_config_files(
     node_block: dict[str, Any],
     paths: ResolvedPaths,
     app_config: AppConfig | None,
-) -> tuple[list[tuple[Path, str, int]], list[str]]:
+) -> tuple[list[tuple[Path, str, FilePolicy]], list[str]]:
     """Turn the hub-pushed node addresses into config.toml / bird.conf / dn42-dummy.*.
 
     Without a local config.toml all three steps are skipped and a warning is recorded;
@@ -293,7 +296,7 @@ def _render_node_config_files(
     ownnet_v6 / ownnetset_v6, which are outside what the hub pushes, and without them
     the template cannot render at all since it runs under StrictUndefined.
     """
-    files: list[tuple[Path, str, int]] = []
+    files: list[tuple[Path, str, FilePolicy]] = []
     warnings: list[str] = []
 
     if app_config is None:
@@ -313,7 +316,7 @@ def _render_node_config_files(
     # file through tomli_w, losing comments and unknown keys, so the normal path must
     # not touch this file at all.
     if merged != app_config:
-        files.append((paths.config_path, dumps_config(merged), FILE_MODE_PRIVATE))
+        files.append((paths.config_path, dumps_config(merged), PRIVATE))
 
     files.append(
         (
@@ -334,7 +337,7 @@ def _render_node_config_files(
                 # The ROA file is not managed by apply, so it has no ResolvedPaths entry.
                 bird_roa_v6_conf_path=Path(merged.bird_roa_v6_conf_path),
             ),
-            FILE_MODE_BIRD,
+            BIRD,
         )
     )
 
@@ -342,7 +345,7 @@ def _render_node_config_files(
     # the operator: putting the placeholder in the list unconditionally would let every
     # 900-second reconcile diff it against whatever they wrote and overwrite it.
     if not paths.bird_extra_conf_path.exists():
-        files.append((paths.bird_extra_conf_path, render_bird_extra_conf_placeholder(), FILE_MODE_BIRD))
+        files.append((paths.bird_extra_conf_path, render_bird_extra_conf_placeholder(), BIRD))
 
     if merged.dummy_backend != NET_BACKEND_NETWORKD:
         # When dn42-dummy is managed by NetworkManager, writing networkd's
@@ -359,18 +362,18 @@ def _render_node_config_files(
     # dn42-dummy goes into the list as an ordinary file entry rather than through
     # ensure_dummy_interface: that function shells out to networkctl/nmcli itself, which
     # would bypass the diff/dry-run machinery. Activation is left to the reload step.
-    files.append((paths.networkd_dir / f"{DUMMY_IFNAME}.netdev", render_dummy_netdev(), FILE_MODE_NETDEV))
+    files.append((paths.networkd_dir / f"{DUMMY_IFNAME}.netdev", render_dummy_netdev(), NETDEV))
     files.append(
         (
             paths.networkd_dir / f"{DUMMY_IFNAME}.network",
             render_dummy_network(own_ipv6=merged.own_ipv6),
-            FILE_MODE_NETDEV,
+            NETWORK,
         )
     )
     return files, warnings
 
 
-def _render_babel(payload: dict[str, Any], paths: ResolvedPaths) -> tuple[Path, str, int]:
+def _render_babel(payload: dict[str, Any], paths: ResolvedPaths) -> tuple[Path, str, FilePolicy]:
     interfaces: list[tuple[str, int, str]] = []
     for peer in payload.get("ibgp_peers", []):
         if not peer["has_wg"]:
@@ -382,7 +385,7 @@ def _render_babel(payload: dict[str, Any], paths: ResolvedPaths) -> tuple[Path, 
                 str(peer["babel_type"]),
             )
         )
-    return paths.babel_conf_path, render_babel_conf(interfaces=interfaces), FILE_MODE_BIRD
+    return paths.babel_conf_path, render_babel_conf(interfaces=interfaces), BIRD
 
 
 def _managed_paths(paths: ResolvedPaths) -> list[tuple[Path, tuple[tuple[str, str], ...]]]:
@@ -462,7 +465,7 @@ def apply(
     paths = _resolve_paths(app_config, config_path)
     warnings: list[str] = []
 
-    files: list[tuple[Path, str, int]] = []
+    files: list[tuple[Path, str, FilePolicy]] = []
     for peer in payload.get("bgp_peers", []):
         files.extend(_render_bgp_peer_files(peer, paths, node_id))
     for peer in payload.get("ibgp_peers", []):
@@ -477,10 +480,10 @@ def apply(
         files.extend(node_files)
         warnings.extend(node_warnings)
 
-    expected_paths: set[Path] = {path for path, _content, _mode in files}
+    expected_paths: set[Path] = {path for path, _content, _policy in files}
     stale = _collect_stale(expected_paths, paths)
 
-    diffs = [_diff(path, content) for path, content, _mode in files]
+    diffs = [_diff(path, content) for path, content, _policy in files]
     for s in stale:
         diffs.append(ApplyDiff(path=s, action="delete", diff=""))
 
@@ -489,9 +492,12 @@ def apply(
     reloads: list[ReloadAction] = []
     if not dry_run:
         changed_actions = {d.path for d in diffs if d.action in {"create", "update"}}
-        for path, content, mode in files:
-            _atomic_write(path, content, mode=mode)
+        for path, content, policy in files:
+            _atomic_write(path, content, policy=policy)
             written.append(path)
+        # extra.conf 的内容归运维,所以它只在缺失时进入写入列表,权限却归工具:bird 读不到
+        # 被 include 的文件就拒绝加载整份配置。已存在的那份因此单独校正一次权限。
+        ensure_policy(paths.bird_extra_conf_path, BIRD)
         for s in stale:
             try:
                 s.unlink()

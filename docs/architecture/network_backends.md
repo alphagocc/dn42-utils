@@ -23,6 +23,9 @@
 - `.network`：
   - 为接口配置 LLA 地址
   - 配置对端的 `Peer=<peer_lla>` 等必要信息
+  - 文件权限：`0644`（无私钥；`0600` 会让 systemd-networkd 打不开，接口因此没有地址）
+
+权限在 `src/dn42ctl/file_policy.py` 统一声明，写入方一律从那里取，详见 [`paths.md`](paths.md)。
 
 ## NetworkManager（仅 dummy_backend，已废弃用于 peer）
 

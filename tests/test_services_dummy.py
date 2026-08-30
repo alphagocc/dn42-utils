@@ -65,6 +65,13 @@ class TestEnsureDummyInterfaceNetworkd:
             timeout=10,
         )
 
+    def test_written_files_are_readable_by_the_networkd_user(self, tmp_path: Path) -> None:
+        """`.network` 曾按 netdev 的 0640 写,属组又是 root,networkd 读不到。"""
+        with patch("subprocess.check_output", return_value=""):
+            ensure_dummy_interface("fd42:4242:1234::1", backend="networkd", networkd_dir=str(tmp_path))
+        assert (tmp_path / "dn42-dummy.network").stat().st_mode & 0o004 == 0o004
+        assert (tmp_path / "dn42-dummy.netdev").stat().st_mode & 0o777 == 0o640
+
     def test_write_failure(self, tmp_path: Path) -> None:
         read_only = tmp_path / "no_write"
         read_only.mkdir()

@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import cast
 
 from dn42ctl.config import AppConfig
-from dn42ctl.constants import FILE_MODE_BIRD, FILE_MODE_NETDEV, WG_PORT_RANGE
+from dn42ctl.constants import WG_PORT_RANGE
 from dn42ctl.db import Database, DatabaseError
-from dn42ctl.fs import chmod_best_effort, chown_best_effort
+from dn42ctl.file_policy import BIRD, NETDEV, NETWORK, FilePolicy, apply_policy
 from dn42ctl.render import (
     render_babel_conf,
     render_bird_bgp_peer_conf,
@@ -171,7 +171,7 @@ class PeerResult:
     generated_files: list[Path]
 
 
-def write_text(path: Path, content: str, *, mode: int | None = None, owner: tuple[int, str] | None = None) -> None:
+def write_text(path: Path, content: str, *, policy: FilePolicy | None = None) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8", newline="\n")
@@ -179,10 +179,8 @@ def write_text(path: Path, content: str, *, mode: int | None = None, owner: tupl
         raise Dn42CtlError(f"权限不足: 无法写入 {path}。{permission_hint()}") from exc
     except OSError as exc:
         raise Dn42CtlError(f"写入失败: {path} ({exc})") from exc
-    if mode is not None:
-        chmod_best_effort(path, mode)
-    if owner is not None:
-        chown_best_effort(path, owner[0], owner[1])
+    if policy is not None:
+        apply_policy(path, policy)
 
 
 def ensure_dir(path: Path) -> None:
@@ -257,8 +255,7 @@ def write_net_backend_files(
             endpoint=endpoint,
             allowed_ips=allowed_ips,
         ),
-        mode=FILE_MODE_NETDEV,
-        owner=(0, "systemd-network"),
+        policy=NETDEV,
     )
     write_text(
         network_path,
@@ -267,6 +264,7 @@ def write_net_backend_files(
             local_lla=local_lla,
             peer_lla=peer_lla,
         ),
+        policy=NETWORK,
     )
     generated.extend([netdev_path, network_path])
 
@@ -347,7 +345,7 @@ def regenerate_babel_conf(*, config: AppConfig, db: Database, node_id: str) -> P
         raise Dn42CtlError(str(exc)) from exc
     babel_text = render_babel_conf(interfaces=interfaces)
     babel_path = Path(config.bird_babel_conf_path)
-    write_text(babel_path, babel_text, mode=FILE_MODE_BIRD)
+    write_text(babel_path, babel_text, policy=BIRD)
     return babel_path
 
 
@@ -397,5 +395,5 @@ def write_bird_bgp_peer(*, config: AppConfig, ifname: str, peer_lla: str, peer_a
         bird_conf_text = render_bird_bgp_peer_conf(ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn)
     except ValueError as exc:
         raise Dn42CtlError(str(exc)) from exc
-    write_text(bird_peer_path, bird_conf_text, mode=FILE_MODE_BIRD)
+    write_text(bird_peer_path, bird_conf_text, policy=BIRD)
     generated.append(bird_peer_path)
