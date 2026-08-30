@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from dn42ctl.config import AppConfig, load_config
+from dn42ctl.config import AppConfig, ConfigError, load_config
 from dn42ctl.db import Database
 
 
@@ -22,7 +22,7 @@ class AppContext:
     def require_config(self) -> AppConfig:
         cfg = self.load_config_optional()
         if cfg is None:
-            raise FileNotFoundError(str(self.config_path))
+            raise ConfigError("未初始化，请先运行 dn42ctl init")
         return cfg
 
     def open_db(self) -> Database:

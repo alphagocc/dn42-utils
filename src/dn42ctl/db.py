@@ -98,9 +98,15 @@ class Database:
 
     @classmethod
     def open(cls, db_path: Path) -> Database:
-        db_path.parent.mkdir(parents=True, exist_ok=True)
         try:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
             conn = sqlite3.connect(db_path)
+        except OSError as exc:
+            # mkdir used to sit outside this try, so an unwritable or missing parent
+            # escaped as a raw OSError and every caller's `except DatabaseError` missed
+            # it, surfacing as a traceback. The CLI keys its --db-path hint off
+            # DatabaseError, so that path must raise it too.
+            raise DatabaseError(f"Failed to open database: {db_path} ({exc})") from exc
         except sqlite3.Error as exc:
             raise DatabaseError(f"Failed to open database: {db_path}") from exc
 
@@ -418,7 +424,7 @@ class Database:
                     listen_port=?, allowed_ips_json=?, net_backend=?,
                     babel_rxcost=?, peer_ip=?, babel_type=?,{extra_set} updated_at=?
                 WHERE node_id=? AND name=?
-                """.strip(),  # noqa: S608 — extra_set 是本方法的字面量,不含外部输入
+                """.strip(),  # noqa: S608 (extra_set 是本方法的字面量,不含外部输入)
                 (
                     peer_public_key,
                     endpoint,

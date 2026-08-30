@@ -11,9 +11,9 @@ from typing import Any, TypeVar
 
 import typer
 
-from dn42ctl.config import AppConfig, ConfigError, save_config
+from dn42ctl.cli_errors import EXIT_FAILURE, EXIT_USAGE, cli_errors
+from dn42ctl.config import save_config
 from dn42ctl.context import AppContext
-from dn42ctl.db import Database, DatabaseError
 from dn42ctl.paths import (
     DEFAULT_BIRD_BABEL_CONF_PATH,
     DEFAULT_BIRD_CONF_PATH,
@@ -58,17 +58,9 @@ from dn42ctl.validators import (
     validate_router_id,
     validate_rxcost,
 )
-from dn42ctl.wg import WireGuardError, generate_random_lla, generate_wg_keypair
+from dn42ctl.wg import generate_random_lla, generate_wg_keypair
 
 app = typer.Typer(add_completion=False)
-
-
-def _db_open_hint(db_path: Path) -> str:
-    return (
-        f"无法打开数据库: {db_path}。"
-        "若使用默认系统路径，通常需要以 root 运行（sudo），"
-        "或使用 --db-path 覆盖到可写位置。"
-    )
 
 
 _ValidatedT = TypeVar("_ValidatedT")
@@ -109,30 +101,6 @@ def _print_dummy_result(dummy: object | None) -> None:
         typer.echo(f"  警告: {w}")
 
 
-def _require_config_or_exit(appctx: AppContext) -> AppConfig:
-    try:
-        return appctx.require_config()
-    except FileNotFoundError as exc:
-        typer.echo("错误: 未初始化，请先运行 dn42ctl init")
-        raise typer.Exit(2) from exc
-    except ConfigError as exc:
-        typer.echo(f"错误: 配置文件读取失败: {exc}")
-        raise typer.Exit(2) from exc
-
-
-def _open_db_or_exit(appctx: AppContext) -> "Database":
-    try:
-        return appctx.open_db()
-    except (PermissionError, OSError) as exc:
-        typer.echo(f"错误: 权限不足/路径不可写 ({exc})")
-        typer.echo(_db_open_hint(appctx.db_path))
-        raise typer.Exit(1) from exc
-    except DatabaseError as exc:
-        typer.echo(f"错误: {exc}")
-        typer.echo(_db_open_hint(appctx.db_path))
-        raise typer.Exit(1) from exc
-
-
 def _prepare_peer_info(
     peer_public_key: str | None,
     endpoint: str | None,
@@ -144,12 +112,8 @@ def _prepare_peer_info(
     prepared_public_key: str | None = None
     prepared_local_lla: str | None = None
     if peer_public_key is None or endpoint is None or peer_lla is None:
-        try:
-            prepared_private_key, prepared_public_key = generate_wg_keypair()
-            prepared_local_lla = generate_random_lla()
-        except WireGuardError as exc:
-            typer.echo(f"错误: {exc}")
-            raise typer.Exit(1) from exc
+        prepared_private_key, prepared_public_key = generate_wg_keypair()
+        prepared_local_lla = generate_random_lla()
 
         typer.echo("本端信息（无需对端提供，先发给对端）：")
         typer.echo(f"本端 WG 公钥: {prepared_public_key}")
@@ -261,6 +225,7 @@ def main(
 
 
 @app.command("init")
+@cli_errors
 def cmd_init(
     ctx: typer.Context,
     own_asn: int | None = typer.Option(None, "--own-asn", help="本机 DN42 ASN (OWNAS)"),
@@ -298,11 +263,7 @@ def cmd_init(
     ),
 ) -> None:
     appctx: AppContext = ctx.obj
-    try:
-        existing = appctx.load_config_optional()
-    except ConfigError as exc:
-        typer.echo(f"错误: 配置文件读取失败: {exc}")
-        raise typer.Exit(2) from exc
+    existing = appctx.load_config_optional()
 
     node_id = existing.node_id if existing else str(uuid.uuid4())
 
@@ -346,16 +307,12 @@ def cmd_init(
     if dummy_backend is None:
         dummy_backend = existing.dummy_backend if existing else typer.prompt("dummy 网卡后端", default="networkd")
 
-    try:
-        _cli_validate(validate_asn, own_asn)
-        _cli_validate(validate_ipv6_address, own_ipv6, field_name="OWNIPv6")
-        _cli_validate(validate_ipv6_network, ownnet_v6, field_name="OWNNETv6")
-        _cli_validate(validate_ownnetset_v6, ownnetset_v6)
-        _cli_validate(validate_router_id, router_id)
-        dummy_backend = _cli_validate(validate_net_backend, dummy_backend)
-    except typer.BadParameter as exc:
-        typer.echo(f"输入错误: {exc}")
-        raise typer.Exit(2) from exc
+    _cli_validate(validate_asn, own_asn)
+    _cli_validate(validate_ipv6_address, own_ipv6, field_name="OWNIPv6")
+    _cli_validate(validate_ipv6_network, ownnet_v6, field_name="OWNNETv6")
+    _cli_validate(validate_ownnetset_v6, ownnetset_v6)
+    _cli_validate(validate_router_id, router_id)
+    dummy_backend = _cli_validate(validate_net_backend, dummy_backend)
 
     overwrite_bird = False
     overwrite_babel = False
@@ -363,41 +320,33 @@ def cmd_init(
         overwrite_bird = _confirm_overwrite_if_exists(bird_conf_path)
         overwrite_babel = _confirm_overwrite_if_exists(bird_babel_conf_path)
 
-    try:
-        init_res = init_node(
-            config_path=appctx.config_path,
-            db_path=appctx.db_path,
-            node_id=node_id,
-            own_asn=own_asn,
-            router_id=router_id,
-            own_ipv6=own_ipv6,
-            ownnet_v6=ownnet_v6,
-            ownnetset_v6=ownnetset_v6,
-            bird_conf_path=bird_conf_path,
-            bird_peers_dir=bird_peers_dir,
-            bird_babel_conf_path=bird_babel_conf_path,
-            bird_roa_v6_conf_path=bird_roa_v6_conf_path,
-            bird_extra_conf_path=bird_extra_conf_path,
-            networkd_dir=networkd_dir,
-            nm_system_connections_dir=nm_system_connections_dir,
-            dummy_backend=dummy_backend,
-        )
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}")
-        raise typer.Exit(1) from exc
+    init_res = init_node(
+        config_path=appctx.config_path,
+        db_path=appctx.db_path,
+        node_id=node_id,
+        own_asn=own_asn,
+        router_id=router_id,
+        own_ipv6=own_ipv6,
+        ownnet_v6=ownnet_v6,
+        ownnetset_v6=ownnetset_v6,
+        bird_conf_path=bird_conf_path,
+        bird_peers_dir=bird_peers_dir,
+        bird_babel_conf_path=bird_babel_conf_path,
+        bird_roa_v6_conf_path=bird_roa_v6_conf_path,
+        bird_extra_conf_path=bird_extra_conf_path,
+        networkd_dir=networkd_dir,
+        nm_system_connections_dir=nm_system_connections_dir,
+        dummy_backend=dummy_backend,
+    )
 
     gen_res = None
     if do_genconf:
-        try:
-            gen_res = genconf(
-                config=init_res.config,
-                db_path=appctx.db_path,
-                overwrite_bird_conf=overwrite_bird,
-                overwrite_babel_conf=overwrite_babel,
-            )
-        except Dn42CtlError as exc:
-            typer.echo(f"错误: {exc}")
-            raise typer.Exit(1) from exc
+        gen_res = genconf(
+            config=init_res.config,
+            db_path=appctx.db_path,
+            overwrite_bird_conf=overwrite_bird,
+            overwrite_babel_conf=overwrite_babel,
+        )
 
     typer.echo("初始化完成")
     typer.echo(f"node_id: {init_res.config.node_id}")
@@ -418,12 +367,13 @@ def cmd_init(
 
 
 @app.command("genconf")
+@cli_errors
 def cmd_genconf(
     ctx: typer.Context,
     all_peers: bool = typer.Option(False, "--all", help="同时重新生成所有 peers 的 Bird 和 WireGuard 配置"),
 ) -> None:
     appctx: AppContext = ctx.obj
-    config = _require_config_or_exit(appctx)
+    config = appctx.require_config()
 
     bird_conf_path = Path(config.bird_conf_path)
     bird_babel_conf_path = Path(config.bird_babel_conf_path)
@@ -431,17 +381,13 @@ def cmd_genconf(
     overwrite_bird = _confirm_overwrite_if_exists(bird_conf_path)
     overwrite_babel = _confirm_overwrite_if_exists(bird_babel_conf_path)
 
-    try:
-        res = genconf(
-            config=config,
-            db_path=appctx.db_path,
-            overwrite_bird_conf=overwrite_bird,
-            overwrite_babel_conf=overwrite_babel,
-            regenerate_peers=all_peers,
-        )
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}")
-        raise typer.Exit(1) from exc
+    res = genconf(
+        config=config,
+        db_path=appctx.db_path,
+        overwrite_bird_conf=overwrite_bird,
+        overwrite_babel_conf=overwrite_babel,
+        regenerate_peers=all_peers,
+    )
 
     typer.echo("genconf 完成")
     typer.echo(f"Bird: {res.bird_conf_path}")
@@ -459,9 +405,10 @@ def cmd_genconf(
 
 
 @app.command("scan")
+@cli_errors
 def cmd_scan(ctx: typer.Context) -> None:
     appctx: AppContext = ctx.obj
-    config = _require_config_or_exit(appctx)
+    config = appctx.require_config()
 
     discovery = discover_bird_paths(
         candidate_bird_conf_paths=[
@@ -493,11 +440,7 @@ def cmd_scan(ctx: typer.Context) -> None:
         except OSError as exc:
             updated_msg = f"无法回写 config.toml（但将继续使用识别到的路径进行 scan）: {exc}"
 
-    try:
-        res = scan_local_configs(config=updated_config, db_path=appctx.db_path)
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}")
-        raise typer.Exit(1) from exc
+    res = scan_local_configs(config=updated_config, db_path=appctx.db_path)
 
     typer.echo("scan 完成")
     typer.echo(f"inserted: {len(res.inserted)}  conflicts: {len(res.conflicts)}  skipped: {len(res.skipped)}")
@@ -530,6 +473,7 @@ peer_app = typer.Typer(invoke_without_command=True)
 
 
 @peer_app.callback(invoke_without_command=True)
+@cli_errors
 def cmd_bgp_peer(
     ctx: typer.Context,
     peer_asn: int | None = typer.Option(None, "--asn", help="Peer ASN"),
@@ -551,18 +495,14 @@ def cmd_bgp_peer(
         return
 
     appctx: AppContext = ctx.obj
-    config = _require_config_or_exit(appctx)
+    config = appctx.require_config()
 
     if peer_asn is None:
         peer_asn = typer.prompt("Peer ASN", type=int)
 
     parsed_allowed_ips: list[str] | None = None
     if allowed_ips_str is not None:
-        try:
-            parsed_allowed_ips = _cli_validate(validate_allowed_ips, allowed_ips_str)
-        except typer.BadParameter as exc:
-            typer.echo(f"输入错误: {exc}")
-            raise typer.Exit(2) from exc
+        parsed_allowed_ips = _cli_validate(validate_allowed_ips, allowed_ips_str)
 
     (
         prepared_private_key,
@@ -575,36 +515,28 @@ def cmd_bgp_peer(
 
     assert peer_asn is not None
 
-    try:
-        peer_public_key = _cli_validate(validate_pubkey, peer_public_key)
-        endpoint = _cli_validate(validate_endpoint, endpoint, allow_empty=True)
-        peer_lla = _cli_validate(validate_ipv6_address, peer_lla, field_name="Peer LLA")
-    except typer.BadParameter as exc:
-        typer.echo(f"输入错误: {exc}")
-        raise typer.Exit(2) from exc
+    peer_public_key = _cli_validate(validate_pubkey, peer_public_key)
+    endpoint = _cli_validate(validate_endpoint, endpoint, allow_empty=True)
+    peer_lla = _cli_validate(validate_ipv6_address, peer_lla, field_name="Peer LLA")
 
     assert peer_public_key is not None
     assert endpoint is not None
     assert peer_lla is not None
 
-    try:
-        res = create_bgp_peer(
-            config=config,
-            db_path=appctx.db_path,
-            peer_asn=peer_asn,
-            peer_public_key=peer_public_key,
-            endpoint=endpoint,
-            peer_lla=peer_lla,
-            net_backend="networkd",
-            listen_port=listen_port,
-            wg_private_key=prepared_private_key,
-            wg_public_key=prepared_public_key,
-            local_lla=prepared_local_lla,
-            allowed_ips=parsed_allowed_ips,
-        )
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}")
-        raise typer.Exit(1) from exc
+    res = create_bgp_peer(
+        config=config,
+        db_path=appctx.db_path,
+        peer_asn=peer_asn,
+        peer_public_key=peer_public_key,
+        endpoint=endpoint,
+        peer_lla=peer_lla,
+        net_backend="networkd",
+        listen_port=listen_port,
+        wg_private_key=prepared_private_key,
+        wg_public_key=prepared_public_key,
+        local_lla=prepared_local_lla,
+        allowed_ips=parsed_allowed_ips,
+    )
 
     typer.echo("BGP peer 创建完成")
     typer.echo(f"ifname: {res.ifname}")
@@ -616,6 +548,7 @@ def cmd_bgp_peer(
 
 
 @peer_app.command("modify")
+@cli_errors
 def cmd_bgp_peer_modify(
     ctx: typer.Context,
     peer_asn: int = typer.Argument(..., help="Peer ASN"),
@@ -634,13 +567,13 @@ def cmd_bgp_peer_modify(
     ),
 ) -> None:
     appctx: AppContext = ctx.obj
-    config = _require_config_or_exit(appctx)
+    config = appctx.require_config()
 
-    db = _open_db_or_exit(appctx)
+    db = appctx.open_db()
     row = db.get_bgp_peer(config.node_id, peer_asn)
     if row is None:
-        typer.echo("错误: 该 peer 不存在")
-        raise typer.Exit(2)
+        typer.echo("错误: 该 peer 不存在", err=True)
+        raise typer.Exit(EXIT_USAGE)
 
     if peer_public_key is None:
         peer_public_key = typer.prompt("Peer 公钥", default=str(row["peer_public_key"] or ""))
@@ -658,35 +591,27 @@ def cmd_bgp_peer_modify(
     assert peer_lla is not None
 
     parsed_allowed_ips: list[str] | None = None
-    try:
-        peer_public_key = _cli_validate(validate_pubkey, peer_public_key)
-        endpoint = _cli_validate(validate_endpoint, endpoint, allow_empty=True)
-        if peer_lla:
-            peer_lla = _cli_validate(validate_ipv6_address, peer_lla, field_name="Peer LLA")
-        parsed_allowed_ips = _cli_validate(validate_allowed_ips, allowed_ips_str)
-    except typer.BadParameter as exc:
-        typer.echo(f"\u8f93\u5165\u9519\u8bef: {exc}")
-        raise typer.Exit(2) from exc
+    peer_public_key = _cli_validate(validate_pubkey, peer_public_key)
+    endpoint = _cli_validate(validate_endpoint, endpoint, allow_empty=True)
+    if peer_lla:
+        peer_lla = _cli_validate(validate_ipv6_address, peer_lla, field_name="Peer LLA")
+    parsed_allowed_ips = _cli_validate(validate_allowed_ips, allowed_ips_str)
 
     assert peer_public_key is not None
     assert endpoint is not None
     assert peer_lla is not None
 
-    try:
-        res = modify_bgp_peer(
-            config=config,
-            db_path=appctx.db_path,
-            peer_asn=peer_asn,
-            peer_public_key=peer_public_key,
-            endpoint=endpoint,
-            peer_lla=peer_lla,
-            net_backend="networkd",
-            listen_port=listen_port,
-            allowed_ips=parsed_allowed_ips,
-        )
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}")
-        raise typer.Exit(1) from exc
+    res = modify_bgp_peer(
+        config=config,
+        db_path=appctx.db_path,
+        peer_asn=peer_asn,
+        peer_public_key=peer_public_key,
+        endpoint=endpoint,
+        peer_lla=peer_lla,
+        net_backend="networkd",
+        listen_port=listen_port,
+        allowed_ips=parsed_allowed_ips,
+    )
 
     typer.echo("BGP peer 已重新生成")
     for p in res.generated_files:
@@ -698,22 +623,19 @@ app.add_typer(bgp_app, name="bgp")
 
 
 @peer_app.command("del")
+@cli_errors
 def cmd_bgp_peer_del(
     ctx: typer.Context,
     peer_asn: int = typer.Argument(..., help="Peer ASN"),
 ) -> None:
     appctx: AppContext = ctx.obj
-    config = _require_config_or_exit(appctx)
+    config = appctx.require_config()
 
     if not typer.confirm(f"确认删除 BGP peer AS{peer_asn}（DB + 配置文件）？", default=False):
         typer.echo("已取消")
         return
 
-    try:
-        res = delete_bgp_peer(config=config, db_path=appctx.db_path, peer_asn=peer_asn)
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}")
-        raise typer.Exit(1) from exc
+    res = delete_bgp_peer(config=config, db_path=appctx.db_path, peer_asn=peer_asn)
 
     typer.echo("删除完成")
     for p in res.deleted_files:
@@ -729,6 +651,7 @@ ibgp_peer_app = typer.Typer(invoke_without_command=True)
 
 
 @ibgp_peer_app.callback(invoke_without_command=True)
+@cli_errors
 def cmd_ibgp_peer(
     ctx: typer.Context,
     name: str | None = typer.Option(None, "--name", help="Peer 名称 (用于文件名/接口名)"),
@@ -756,7 +679,7 @@ def cmd_ibgp_peer(
         return
 
     appctx: AppContext = ctx.obj
-    config = _require_config_or_exit(appctx)
+    config = appctx.require_config()
 
     if name is None:
         name = typer.prompt("iBGP peer 名称")
@@ -766,34 +689,22 @@ def cmd_ibgp_peer(
     assert name is not None
     assert peer_ip is not None
 
-    try:
-        peer_ip = _cli_validate(validate_ipv6_address, peer_ip, field_name="对端网内 IPv6")
-    except typer.BadParameter as exc:
-        typer.echo(f"输入错误: {exc}")
-        raise typer.Exit(2) from exc
+    peer_ip = _cli_validate(validate_ipv6_address, peer_ip, field_name="对端网内 IPv6")
 
     parsed_allowed_ips: list[str] | None = None
     if allowed_ips_str is not None:
-        try:
-            parsed_allowed_ips = _cli_validate(validate_allowed_ips, allowed_ips_str)
-        except typer.BadParameter as exc:
-            typer.echo(f"输入错误: {exc}")
-            raise typer.Exit(2) from exc
+        parsed_allowed_ips = _cli_validate(validate_allowed_ips, allowed_ips_str)
 
     if no_wg:
         assert peer_ip is not None
-        try:
-            res = create_ibgp_peer(
-                config=config,
-                db_path=appctx.db_path,
-                name=name,
-                peer_ip=peer_ip,
-                has_wg=False,
-                allowed_ips=parsed_allowed_ips,
-            )
-        except Dn42CtlError as exc:
-            typer.echo(f"错误: {exc}")
-            raise typer.Exit(1) from exc
+        res = create_ibgp_peer(
+            config=config,
+            db_path=appctx.db_path,
+            name=name,
+            peer_ip=peer_ip,
+            has_wg=False,
+            allowed_ips=parsed_allowed_ips,
+        )
 
         typer.echo("iBGP peer 创建完成 (无 WireGuard)")
         for p in res.generated_files:
@@ -817,15 +728,11 @@ def cmd_ibgp_peer(
     assert babel_rxcost is not None
     assert babel_type is not None
 
-    try:
-        peer_public_key = _cli_validate(validate_pubkey, peer_public_key)
-        endpoint = _cli_validate(validate_endpoint, endpoint, allow_empty=True)
-        peer_lla = _cli_validate(validate_ipv6_address, peer_lla, field_name="Peer LLA")
-        babel_rxcost = _cli_validate(validate_rxcost, babel_rxcost)
-        babel_type = _cli_validate(validate_babel_type, babel_type)
-    except typer.BadParameter as exc:
-        typer.echo(f"输入错误: {exc}")
-        raise typer.Exit(2) from exc
+    peer_public_key = _cli_validate(validate_pubkey, peer_public_key)
+    endpoint = _cli_validate(validate_endpoint, endpoint, allow_empty=True)
+    peer_lla = _cli_validate(validate_ipv6_address, peer_lla, field_name="Peer LLA")
+    babel_rxcost = _cli_validate(validate_rxcost, babel_rxcost)
+    babel_type = _cli_validate(validate_babel_type, babel_type)
 
     assert peer_ip is not None
     assert peer_public_key is not None
@@ -834,28 +741,24 @@ def cmd_ibgp_peer(
     assert babel_rxcost is not None
     assert babel_type is not None
 
-    try:
-        res = create_ibgp_peer(
-            config=config,
-            db_path=appctx.db_path,
-            name=name,
-            peer_ip=peer_ip,
-            has_wg=True,
-            peer_public_key=peer_public_key,
-            endpoint=endpoint,
-            peer_lla=peer_lla,
-            net_backend="networkd",
-            babel_rxcost=babel_rxcost,
-            babel_type=babel_type,
-            listen_port=listen_port,
-            wg_private_key=prepared_private_key,
-            wg_public_key=prepared_public_key,
-            local_lla=prepared_local_lla,
-            allowed_ips=parsed_allowed_ips,
-        )
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}")
-        raise typer.Exit(1) from exc
+    res = create_ibgp_peer(
+        config=config,
+        db_path=appctx.db_path,
+        name=name,
+        peer_ip=peer_ip,
+        has_wg=True,
+        peer_public_key=peer_public_key,
+        endpoint=endpoint,
+        peer_lla=peer_lla,
+        net_backend="networkd",
+        babel_rxcost=babel_rxcost,
+        babel_type=babel_type,
+        listen_port=listen_port,
+        wg_private_key=prepared_private_key,
+        wg_public_key=prepared_public_key,
+        local_lla=prepared_local_lla,
+        allowed_ips=parsed_allowed_ips,
+    )
 
     typer.echo("iBGP peer 创建完成")
     typer.echo(f"ifname: {res.ifname}")
@@ -867,6 +770,7 @@ def cmd_ibgp_peer(
 
 
 @ibgp_peer_app.command("modify")
+@cli_errors
 def cmd_ibgp_peer_modify(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="iBGP peer name"),
@@ -888,23 +792,24 @@ def cmd_ibgp_peer_modify(
     ),
 ) -> None:
     appctx: AppContext = ctx.obj
-    config = _require_config_or_exit(appctx)
+    config = appctx.require_config()
 
-    db = _open_db_or_exit(appctx)
+    db = appctx.open_db()
     try:
         peer_name = sanitize_name(name)
     except Dn42CtlError as exc:
-        typer.echo(f"输入错误: {exc}")
-        raise typer.Exit(2) from exc
+        # 这里的 Dn42CtlError 来自用户给的 --name，属于输入错误而非运行期失败。
+        # 转成 BadParameter 才能拿到退出码 2。
+        raise typer.BadParameter(str(exc)) from exc
 
     row = db.get_ibgp_peer(config.node_id, peer_name)
     if row is None:
-        typer.echo("错误: 该 peer 不存在")
-        raise typer.Exit(2)
+        typer.echo("错误: 该 peer 不存在", err=True)
+        raise typer.Exit(EXIT_USAGE)
 
     if not bool(row["has_wg"]):
-        typer.echo("错误: 该 iBGP peer 未启用 WireGuard，不支持修改 WG 相关参数")
-        raise typer.Exit(2)
+        typer.echo("错误: 该 iBGP peer 未启用 WireGuard，不支持修改 WG 相关参数", err=True)
+        raise typer.Exit(EXIT_USAGE)
 
     if peer_public_key is None:
         peer_public_key = typer.prompt("Peer 公钥", default=str(row["peer_public_key"] or ""))
@@ -931,19 +836,15 @@ def cmd_ibgp_peer_modify(
     assert babel_type is not None
 
     parsed_allowed_ips: list[str] | None = None
-    try:
-        peer_public_key = _cli_validate(validate_pubkey, peer_public_key)
-        endpoint = _cli_validate(validate_endpoint, endpoint, allow_empty=True)
-        if peer_lla:
-            peer_lla = _cli_validate(validate_ipv6_address, peer_lla, field_name="Peer LLA")
-        if peer_ip:
-            peer_ip = _cli_validate(validate_ipv6_address, peer_ip, field_name="对端网内 IPv6")
-        babel_rxcost = _cli_validate(validate_rxcost, babel_rxcost)
-        babel_type = _cli_validate(validate_babel_type, babel_type)
-        parsed_allowed_ips = _cli_validate(validate_allowed_ips, allowed_ips_str)
-    except typer.BadParameter as exc:
-        typer.echo(f"输入错误: {exc}")
-        raise typer.Exit(2) from exc
+    peer_public_key = _cli_validate(validate_pubkey, peer_public_key)
+    endpoint = _cli_validate(validate_endpoint, endpoint, allow_empty=True)
+    if peer_lla:
+        peer_lla = _cli_validate(validate_ipv6_address, peer_lla, field_name="Peer LLA")
+    if peer_ip:
+        peer_ip = _cli_validate(validate_ipv6_address, peer_ip, field_name="对端网内 IPv6")
+    babel_rxcost = _cli_validate(validate_rxcost, babel_rxcost)
+    babel_type = _cli_validate(validate_babel_type, babel_type)
+    parsed_allowed_ips = _cli_validate(validate_allowed_ips, allowed_ips_str)
 
     assert peer_public_key is not None
     assert endpoint is not None
@@ -952,24 +853,20 @@ def cmd_ibgp_peer_modify(
     assert babel_rxcost is not None
     assert babel_type is not None
 
-    try:
-        res = modify_ibgp_peer(
-            config=config,
-            db_path=appctx.db_path,
-            name=peer_name,
-            peer_public_key=peer_public_key,
-            endpoint=endpoint,
-            peer_lla=peer_lla,
-            peer_ip=peer_ip,
-            net_backend="networkd",
-            babel_rxcost=babel_rxcost,
-            babel_type=babel_type,
-            listen_port=listen_port,
-            allowed_ips=parsed_allowed_ips,
-        )
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}")
-        raise typer.Exit(1) from exc
+    res = modify_ibgp_peer(
+        config=config,
+        db_path=appctx.db_path,
+        name=peer_name,
+        peer_public_key=peer_public_key,
+        endpoint=endpoint,
+        peer_lla=peer_lla,
+        peer_ip=peer_ip,
+        net_backend="networkd",
+        babel_rxcost=babel_rxcost,
+        babel_type=babel_type,
+        listen_port=listen_port,
+        allowed_ips=parsed_allowed_ips,
+    )
 
     typer.echo("iBGP peer 已重新生成")
     for p in res.generated_files:
@@ -981,12 +878,13 @@ app.add_typer(ibgp_app, name="ibgp")
 
 
 @ibgp_peer_app.command("del")
+@cli_errors
 def cmd_ibgp_peer_del(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="iBGP peer name"),
 ) -> None:
     appctx: AppContext = ctx.obj
-    config = _require_config_or_exit(appctx)
+    config = appctx.require_config()
 
     if not typer.confirm(
         f"确认删除 iBGP peer '{name}'（DB + 配置文件）？",
@@ -995,11 +893,7 @@ def cmd_ibgp_peer_del(
         typer.echo("已取消")
         return
 
-    try:
-        res = delete_ibgp_peer(config=config, db_path=appctx.db_path, name=name)
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}")
-        raise typer.Exit(1) from exc
+    res = delete_ibgp_peer(config=config, db_path=appctx.db_path, name=name)
 
     typer.echo("删除完成")
     for p in res.deleted_files:
@@ -1016,6 +910,7 @@ show_app = typer.Typer(invoke_without_command=True)
 
 
 @show_app.callback(invoke_without_command=True)
+@cli_errors
 def cmd_show_default(
     ctx: typer.Context,
     as_json: bool = typer.Option(False, "--json", help="输出 JSON"),
@@ -1038,18 +933,15 @@ def _print_file_statuses(files: list[dict[str, object]]) -> None:
 
 
 @show_app.command("wg")
+@cli_errors
 def cmd_show_wg(
     ctx: typer.Context,
     as_json: bool = typer.Option(False, "--json", help="输出 JSON"),
 ) -> None:
     appctx: AppContext = ctx.obj
-    config = _require_config_or_exit(appctx)
+    config = appctx.require_config()
 
-    try:
-        tunnels = show_wg_tunnels(config=config, db_path=appctx.db_path, include_live=True)
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}")
-        raise typer.Exit(1) from exc
+    tunnels = show_wg_tunnels(config=config, db_path=appctx.db_path, include_live=True)
 
     if as_json:
         _print_json([asdict(x) for x in tunnels])
@@ -1059,18 +951,15 @@ def cmd_show_wg(
 
 
 @show_app.command("bgp")
+@cli_errors
 def cmd_show_bgp(
     ctx: typer.Context,
     as_json: bool = typer.Option(False, "--json", help="输出 JSON"),
 ) -> None:
     appctx: AppContext = ctx.obj
-    config = _require_config_or_exit(appctx)
+    config = appctx.require_config()
 
-    try:
-        peers = show_bgp_peers(config=config, db_path=appctx.db_path, include_live=True)
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}")
-        raise typer.Exit(1) from exc
+    peers = show_bgp_peers(config=config, db_path=appctx.db_path, include_live=True)
 
     if as_json:
         _print_json([asdict(x) for x in peers])
@@ -1080,18 +969,15 @@ def cmd_show_bgp(
 
 
 @show_app.command("ibgp")
+@cli_errors
 def cmd_show_ibgp(
     ctx: typer.Context,
     as_json: bool = typer.Option(False, "--json", help="输出 JSON"),
 ) -> None:
     appctx: AppContext = ctx.obj
-    config = _require_config_or_exit(appctx)
+    config = appctx.require_config()
 
-    try:
-        peers = show_ibgp_peers(config=config, db_path=appctx.db_path, include_live=True)
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}")
-        raise typer.Exit(1) from exc
+    peers = show_ibgp_peers(config=config, db_path=appctx.db_path, include_live=True)
 
     if as_json:
         _print_json([asdict(x) for x in peers])
@@ -1101,20 +987,17 @@ def cmd_show_ibgp(
 
 
 @show_app.command("all")
+@cli_errors
 def cmd_show_all(
     ctx: typer.Context,
     as_json: bool = typer.Option(False, "--json", help="输出 JSON"),
 ) -> None:
     appctx: AppContext = ctx.obj
-    config = _require_config_or_exit(appctx)
+    config = appctx.require_config()
 
-    try:
-        tunnels = show_wg_tunnels(config=config, db_path=appctx.db_path, include_live=True)
-        bgp = show_bgp_peers(config=config, db_path=appctx.db_path, include_live=True)
-        ibgp = show_ibgp_peers(config=config, db_path=appctx.db_path, include_live=True)
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}")
-        raise typer.Exit(1) from exc
+    tunnels = show_wg_tunnels(config=config, db_path=appctx.db_path, include_live=True)
+    bgp = show_bgp_peers(config=config, db_path=appctx.db_path, include_live=True)
+    ibgp = show_ibgp_peers(config=config, db_path=appctx.db_path, include_live=True)
 
     payload: dict[str, object] = {
         "node_id": config.node_id,
@@ -1142,6 +1025,7 @@ app.add_typer(show_app, name="show")
 
 
 @app.command("serve")
+@cli_errors
 def cmd_serve(
     ctx: typer.Context,
     host: str = typer.Option("::1", "--host", help="绑定地址 (默认 ::1, IPv6 loopback)"),
@@ -1170,14 +1054,14 @@ def cmd_serve(
     ),
 ) -> None:
     appctx: AppContext = ctx.obj
-    config = _require_config_or_exit(appctx)
+    config = appctx.require_config()
 
     from dn42ctl.api import app as api_app
     from dn42ctl.api import configure
 
     if sync_poll_interval <= 0:
         typer.echo("输入错误: --sync-poll-interval 必须大于 0", err=True)
-        raise typer.Exit(2)
+        raise typer.Exit(EXIT_USAGE)
 
     configure(
         config=config,
@@ -1231,7 +1115,7 @@ def cmd_serve(
                 typer.echo(f"  node.toml -> {result.node_toml_path}")
             if result.config_node_id_mismatch:
                 # 分叉时 admin 写入的 peer 会落在 desired-state 读不到的分区里,而且
-                # 不会有任何报错 —— 必须在启动时就喊出来。
+                # 不会有任何报错，必须在启动时就喊出来。
                 typer.echo(
                     "警告: config.toml 的 node_id 与 self 节点 id 不一致\n"
                     f"  config.toml : {config.node_id}\n"
@@ -1263,6 +1147,7 @@ def _print_managed_node(node) -> None:
 
 
 @node_app.command("add")
+@cli_errors
 def cmd_node_add(
     ctx: typer.Context,
     node_id: str = typer.Argument(..., help="UUIDv4 node id"),
@@ -1271,28 +1156,17 @@ def cmd_node_add(
     appctx: AppContext = ctx.obj
     from dn42ctl.services import add_node
 
-    try:
-        node = add_node(db_path=appctx.db_path, node_id=node_id, name=name)
-    except Dn42CtlError as exc:
-        raise typer.BadParameter(str(exc)) from exc
-    except DatabaseError as exc:
-        typer.echo(_db_open_hint(appctx.db_path), err=True)
-        raise typer.Exit(code=1) from exc
+    node = add_node(db_path=appctx.db_path, node_id=node_id, name=name)
     _print_managed_node(node)
 
 
 @node_app.command("list")
+@cli_errors
 def cmd_node_list(ctx: typer.Context) -> None:
     appctx: AppContext = ctx.obj
     from dn42ctl.services import list_nodes
 
-    try:
-        nodes = list_nodes(db_path=appctx.db_path)
-    except Dn42CtlError as exc:
-        raise typer.BadParameter(str(exc)) from exc
-    except DatabaseError as exc:
-        typer.echo(_db_open_hint(appctx.db_path), err=True)
-        raise typer.Exit(code=1) from exc
+    nodes = list_nodes(db_path=appctx.db_path)
     if not nodes:
         typer.echo("(没有已注册的 managed_nodes)")
         return
@@ -1303,6 +1177,7 @@ def cmd_node_list(ctx: typer.Context) -> None:
 
 
 @node_app.command("show")
+@cli_errors
 def cmd_node_show(
     ctx: typer.Context,
     node_id: str = typer.Argument(..., help="节点 UUID"),
@@ -1310,17 +1185,12 @@ def cmd_node_show(
     appctx: AppContext = ctx.obj
     from dn42ctl.services import get_node
 
-    try:
-        node = get_node(db_path=appctx.db_path, node_id=node_id)
-    except Dn42CtlError as exc:
-        raise typer.BadParameter(str(exc)) from exc
-    except DatabaseError as exc:
-        typer.echo(_db_open_hint(appctx.db_path), err=True)
-        raise typer.Exit(code=1) from exc
+    node = get_node(db_path=appctx.db_path, node_id=node_id)
     _print_managed_node(node)
 
 
 @node_app.command("remove")
+@cli_errors
 def cmd_node_remove(
     ctx: typer.Context,
     node_id: str = typer.Argument(..., help="节点 UUID"),
@@ -1332,18 +1202,12 @@ def cmd_node_remove(
     appctx: AppContext = ctx.obj
     from dn42ctl.services import remove_node
 
-    try:
-        removed = remove_node(
-            db_path=appctx.db_path,
-            node_id=node_id,
-            force=force,
-            self_node_toml_path=node_config_path,
-        )
-    except Dn42CtlError as exc:
-        raise typer.BadParameter(str(exc)) from exc
-    except DatabaseError as exc:
-        typer.echo(_db_open_hint(appctx.db_path), err=True)
-        raise typer.Exit(code=1) from exc
+    removed = remove_node(
+        db_path=appctx.db_path,
+        node_id=node_id,
+        force=force,
+        self_node_toml_path=node_config_path,
+    )
     node = removed.node
     typer.echo(f"已删除: {node.node_id} ({node.name})")
     if node.is_self:
@@ -1357,6 +1221,7 @@ token_app = typer.Typer(help="节点 token 管理")
 
 
 @token_app.command("rotate")
+@cli_errors
 def cmd_node_token_rotate(
     ctx: typer.Context,
     node_id: str = typer.Argument(..., help="节点 UUID"),
@@ -1367,17 +1232,11 @@ def cmd_node_token_rotate(
     appctx: AppContext = ctx.obj
     from dn42ctl.services import rotate_token
 
-    try:
-        rotated = rotate_token(
-            db_path=appctx.db_path,
-            node_id=node_id,
-            self_node_toml_path=node_config_path,
-        )
-    except Dn42CtlError as exc:
-        raise typer.BadParameter(str(exc)) from exc
-    except DatabaseError as exc:
-        typer.echo(_db_open_hint(appctx.db_path), err=True)
-        raise typer.Exit(code=1) from exc
+    rotated = rotate_token(
+        db_path=appctx.db_path,
+        node_id=node_id,
+        self_node_toml_path=node_config_path,
+    )
     typer.echo(f"node_id: {rotated.node_id}")
     typer.echo(f"token (明文,仅显示一次): {rotated.plaintext}")
     if rotated.self_node_toml_updated:
@@ -1395,6 +1254,7 @@ policy_app = typer.Typer(help="节点写策略 (write_policy) 管理")
 
 
 @policy_app.command("set")
+@cli_errors
 def cmd_node_policy_set(
     ctx: typer.Context,
     node_id: str = typer.Argument(..., help="节点 UUID"),
@@ -1408,20 +1268,14 @@ def cmd_node_policy_set(
 
     if peer_add is None and peer_modify is None and peer_delete is None and report is None:
         raise typer.BadParameter("至少指定一个 --peer-add / --peer-modify / --peer-delete / --report")
-    try:
-        node = set_policy(
-            db_path=appctx.db_path,
-            node_id=node_id,
-            peer_add=peer_add,
-            peer_modify=peer_modify,
-            peer_delete=peer_delete,
-            report=report,
-        )
-    except Dn42CtlError as exc:
-        raise typer.BadParameter(str(exc)) from exc
-    except DatabaseError as exc:
-        typer.echo(_db_open_hint(appctx.db_path), err=True)
-        raise typer.Exit(code=1) from exc
+    node = set_policy(
+        db_path=appctx.db_path,
+        node_id=node_id,
+        peer_add=peer_add,
+        peer_modify=peer_modify,
+        peer_delete=peer_delete,
+        report=report,
+    )
     _print_managed_node(node)
 
 
@@ -1429,6 +1283,7 @@ node_app.add_typer(policy_app, name="policy")
 
 
 @node_app.command("set-address")
+@cli_errors
 def cmd_node_set_address(
     ctx: typer.Context,
     node_id: str = typer.Argument(..., help="UUIDv4 node id"),
@@ -1462,21 +1317,15 @@ def cmd_node_set_address(
     if host is UNSET and ipv6 is UNSET and rid is UNSET:
         raise typer.BadParameter("至少指定一个 --endpoint-host / --own-ipv6 / --router-id 或对应的 --clear-*")
 
-    try:
-        result = set_node_addresses(
-            db_path=appctx.db_path,
-            node_id=node_id,
-            endpoint_host=host,
-            own_ipv6=ipv6,
-            router_id=rid,
-            propagate=not no_propagate,
-            dry_run=dry_run,
-        )
-    except Dn42CtlError as exc:
-        raise typer.BadParameter(str(exc)) from exc
-    except DatabaseError as exc:
-        typer.echo(_db_open_hint(appctx.db_path), err=True)
-        raise typer.Exit(code=1) from exc
+    result = set_node_addresses(
+        db_path=appctx.db_path,
+        node_id=node_id,
+        endpoint_host=host,
+        own_ipv6=ipv6,
+        router_id=rid,
+        propagate=not no_propagate,
+        dry_run=dry_run,
+    )
 
     _print_managed_node(result.node)
     if result.changes:
@@ -1488,6 +1337,7 @@ def cmd_node_set_address(
 
 
 @node_app.command("rename")
+@cli_errors
 def cmd_node_rename(
     ctx: typer.Context,
     node_id: str = typer.Argument(..., help="节点 UUID"),
@@ -1500,23 +1350,18 @@ def cmd_node_rename(
     if not name.strip():
         raise typer.BadParameter("name 不能为空")
 
-    try:
-        result = set_node_addresses(
-            db_path=appctx.db_path,
-            node_id=node_id,
-            name=name.strip(),
-            propagate=False,
-        )
-    except Dn42CtlError as exc:
-        raise typer.BadParameter(str(exc)) from exc
-    except DatabaseError as exc:
-        typer.echo(_db_open_hint(appctx.db_path), err=True)
-        raise typer.Exit(code=1) from exc
+    result = set_node_addresses(
+        db_path=appctx.db_path,
+        node_id=node_id,
+        name=name.strip(),
+        propagate=False,
+    )
 
     _print_managed_node(result.node)
 
 
 @node_app.command("auto-peer")
+@cli_errors
 def cmd_node_auto_peer(
     ctx: typer.Context,
     node_id: str = typer.Argument(..., help="节点 UUID"),
@@ -1526,23 +1371,18 @@ def cmd_node_auto_peer(
     appctx: AppContext = ctx.obj
     from dn42ctl.services.node_address import set_node_addresses
 
-    try:
-        result = set_node_addresses(
-            db_path=appctx.db_path,
-            node_id=node_id,
-            auto_peer=enable,
-            propagate=False,
-        )
-    except Dn42CtlError as exc:
-        raise typer.BadParameter(str(exc)) from exc
-    except DatabaseError as exc:
-        typer.echo(_db_open_hint(appctx.db_path), err=True)
-        raise typer.Exit(code=1) from exc
+    result = set_node_addresses(
+        db_path=appctx.db_path,
+        node_id=node_id,
+        auto_peer=enable,
+        propagate=False,
+    )
 
     _print_managed_node(result.node)
 
 
 @node_app.command("mesh-backfill")
+@cli_errors
 def cmd_node_mesh_backfill(
     ctx: typer.Context,
     dry_run: bool = typer.Option(False, "--dry-run", help="只打印将建立的关联,不写库"),
@@ -1551,13 +1391,7 @@ def cmd_node_mesh_backfill(
     appctx: AppContext = ctx.obj
     from dn42ctl.services.node_address import backfill_remote_node_ids
 
-    try:
-        linked, skipped = backfill_remote_node_ids(db_path=appctx.db_path, dry_run=dry_run)
-    except Dn42CtlError as exc:
-        raise typer.BadParameter(str(exc)) from exc
-    except DatabaseError as exc:
-        typer.echo(_db_open_hint(appctx.db_path), err=True)
-        raise typer.Exit(code=1) from exc
+    linked, skipped = backfill_remote_node_ids(db_path=appctx.db_path, dry_run=dry_run)
 
     suffix = " (dry-run)" if dry_run else ""
     typer.echo(f"已关联{suffix}: {len(linked)}")
@@ -1570,6 +1404,7 @@ def cmd_node_mesh_backfill(
 
 
 @node_app.command("adopt-self")
+@cli_errors
 def cmd_node_adopt_self(
     ctx: typer.Context,
     from_node_id: str = typer.Option(None, "--from", help="源分区 node_id (默认取 config.toml 的 node_id)"),
@@ -1581,22 +1416,15 @@ def cmd_node_adopt_self(
     peer 落在 desired-state 读不到的分区里，且没有任何报错。
     """
     appctx: AppContext = ctx.obj
-    config = _require_config_or_exit(appctx)
+    config = appctx.require_config()
     from dn42ctl.services.node_address import adopt_self_partition
 
-    try:
-        result = adopt_self_partition(
-            db_path=appctx.db_path,
-            config_node_id=config.node_id,
-            from_node_id=from_node_id,
-            dry_run=dry_run,
-        )
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}", err=True)
-        raise typer.Exit(1) from exc
-    except DatabaseError as exc:
-        typer.echo(_db_open_hint(appctx.db_path), err=True)
-        raise typer.Exit(code=1) from exc
+    result = adopt_self_partition(
+        db_path=appctx.db_path,
+        config_node_id=config.node_id,
+        from_node_id=from_node_id,
+        dry_run=dry_run,
+    )
 
     suffix = " (dry-run)" if result.dry_run else ""
     typer.echo(f"搬迁{suffix}: {result.from_node_id} -> {result.to_node_id}")
@@ -1617,6 +1445,7 @@ def _resolve_node_config_path(appctx: AppContext, override: Path | None) -> Path
 
 
 @node_app.command("init")
+@cli_errors
 def cmd_node_init(
     ctx: typer.Context,
     server: str = typer.Option(..., "--server", help="中心 server URL (含 scheme), 如 https://center.example"),
@@ -1632,34 +1461,28 @@ def cmd_node_init(
         save_node_config(path, NodeConfig(server=server, node_id=node_id, token=token))
     except (PermissionError, OSError) as exc:
         typer.echo(f"错误: 无法写入 {path}: {exc}", err=True)
-        raise typer.Exit(1) from exc
+        raise typer.Exit(EXIT_FAILURE) from exc
     typer.echo(f"已写入: {path}")
 
 
 @node_app.command("pull")
+@cli_errors
 def cmd_node_pull(
     ctx: typer.Context,
     node_config_path: Path = typer.Option(None, "--node-config-path"),
 ) -> None:
     appctx: AppContext = ctx.obj
-    from dn42ctl.node_config import NodeConfigError, load_node_config
+    from dn42ctl.node_config import load_node_config
     from dn42ctl.services.node_agent import pull
 
     path = _resolve_node_config_path(appctx, node_config_path)
-    try:
-        node_cfg = load_node_config(path)
-    except NodeConfigError as exc:
-        typer.echo(f"错误: {exc}", err=True)
-        raise typer.Exit(1) from exc
-    try:
-        result = pull(node_config=node_cfg)
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}", err=True)
-        raise typer.Exit(1) from exc
+    node_cfg = load_node_config(path)
+    result = pull(node_config=node_cfg)
     typer.echo(f"已 pull: revision={result.revision} (cache: {node_cfg.cache_db_path})")
 
 
 @node_app.command("apply")
+@cli_errors
 def cmd_node_apply(
     ctx: typer.Context,
     dry_run: bool = typer.Option(False, "--dry-run", help="不写文件,仅输出 diff"),
@@ -1668,23 +1491,19 @@ def cmd_node_apply(
     node_config_path: Path = typer.Option(None, "--node-config-path"),
 ) -> None:
     appctx: AppContext = ctx.obj
-    from dn42ctl.node_config import NodeConfigError, load_node_config
+    from dn42ctl.node_config import load_node_config
     from dn42ctl.services.node_agent import pull
     from dn42ctl.services.node_apply import apply, apply_diff_text, apply_summary
 
     path = _resolve_node_config_path(appctx, node_config_path)
-    try:
-        node_cfg = load_node_config(path)
-    except NodeConfigError as exc:
-        typer.echo(f"错误: {exc}", err=True)
-        raise typer.Exit(1) from exc
+    node_cfg = load_node_config(path)
 
     if from_server:
         try:
             pull(node_config=node_cfg)
         except Dn42CtlError as exc:
             typer.echo(f"错误 (pull): {exc}", err=True)
-            raise typer.Exit(1) from exc
+            raise typer.Exit(EXIT_FAILURE) from exc
 
     try:
         result = apply(
@@ -1695,10 +1514,10 @@ def cmd_node_apply(
         )
     except Dn42CtlError as exc:
         typer.echo(f"错误 (apply): {exc}", err=True)
-        raise typer.Exit(1) from exc
+        raise typer.Exit(EXIT_FAILURE) from exc
     except (PermissionError, OSError) as exc:
         typer.echo(f"错误: 写文件失败: {exc}", err=True)
-        raise typer.Exit(1) from exc
+        raise typer.Exit(EXIT_FAILURE) from exc
 
     if dry_run:
         typer.echo(apply_diff_text(result))
@@ -1709,6 +1528,7 @@ def cmd_node_apply(
 
 
 @node_app.command("once")
+@cli_errors
 def cmd_node_once(
     ctx: typer.Context,
     node_config_path: Path = typer.Option(None, "--node-config-path"),
@@ -1716,17 +1536,13 @@ def cmd_node_once(
 ) -> None:
     """pull -> apply -> report (apply_result)"""
     appctx: AppContext = ctx.obj
-    from dn42ctl.node_config import NodeConfigError, load_node_config
+    from dn42ctl.node_config import load_node_config
     from dn42ctl.services.node_agent import pull
     from dn42ctl.services.node_apply import apply, apply_summary
     from dn42ctl.services.node_push import post_report
 
     path = _resolve_node_config_path(appctx, node_config_path)
-    try:
-        node_cfg = load_node_config(path)
-    except NodeConfigError as exc:
-        typer.echo(f"错误: {exc}", err=True)
-        raise typer.Exit(1) from exc
+    node_cfg = load_node_config(path)
 
     try:
         pull_res = pull(node_config=node_cfg)
@@ -1760,13 +1576,14 @@ def cmd_node_once(
             except Exception as report_exc:  # noqa: BLE001
                 typer.echo(f"警告: 错误上报失败: {report_exc}", err=True)
         typer.echo(f"错误: {exc}", err=True)
-        raise typer.Exit(1) from exc
+        raise typer.Exit(EXIT_FAILURE) from exc
     except (PermissionError, OSError) as exc:
         typer.echo(f"错误: 写文件失败: {exc}", err=True)
-        raise typer.Exit(1) from exc
+        raise typer.Exit(EXIT_FAILURE) from exc
 
 
 @node_app.command("agent")
+@cli_errors
 def cmd_node_agent(
     ctx: typer.Context,
     node_config_path: Path = typer.Option(None, "--node-config-path"),
@@ -1782,31 +1599,21 @@ def cmd_node_agent(
     appctx: AppContext = ctx.obj
     import asyncio
 
-    from dn42ctl.node_config import NodeConfigError, load_node_config
+    from dn42ctl.node_config import load_node_config
     from dn42ctl.node_ws_agent import run_agent
 
     path = _resolve_node_config_path(appctx, node_config_path)
-    try:
-        load_node_config(path)
-    except NodeConfigError as exc:
-        typer.echo(f"错误: {exc}", err=True)
-        raise typer.Exit(2) from exc
+    load_node_config(path)
 
     try:
         asyncio.run(run_agent(node_config_path=path, config_path=appctx.config_path))
     except KeyboardInterrupt:
         # systemctl stop sends SIGTERM/SIGINT; a clean stop is not a failure.
         typer.echo("已停止")
-    except NodeConfigError as exc:
-        # node.toml became unreadable during a reconnect (e.g. bad edit).
-        typer.echo(f"错误: {exc}", err=True)
-        raise typer.Exit(2) from exc
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}", err=True)
-        raise typer.Exit(1) from exc
 
 
 @node_app.command("status")
+@cli_errors
 def cmd_node_status(
     ctx: typer.Context,
     node_config_path: Path = typer.Option(None, "--node-config-path"),
@@ -1829,14 +1636,14 @@ def cmd_node_status(
         st = path.stat()
         typer.echo(f"  权限: 0o{st.st_mode & 0o777:o}")
     except FileNotFoundError:
-        typer.echo("  错误: 文件不存在 (先运行 dn42ctl node init)")
-        raise typer.Exit(1) from None
+        typer.echo("  错误: 文件不存在 (先运行 dn42ctl node init)", err=True)
+        raise typer.Exit(EXIT_USAGE) from None
 
     try:
         node_cfg = load_node_config(path)
     except NodeConfigError as exc:
         typer.echo(f"  错误: {exc}", err=True)
-        raise typer.Exit(1) from exc
+        raise typer.Exit(EXIT_USAGE) from exc
     typer.echo(f"  server: {node_cfg.server}")
     typer.echo(f"  node_id: {node_cfg.node_id}")
     typer.echo(f"  token: {'<set>' if node_cfg.token else '<missing>'}")
@@ -1860,7 +1667,7 @@ def cmd_node_status(
         remote = client.fetch_status()
     except NodeClientError as exc:
         typer.echo(f"  不可达: {exc}", err=True)
-        raise typer.Exit(1) from exc
+        raise typer.Exit(EXIT_FAILURE) from exc
     typer.echo(f"  last_seen_at: {remote.get('last_seen_at') or '-'}")
     typer.echo(f"  current_revision: {remote.get('current_revision') or '-'}")
     typer.echo(f"  pinned_revision: {remote.get('pinned_revision') or '(none)'}")
@@ -1873,6 +1680,7 @@ def cmd_node_status(
 
 
 @node_app.command("push")
+@cli_errors
 def cmd_node_push(
     ctx: typer.Context,
     json_path: Path = typer.Option(..., "--json", help="proposals 列表 JSON 文件: [{kind,payload}, ...]"),
@@ -1885,39 +1693,32 @@ def cmd_node_push(
     kind ∈ {peer_add, peer_modify, peer_delete}.
     """
     appctx: AppContext = ctx.obj
-    from dn42ctl.node_config import NodeConfigError, load_node_config
+    from dn42ctl.node_config import load_node_config
     from dn42ctl.services.node_push import post_proposal
 
     path = _resolve_node_config_path(appctx, node_config_path)
-    try:
-        node_cfg = load_node_config(path)
-    except NodeConfigError as exc:
-        typer.echo(f"错误: {exc}", err=True)
-        raise typer.Exit(1) from exc
+    node_cfg = load_node_config(path)
     try:
         items = json.loads(json_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         typer.echo(f"错误: 无法读取 JSON: {exc}", err=True)
-        raise typer.Exit(1) from exc
+        raise typer.Exit(EXIT_FAILURE) from exc
     if not isinstance(items, list):
         typer.echo("错误: JSON 顶层必须是数组", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(EXIT_FAILURE)
     submitted = 0
     for item in items:
         if not isinstance(item, dict) or "kind" not in item or "payload" not in item:
             typer.echo(f"错误: 跳过非法 item: {item}", err=True)
             continue
-        try:
-            res = post_proposal(node_config=node_cfg, kind=item["kind"], payload=item["payload"], source=source)
-        except Dn42CtlError as exc:
-            typer.echo(f"错误: {exc}", err=True)
-            raise typer.Exit(1) from exc
+        res = post_proposal(node_config=node_cfg, kind=item["kind"], payload=item["payload"], source=source)
         typer.echo(f"提案 #{res['id']} kind={res['kind']} status={res['status']}")
         submitted += 1
     typer.echo(f"共提交 {submitted} 条提案")
 
 
 @node_app.command("report")
+@cli_errors
 def cmd_node_report(
     ctx: typer.Context,
     kind: str = typer.Option(..., "--kind", help="apply_result | scan_result | live_status | error"),
@@ -1925,32 +1726,25 @@ def cmd_node_report(
     node_config_path: Path = typer.Option(None, "--node-config-path"),
 ) -> None:
     appctx: AppContext = ctx.obj
-    from dn42ctl.node_config import NodeConfigError, load_node_config
+    from dn42ctl.node_config import load_node_config
     from dn42ctl.services.node_push import post_report
 
     path = _resolve_node_config_path(appctx, node_config_path)
-    try:
-        node_cfg = load_node_config(path)
-    except NodeConfigError as exc:
-        typer.echo(f"错误: {exc}", err=True)
-        raise typer.Exit(1) from exc
+    node_cfg = load_node_config(path)
     try:
         payload = json.loads(json_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         typer.echo(f"错误: 无法读取 JSON: {exc}", err=True)
-        raise typer.Exit(1) from exc
+        raise typer.Exit(EXIT_FAILURE) from exc
     if not isinstance(payload, dict):
         typer.echo("错误: report payload 必须是对象", err=True)
-        raise typer.Exit(1)
-    try:
-        res = post_report(node_config=node_cfg, kind=kind, payload=payload)
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}", err=True)
-        raise typer.Exit(1) from exc
+        raise typer.Exit(EXIT_FAILURE)
+    res = post_report(node_config=node_cfg, kind=kind, payload=payload)
     typer.echo(f"上报 #{res['id']} kind={res['kind']} at={res['received_at']}")
 
 
 @node_app.command("proposals")
+@cli_errors
 def cmd_node_proposals(
     ctx: typer.Context,
     node_id: str = typer.Argument(..., help="节点 UUID"),
@@ -1960,13 +1754,7 @@ def cmd_node_proposals(
     appctx: AppContext = ctx.obj
     from dn42ctl.services import list_proposals
 
-    try:
-        rows = list_proposals(db_path=appctx.db_path, node_id=node_id, status=status, limit=limit)
-    except Dn42CtlError as exc:
-        raise typer.BadParameter(str(exc)) from exc
-    except DatabaseError as exc:
-        typer.echo(_db_open_hint(appctx.db_path), err=True)
-        raise typer.Exit(code=1) from exc
+    rows = list_proposals(db_path=appctx.db_path, node_id=node_id, status=status, limit=limit)
     if not rows:
         typer.echo("(没有 proposal)")
         return
@@ -1978,6 +1766,7 @@ def cmd_node_proposals(
 
 
 @node_app.command("reports")
+@cli_errors
 def cmd_node_reports(
     ctx: typer.Context,
     node_id: str = typer.Argument(..., help="节点 UUID"),
@@ -1987,13 +1776,7 @@ def cmd_node_reports(
     appctx: AppContext = ctx.obj
     from dn42ctl.services import list_reports
 
-    try:
-        rows = list_reports(db_path=appctx.db_path, node_id=node_id, kind=kind, limit=limit)
-    except Dn42CtlError as exc:
-        raise typer.BadParameter(str(exc)) from exc
-    except DatabaseError as exc:
-        typer.echo(_db_open_hint(appctx.db_path), err=True)
-        raise typer.Exit(code=1) from exc
+    rows = list_reports(db_path=appctx.db_path, node_id=node_id, kind=kind, limit=limit)
     if not rows:
         typer.echo("(没有 report)")
         return
@@ -2006,26 +1789,21 @@ def cmd_node_reports(
 
 
 @node_app.command("accept-proposal")
+@cli_errors
 def cmd_node_accept_proposal(
     ctx: typer.Context,
     proposal_id: int = typer.Argument(..., help="proposal id"),
 ) -> None:
     appctx: AppContext = ctx.obj
-    config = _require_config_or_exit(appctx)
+    config = appctx.require_config()
     from dn42ctl.services import accept_proposal
 
-    try:
-        p = accept_proposal(config=config, db_path=appctx.db_path, proposal_id=proposal_id)
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}", err=True)
-        raise typer.Exit(1) from exc
-    except DatabaseError as exc:
-        typer.echo(_db_open_hint(appctx.db_path), err=True)
-        raise typer.Exit(1) from exc
+    p = accept_proposal(config=config, db_path=appctx.db_path, proposal_id=proposal_id)
     typer.echo(f"已接受 proposal #{p.id} kind={p.kind} status={p.status} at={p.decided_at}")
 
 
 @node_app.command("reject-proposal")
+@cli_errors
 def cmd_node_reject_proposal(
     ctx: typer.Context,
     proposal_id: int = typer.Argument(..., help="proposal id"),
@@ -2034,34 +1812,21 @@ def cmd_node_reject_proposal(
     appctx: AppContext = ctx.obj
     from dn42ctl.services import reject_proposal
 
-    try:
-        p = reject_proposal(db_path=appctx.db_path, proposal_id=proposal_id, reason=reason)
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}", err=True)
-        raise typer.Exit(1) from exc
-    except DatabaseError as exc:
-        typer.echo(_db_open_hint(appctx.db_path), err=True)
-        raise typer.Exit(1) from exc
+    p = reject_proposal(db_path=appctx.db_path, proposal_id=proposal_id, reason=reason)
     typer.echo(f"已拒绝 proposal #{p.id}: {p.message}")
 
 
 @node_app.command("import-report")
+@cli_errors
 def cmd_node_import_report(
     ctx: typer.Context,
     report_id: int = typer.Argument(..., help="report id"),
 ) -> None:
     appctx: AppContext = ctx.obj
-    config = _require_config_or_exit(appctx)
+    config = appctx.require_config()
     from dn42ctl.services import import_report
 
-    try:
-        counts = import_report(config=config, db_path=appctx.db_path, report_id=report_id)
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}", err=True)
-        raise typer.Exit(1) from exc
-    except DatabaseError as exc:
-        typer.echo(_db_open_hint(appctx.db_path), err=True)
-        raise typer.Exit(1) from exc
+    counts = import_report(config=config, db_path=appctx.db_path, report_id=report_id)
     typer.echo(
         f"已导入 report #{report_id}: "
         f"bgp(created={counts['bgp_created']}, skipped={counts['bgp_skipped']}), "
@@ -2079,6 +1844,7 @@ def cmd_node_import_report(
 
 
 @node_app.command("revisions")
+@cli_errors
 def cmd_node_revisions(
     ctx: typer.Context,
     node_id: str = typer.Argument(..., help="节点 UUID"),
@@ -2087,14 +1853,8 @@ def cmd_node_revisions(
     appctx: AppContext = ctx.obj
     from dn42ctl.services import get_pinned, list_revisions
 
-    try:
-        rows = list_revisions(db_path=appctx.db_path, node_id=node_id, limit=limit)
-        pin = get_pinned(db_path=appctx.db_path, node_id=node_id)
-    except Dn42CtlError as exc:
-        raise typer.BadParameter(str(exc)) from exc
-    except DatabaseError as exc:
-        typer.echo(_db_open_hint(appctx.db_path), err=True)
-        raise typer.Exit(code=1) from exc
+    rows = list_revisions(db_path=appctx.db_path, node_id=node_id, limit=limit)
+    pin = get_pinned(db_path=appctx.db_path, node_id=node_id)
     pin_rev = pin.revision if pin else None
     typer.echo(f"pinned: {pin_rev or '(none, following latest)'}")
     if not rows:
@@ -2106,6 +1866,7 @@ def cmd_node_revisions(
 
 
 @node_app.command("rollback")
+@cli_errors
 def cmd_node_rollback(
     ctx: typer.Context,
     node_id: str = typer.Argument(..., help="节点 UUID"),
@@ -2114,15 +1875,12 @@ def cmd_node_rollback(
     appctx: AppContext = ctx.obj
     from dn42ctl.services import rollback_to
 
-    try:
-        rev = rollback_to(db_path=appctx.db_path, node_id=node_id, revision=revision)
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}", err=True)
-        raise typer.Exit(1) from exc
+    rev = rollback_to(db_path=appctx.db_path, node_id=node_id, revision=revision)
     typer.echo(f"已 pin: node={rev.node_id} revision={rev.revision}")
 
 
 @node_app.command("rollback-clear")
+@cli_errors
 def cmd_node_rollback_clear(
     ctx: typer.Context,
     node_id: str = typer.Argument(..., help="节点 UUID"),
@@ -2130,11 +1888,7 @@ def cmd_node_rollback_clear(
     appctx: AppContext = ctx.obj
     from dn42ctl.services import clear_rollback
 
-    try:
-        clear_rollback(db_path=appctx.db_path, node_id=node_id)
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}", err=True)
-        raise typer.Exit(1) from exc
+    clear_rollback(db_path=appctx.db_path, node_id=node_id)
     typer.echo(f"已清除 pin: node={node_id} (恢复到最新)")
 
 
@@ -2155,6 +1909,7 @@ def _print_system_result(result: object) -> None:
 
 
 @system_app.command("install")
+@cli_errors
 def cmd_system_install(
     ctx: typer.Context,
     component: str = typer.Argument(..., help=f"组件名: {' | '.join(_SYSTEM_COMPONENTS)}"),
@@ -2168,28 +1923,25 @@ def cmd_system_install(
     appctx: AppContext = ctx.obj
 
     if component not in _SYSTEM_COMPONENTS:
-        typer.echo(f"错误: 未知组件 '{component}'，可选: {', '.join(_SYSTEM_COMPONENTS)}")
-        raise typer.Exit(2)
+        typer.echo(f"错误: 未知组件 '{component}'，可选: {', '.join(_SYSTEM_COMPONENTS)}", err=True)
+        raise typer.Exit(EXIT_USAGE)
 
-    try:
-        if component == "firewalld-conf":
-            result = install_firewalld_conf()
-        elif component == "nftables-conf":
-            result = install_nftables_conf()
-        elif component == "roa-service":
-            config = _require_config_or_exit(appctx)
-            result = install_roa_service(config=config)
-        else:
-            raise typer.Exit(2)
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}")
-        raise typer.Exit(1) from exc
+    if component == "firewalld-conf":
+        result = install_firewalld_conf()
+    elif component == "nftables-conf":
+        result = install_nftables_conf()
+    elif component == "roa-service":
+        config = appctx.require_config()
+        result = install_roa_service(config=config)
+    else:
+        raise typer.Exit(EXIT_USAGE)
 
     typer.echo(f"{component} 安装完成")
     _print_system_result(result)
 
 
 @system_app.command("uninstall")
+@cli_errors
 def cmd_system_uninstall(
     ctx: typer.Context,
     component: str = typer.Argument(..., help=f"组件名: {' | '.join(_SYSTEM_COMPONENTS)}"),
@@ -2201,21 +1953,17 @@ def cmd_system_uninstall(
     )
 
     if component not in _SYSTEM_COMPONENTS:
-        typer.echo(f"错误: 未知组件 '{component}'，可选: {', '.join(_SYSTEM_COMPONENTS)}")
-        raise typer.Exit(2)
+        typer.echo(f"错误: 未知组件 '{component}'，可选: {', '.join(_SYSTEM_COMPONENTS)}", err=True)
+        raise typer.Exit(EXIT_USAGE)
 
-    try:
-        if component == "firewalld-conf":
-            result = uninstall_firewalld_conf()
-        elif component == "nftables-conf":
-            result = uninstall_nftables_conf()
-        elif component == "roa-service":
-            result = uninstall_roa_service()
-        else:
-            raise typer.Exit(2)
-    except Dn42CtlError as exc:
-        typer.echo(f"错误: {exc}")
-        raise typer.Exit(1) from exc
+    if component == "firewalld-conf":
+        result = uninstall_firewalld_conf()
+    elif component == "nftables-conf":
+        result = uninstall_nftables_conf()
+    elif component == "roa-service":
+        result = uninstall_roa_service()
+    else:
+        raise typer.Exit(EXIT_USAGE)
 
     typer.echo(f"{component} 卸载完成")
     _print_system_result(result)
@@ -2235,7 +1983,7 @@ def _find_web_dir() -> Path:
     web_dir = _find_pkg_root() / "web"
     if not (web_dir / "package.json").exists():
         typer.echo(f"错误: 找不到 web 目录 ({web_dir})")
-        raise typer.Exit(1)
+        raise typer.Exit(EXIT_FAILURE)
     return web_dir
 
 
@@ -2252,6 +2000,7 @@ def _restorecon(path: Path) -> None:
 
 
 @deploy_app.command("web")
+@cli_errors
 def cmd_deploy_web(
     dest: Path = typer.Argument(..., help="部署目标目录 (如 /var/www/dn42ctl)"),
     skip_build: bool = typer.Option(False, "--skip-build", help="跳过构建，直接复制已有 dist/"),
@@ -2272,7 +2021,7 @@ def cmd_deploy_web(
         pnpm = shutil.which("pnpm")
         if pnpm is None:
             typer.echo("错误: 未找到 pnpm，请先安装 (npm install -g pnpm)")
-            raise typer.Exit(1)
+            raise typer.Exit(EXIT_FAILURE)
 
         build_env = {**os.environ}
         if api_base:
@@ -2294,11 +2043,11 @@ def cmd_deploy_web(
             )
         except subprocess.CalledProcessError as exc:
             typer.echo(f"错误: 构建失败 (exit {exc.returncode})")
-            raise typer.Exit(1) from exc
+            raise typer.Exit(EXIT_FAILURE) from exc
 
     if not dist_dir.exists():
         typer.echo(f"错误: dist/ 不存在 ({dist_dir})，请先运行构建")
-        raise typer.Exit(1)
+        raise typer.Exit(EXIT_FAILURE)
 
     dest.mkdir(parents=True, exist_ok=True)
 
@@ -2317,6 +2066,7 @@ def cmd_deploy_web(
 
 
 @deploy_app.command("daemon")
+@cli_errors
 def cmd_deploy_daemon(
     dest: Path = typer.Option(
         Path("/usr/local/bin"),
@@ -2342,7 +2092,7 @@ def cmd_deploy_daemon(
     uv = shutil.which("uv")
     if uv is None:
         typer.echo("错误: 未找到 uv")
-        raise typer.Exit(1)
+        raise typer.Exit(EXIT_FAILURE)
 
     dest.mkdir(parents=True, exist_ok=True)
     tool_dir.mkdir(parents=True, exist_ok=True)
@@ -2376,7 +2126,7 @@ def cmd_deploy_daemon(
         )
     except subprocess.CalledProcessError as exc:
         typer.echo(f"错误: 安装失败 (exit {exc.returncode})")
-        raise typer.Exit(1) from exc
+        raise typer.Exit(EXIT_FAILURE) from exc
     finally:
         commit_file.unlink(missing_ok=True)
         tmp_commit.unlink(missing_ok=True)
