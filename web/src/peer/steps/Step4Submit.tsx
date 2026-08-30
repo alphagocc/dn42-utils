@@ -86,9 +86,9 @@ export function Step4Submit({ asn, challenge, session, onResult }: Props) {
           </span>
           <input
             name="listen_port"
-            type="number"
-            min="0"
-            max="65535"
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
             className="block w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-black px-3 py-2 text-sm"
           />
         </label>

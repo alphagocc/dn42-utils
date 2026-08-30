@@ -13,3 +13,27 @@
     font-size: 0.85em;
   }
 }
+
+/* Press feedback for every button of both entries, deliberately left unlayered:
+   Tailwind's utilities layer outranks `@layer base` whatever the specificity, and
+   the primary buttons carry `hover:opacity-90`, which would win while the pointer
+   is held down. */
+button:not(:disabled) {
+  cursor: pointer;
+  transition: transform 120ms ease-out, opacity 120ms ease-out;
+}
+
+button:not(:disabled):active {
+  transform: scale(0.97);
+  opacity: 0.85;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button:not(:disabled) {
+    transition: opacity 120ms ease-out;
+  }
+
+  button:not(:disabled):active {
+    transform: none;
+  }
+}

@@ -39,8 +39,9 @@ export function Step1Lookup({ asn, onResult }: Props) {
           </span>
           <input
             name="asn"
-            type="number"
-            min="1"
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
             required
             placeholder="e.g. 4242421234"
             defaultValue={asn || ""}

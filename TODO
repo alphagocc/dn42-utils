@@ -2,7 +2,10 @@
 
 <task>
 
-  - [x] 添加功能，使得 bird.conf 支持一个 自定义的 extra.conf 以便用户插入不能在数据库中保存的配置。
+  — [x] auto peer 页面your asn不应该支持箭头加减1
+  - [x] admin 页面 sign out 会出现在两行上。
+  - [x] 第一排上的 overview 等按钮，一行不一定放得下，把这些按钮放到侧边栏
+  - [x] 所有的按钮都没有按下的反应，做一点 css 动画。
 
 </task>
 

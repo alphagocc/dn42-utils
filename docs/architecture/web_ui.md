@@ -39,7 +39,7 @@ web/
     │   ├── App.tsx              # 登录/仪表盘条件渲染
     │   ├── Login.tsx            # token 登录表单
     │   ├── NodeContext.tsx      # 当前选中节点 (React Context)
-    │   ├── Dashboard.tsx        # Tab 容器 + 标题栏
+    │   ├── Dashboard.tsx        # 顶栏 + 侧栏 Tab 容器
     │   └── tabs/
     │       ├── Overview.tsx
     │       ├── Bgp.tsx          # CRUD
@@ -90,6 +90,22 @@ HTML `<head>` 内尽早执行的内联脚本（防 FOUC）：
 
 不使用其他色相 (蓝/绿/紫等)，保持黑白配色一致性。
 
+## 按钮的按下反馈
+
+按下反馈写在 `shared/index.css` 的 base layer 内，以元素选择器 `button` 生效，admin 与 peer 两个入口的全部按钮因此获得一致行为，新增按钮无需重复书写 class。
+
+三条规则：指针悬停时 `cursor: pointer`；按下时 `transform: scale(0.97)` 叠加 `opacity: 0.85`，过渡时长 120ms；`disabled` 状态降为半透明并取消上述反馈。
+
+`prefers-reduced-motion: reduce` 下取消缩放与过渡，仅保留透明度变化，反馈对偏好减少动效的用户依然可见。
+
+## 数字输入框
+
+`type="number"` 的 spinner 箭头会让方向键与滚轮意外改写数值，ASN、端口这类字段并没有逐一增减的语义。全部数字字段改用 `type="text"` 配合 `inputMode="numeric"` 与 `pattern="[0-9]*"`：移动端仍然弹出数字键盘，浏览器仍按 pattern 拦截含非数字字符的提交，而 spinner 箭头、方向键增减与滚轮改值一并消失。
+
+覆盖 peer 页的 ASN 与 listen_port，以及 `FormModal` 中声明为 `type: "number"` 的字段（peer_asn、listen_port、babel_rxcost）。`FieldDef` 的类型名保持 `"number"`，转换发生在 `Modal.tsx` 内部，调用方无需改动。
+
+上下界校验交给服务端，与本文件"已知限制"中记录的表单校验策略一致。
+
 ## admin: 鉴权与状态
 
 - 无路由库：`App.tsx` 根据 `sessionStorage.dn42ctl_admin_token` 条件渲染 `<Login />` 或 `<Dashboard />`。
@@ -97,7 +113,19 @@ HTML `<head>` 内尽早执行的内联脚本（防 FOUC）：
 - "Sign out"按钮：`sessionStorage.removeItem` + 状态更新。
 - **不存到 `localStorage`**：保持 token 仅活在当前 tab。
 
-## admin: 顶部 Tab 视图
+## admin: 侧栏 Tab 视图
+
+十个 tab 竖排在左侧导航栏内，顶栏只保留标题与全局操作控件（节点选择器、Refresh、Theme、Sign out）。改为侧栏之前，十个 tab 与四个控件同处一行，窗口稍窄时 tab 就会折行，并把 Sign out 的文字挤成两行。
+
+布局要点：
+
+顶栏内容区高度固定为 `h-14`，右侧控件带 `shrink-0` 与 `whitespace-nowrap`，窗口收窄时按钮文字保持单行。
+
+侧栏在 `lg` 及以上宽度常显，宽度 `w-52`，内部 `<nav>` 使用 `sticky top-14` 跟随页面滚动。
+
+`lg` 以下宽度侧栏隐藏，顶栏左侧出现 `Menu` 按钮，点击后以抽屉形式覆盖显示：半透明遮罩加左侧面板；点击遮罩、按 Escape、或选中任一 tab 都会关闭抽屉。
+
+侧栏与抽屉共用同一份 `TabNav`，选中项沿用黑底白字（暗色下反转），未选中项使用 `hover:bg-zinc-100 dark:hover:bg-zinc-900`。
 
 | Tab | 数据来源 (admin API) | 操作 |
 |-----|---------------------|------|
@@ -136,7 +164,7 @@ Tab 切换使用 React `useState`，刷新按钮递增 `refreshKey` 强制组件
 `Modal.tsx` 用 `Object.fromEntries(new FormData(...))` 取值，因此：
 
 - **未勾选的 checkbox 在 `FormData` 里是缺席而非 `false`**，取值要写 `!!d.enabled`。
-- **空文本框产出 `""` 而非缺席。** 涉及"可清除"语义的字段（节点的三个地址字段）必须显式把 `"" → null` 再序列化——`""` 是 UI 表达"取消中心管理"的方式，而 `null` 才是 API 的表达方式。
+- **空文本框产出 `""` 而非缺席。** 涉及"可清除"语义的字段（节点的三个地址字段）必须显式把 `"" → null` 再序列化。`""` 是 UI 表达"取消中心管理"的方式，而 `null` 才是 API 的表达方式。
 
 ## peer: 4 步向导
 

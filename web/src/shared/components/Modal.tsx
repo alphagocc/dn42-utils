@@ -33,6 +33,10 @@ export function Modal({ onClose, children }: ModalProps) {
 export interface FieldDef {
   name: string;
   label: string;
+  /**
+   * `"number"` renders as a numeric-keyboard text box, not `type="number"`: the
+   * spinner arrows let a stray wheel scroll or arrow key rewrite an ASN or port.
+   */
   type?: "text" | "number" | "password" | "select" | "checkbox";
   required?: boolean;
   value?: string | number | boolean;
@@ -85,7 +89,9 @@ export function FormModal({ title, fields, onSubmit, onClose }: FormModalProps) 
               />
             ) : (
               <input
-                type={f.type || "text"}
+                type={f.type === "number" ? "text" : f.type || "text"}
+                inputMode={f.type === "number" ? "numeric" : undefined}
+                pattern={f.type === "number" ? "[0-9]*" : undefined}
                 name={f.name}
                 defaultValue={f.value != null ? String(f.value) : ""}
                 required={f.required}
