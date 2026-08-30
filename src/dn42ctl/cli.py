@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import secrets
 import uuid
 from collections.abc import Callable
@@ -1975,28 +1974,17 @@ app.add_typer(system_app, name="system")
 deploy_app = typer.Typer(help="部署 Web UI / daemon 到系统目录")
 
 
-def _find_pkg_root() -> Path:
-    return Path(__file__).resolve().parent.parent.parent
+def _print_deploy_result(result: object) -> None:
+    from dn42ctl.services.deploy import DeployResult
 
-
-def _find_web_dir() -> Path:
-    web_dir = _find_pkg_root() / "web"
-    if not (web_dir / "package.json").exists():
-        typer.echo(f"错误: 找不到 web 目录 ({web_dir})")
-        raise typer.Exit(EXIT_FAILURE)
-    return web_dir
-
-
-def _restorecon(path: Path) -> None:
-    import shutil
-    import subprocess
-
-    restorecon = shutil.which("restorecon")
-    if restorecon is not None:
-        subprocess.run(  # noqa: S603
-            [restorecon, "-Rv", str(path)],
-            check=False,
-        )
+    if not isinstance(result, DeployResult):
+        return
+    for n in result.notes:
+        typer.echo(f"  {n}")
+    for f in result.changed_files:
+        typer.echo(f"  {f}")
+    for w in result.warnings:
+        typer.echo(f"  警告: {w}")
 
 
 @deploy_app.command("web")
@@ -2011,58 +1999,11 @@ def cmd_deploy_web(
     ),
 ) -> None:
     """构建 web UI 并复制到指定目录。"""
-    import shutil
-    import subprocess
+    from dn42ctl.services.deploy import deploy_web
 
-    web_dir = _find_web_dir()
-    dist_dir = web_dir / "dist"
-
-    if not skip_build:
-        pnpm = shutil.which("pnpm")
-        if pnpm is None:
-            typer.echo("错误: 未找到 pnpm，请先安装 (npm install -g pnpm)")
-            raise typer.Exit(EXIT_FAILURE)
-
-        build_env = {**os.environ}
-        if api_base:
-            build_env["VITE_API_BASE"] = api_base
-            typer.echo(f"VITE_API_BASE={api_base}")
-
-        typer.echo("正在构建 web UI...")
-        try:
-            subprocess.run(  # noqa: S603
-                [pnpm, "install", "--frozen-lockfile"],
-                cwd=str(web_dir),
-                check=True,
-            )
-            subprocess.run(  # noqa: S603
-                [pnpm, "build"],
-                cwd=str(web_dir),
-                env=build_env,
-                check=True,
-            )
-        except subprocess.CalledProcessError as exc:
-            typer.echo(f"错误: 构建失败 (exit {exc.returncode})")
-            raise typer.Exit(EXIT_FAILURE) from exc
-
-    if not dist_dir.exists():
-        typer.echo(f"错误: dist/ 不存在 ({dist_dir})，请先运行构建")
-        raise typer.Exit(EXIT_FAILURE)
-
-    dest.mkdir(parents=True, exist_ok=True)
-
-    for name in ("admin", "peer", "assets"):
-        src = dist_dir / name
-        if not src.exists():
-            continue
-        target = dest / name
-        if target.exists():
-            shutil.rmtree(target)
-        shutil.copytree(src, target)
-        typer.echo(f"  {src} -> {target}")
-
-    _restorecon(dest)
+    result = deploy_web(dest=dest, skip_build=skip_build, api_base=api_base)
     typer.echo(f"部署完成: {dest}")
+    _print_deploy_result(result)
 
 
 @deploy_app.command("daemon")
@@ -2084,55 +2025,11 @@ def cmd_deploy_daemon(
     venv 放在 --tool-dir 而非 ~/.local/share/uv/tools/，
     避免 systemd ProtectHome=true 导致无法启动。
     """
-    import shutil
-    import subprocess
+    from dn42ctl.services.deploy import deploy_daemon
 
-    pkg_root = _find_pkg_root()
-
-    uv = shutil.which("uv")
-    if uv is None:
-        typer.echo("错误: 未找到 uv")
-        raise typer.Exit(EXIT_FAILURE)
-
-    dest.mkdir(parents=True, exist_ok=True)
-    tool_dir.mkdir(parents=True, exist_ok=True)
-
-    commit_file = pkg_root / "src" / "dn42ctl" / "_build_commit.txt"
-    tmp_commit = Path("/tmp/dn42ctl_build_commit.txt")  # noqa: S108
-    try:
-        commit_hash = subprocess.check_output(  # noqa: S603
-            ["git", "rev-parse", "HEAD"],  # noqa: S607
-            cwd=pkg_root,
-            text=True,
-        ).strip()
-        tmp_commit.write_text(commit_hash, encoding="utf-8")
-        shutil.copy2(tmp_commit, commit_file)
-        typer.echo(f"注入 commit: {commit_hash[:12]}")
-    except (subprocess.CalledProcessError, OSError) as exc:
-        typer.echo(f"警告: 无法获取 git commit ({exc})")
-
-    env = {
-        **__import__("os").environ,
-        "UV_TOOL_BIN_DIR": str(dest),
-        "UV_TOOL_DIR": str(tool_dir),
-    }
-
-    typer.echo(f"正在安装 dn42ctl 到 {dest} (venv: {tool_dir}) ...")
-    try:
-        subprocess.run(  # noqa: S603
-            [uv, "tool", "install", "--force", "--reinstall", str(pkg_root)],
-            env=env,
-            check=True,
-        )
-    except subprocess.CalledProcessError as exc:
-        typer.echo(f"错误: 安装失败 (exit {exc.returncode})")
-        raise typer.Exit(EXIT_FAILURE) from exc
-    finally:
-        commit_file.unlink(missing_ok=True)
-        tmp_commit.unlink(missing_ok=True)
-
-    _restorecon(dest / "dn42ctl")
+    result = deploy_daemon(dest=dest, tool_dir=tool_dir)
     typer.echo(f"已安装: {dest / 'dn42ctl'}")
+    _print_deploy_result(result)
 
 
 app.add_typer(deploy_app, name="deploy")

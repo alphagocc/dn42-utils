@@ -53,6 +53,7 @@ tests/
 ├── test_services_dummy.py                 # dummy 接口管理
 ├── test_services_init_sys.py              # init + genconf
 ├── test_services_system.py                # system install/uninstall
+├── test_services_deploy.py                # deploy web/daemon
 ├── test_services_auto_peer.py             # auto-peer 会话与提案提交
 ├── test_services_kioubit_auth.py          # Kioubit 认证响应验签
 ├── test_services_desired_state.py         # desired state 生成
@@ -74,6 +75,7 @@ tests/
 ├── test_api_public_auto_peer.py           # REST API: 公共 auto-peer
 ├── test_api_revisions.py                  # REST API: revisions
 ├── test_cli_errors.py                     # CLI: 异常到退出码的映射
+├── test_cli_deploy.py                     # CLI: deploy 命令
 ├── test_cli_node.py                       # CLI: node 命令
 ├── test_cli_node_agent.py                 # CLI: node agent 命令
 ├── test_cli_node_decisions.py             # CLI: node decision 命令
