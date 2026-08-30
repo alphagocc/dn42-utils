@@ -13,6 +13,11 @@ ExecStart=/usr/local/bin/dn42ctl serve --host ::1 --port 4242
 Restart=on-failure
 RestartSec=3s
 
+# ---- SELinux ----
+# 与策略模块中的自动转换目标一致,写出来是为了让两个 unit 的归属都一目了然。
+# 前缀 "-" 让未加载 dn42ctl 策略模块或未启用 SELinux 的机器忽略这一行。
+SELinuxContext=-system_u:system_r:dn42ctl_server_t:s0
+
 # ---- 文件系统 ----
 ReadWritePaths=/var/lib/dn42ctl /etc/dn42ctl
 ProtectSystem=strict

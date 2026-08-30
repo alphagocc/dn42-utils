@@ -30,3 +30,9 @@ node_modules/
 coverage.xml
 htmlcov/
 .coverage
+
+# SELinux 策略模块的编译产物,源文件是 selinux/*.te|fc|if
+selinux/tmp/
+selinux/*.pp
+selinux/*.mod
+selinux/*.mod.fc

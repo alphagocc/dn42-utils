@@ -1,0 +1,186 @@
+policy_module(dn42ctl, 1.0.0)
+
+########################################
+#
+# 声明
+#
+
+attribute dn42ctl_domain;
+
+type dn42ctl_exec_t;
+corecmd_executable_file(dn42ctl_exec_t)
+
+# hub 侧 API server。以非特权用户 dn42ctl 运行,只读写权威数据库与 /etc/dn42ctl,
+# 不触碰 /etc/bird 与 /etc/systemd/network,这一职责划分见 docs/architecture/deployment.md。
+type dn42ctl_server_t, dn42ctl_domain;
+init_daemon_domain(dn42ctl_server_t, dn42ctl_exec_t)
+init_nnp_daemon_domain(dn42ctl_server_t)
+
+# 节点侧常驻同步 agent。以 root 运行,渲染 /etc/bird 与 /etc/systemd/network。
+# 显式转换的原因见 dn42ctl.if 中 dn42ctl_explicit_daemon_domain 的说明。
+type dn42ctl_agent_t, dn42ctl_domain;
+dn42ctl_explicit_daemon_domain(dn42ctl_agent_t, dn42ctl_exec_t)
+init_nnp_daemon_domain(dn42ctl_agent_t)
+
+type dn42ctl_etc_t;
+files_config_file(dn42ctl_etc_t)
+
+type dn42ctl_var_lib_t;
+files_type(dn42ctl_var_lib_t)
+
+type dn42ctl_tmp_t;
+files_tmp_file(dn42ctl_tmp_t)
+
+type dn42ctl_bird_conf_t;
+files_config_file(dn42ctl_bird_conf_t)
+
+type dn42ctl_networkd_conf_t;
+files_config_file(dn42ctl_networkd_conf_t)
+
+# DN42 registry 的本地克隆。位置由 config.toml 指定,无法在 .fc 中穷举,
+# 部署时用 semanage fcontext 把实际目录标成本类型。
+type dn42ctl_registry_t;
+files_type(dn42ctl_registry_t)
+
+########################################
+#
+# 两个域的公共规则
+#
+
+allow dn42ctl_domain self:process { fork getsched setsched signal signull sigkill setrlimit };
+allow dn42ctl_domain self:fifo_file rw_fifo_file_perms;
+allow dn42ctl_domain self:unix_stream_socket create_stream_socket_perms;
+allow dn42ctl_domain self:unix_dgram_socket create_socket_perms;
+
+# 可执行文件是一个 shebang 脚本,解释器位于 uv 建立的 venv 中（默认 /opt/dn42ctl）,
+# 该目录及其中的扩展模块均为 usr_t,因此需要 exec 与 map。
+corecmd_exec_bin(dn42ctl_domain)
+files_read_usr_files(dn42ctl_domain)
+files_exec_usr_files(dn42ctl_domain)
+files_mmap_usr_files(dn42ctl_domain)
+files_read_usr_symlinks(dn42ctl_domain)
+
+kernel_read_system_state(dn42ctl_domain)
+files_read_etc_files(dn42ctl_domain)
+files_search_var_lib(dn42ctl_domain)
+miscfiles_read_localization(dn42ctl_domain)
+dev_read_urand(dn42ctl_domain)
+
+# chown_best_effort() 会调用 grp.getgrnam("systemd-network")。
+auth_use_nsswitch(dn42ctl_domain)
+
+manage_dirs_pattern(dn42ctl_domain, dn42ctl_etc_t, dn42ctl_etc_t)
+manage_files_pattern(dn42ctl_domain, dn42ctl_etc_t, dn42ctl_etc_t)
+filetrans_pattern(dn42ctl_domain, dn42ctl_etc_t, dn42ctl_etc_t, file)
+files_etc_filetrans(dn42ctl_domain, dn42ctl_etc_t, dir, "dn42ctl")
+
+manage_dirs_pattern(dn42ctl_domain, dn42ctl_var_lib_t, dn42ctl_var_lib_t)
+manage_files_pattern(dn42ctl_domain, dn42ctl_var_lib_t, dn42ctl_var_lib_t)
+filetrans_pattern(dn42ctl_domain, dn42ctl_var_lib_t, dn42ctl_var_lib_t, file)
+files_var_lib_filetrans(dn42ctl_domain, dn42ctl_var_lib_t, dir, "dn42ctl")
+
+########################################
+#
+# dn42ctl_server_t
+#
+
+allow dn42ctl_server_t self:tcp_socket create_stream_socket_perms;
+
+# uvicorn 监听 [::1]:4242。对外 TLS 由 nginx 终结,unit 中的 IPAddressAllow=localhost
+# 已经把监听面限制在回环,此处不再单独定义端口类型。
+corenet_tcp_bind_generic_node(dn42ctl_server_t)
+corenet_tcp_bind_all_unreserved_ports(dn42ctl_server_t)
+corenet_tcp_sendrecv_generic_if(dn42ctl_server_t)
+corenet_tcp_sendrecv_generic_node(dn42ctl_server_t)
+
+read_files_pattern(dn42ctl_server_t, dn42ctl_registry_t, dn42ctl_registry_t)
+list_dirs_pattern(dn42ctl_server_t, dn42ctl_registry_t, dn42ctl_registry_t)
+
+# auto-peer 的签名校验调用 ssh-keygen -Y verify 与 gpg --verify。两者都在
+# PrivateTmp 提供的私有 /tmp 里建临时目录,用完即删,不做域转换：转换后的
+# gpg_t / ssh_keygen_t 读不到调用方创建的临时文件,反而要放开更多规则。
+ssh_exec_keygen(dn42ctl_server_t)
+gpg_exec(dn42ctl_server_t)
+
+manage_dirs_pattern(dn42ctl_server_t, dn42ctl_tmp_t, dn42ctl_tmp_t)
+manage_files_pattern(dn42ctl_server_t, dn42ctl_tmp_t, dn42ctl_tmp_t)
+files_tmp_filetrans(dn42ctl_server_t, dn42ctl_tmp_t, { dir file })
+
+########################################
+#
+# dn42ctl_agent_t
+#
+
+# netdev 文件要 chown 成 root:systemd-network 并保持 0640。
+allow dn42ctl_agent_t self:capability { chown fowner fsetid };
+
+allow dn42ctl_agent_t self:tcp_socket create_stream_socket_perms;
+allow dn42ctl_agent_t self:netlink_route_socket r_netlink_socket_perms;
+allow dn42ctl_agent_t self:netlink_generic_socket create_socket_perms;
+
+# hub 通常在 nginx 之后（443）,self 节点则直连 uvicorn 的 [::1]:4242。
+corenet_tcp_connect_http_port(dn42ctl_agent_t)
+corenet_tcp_connect_all_unreserved_ports(dn42ctl_agent_t)
+corenet_tcp_sendrecv_generic_if(dn42ctl_agent_t)
+corenet_tcp_sendrecv_generic_node(dn42ctl_agent_t)
+sysnet_dns_name_resolve(dn42ctl_agent_t)
+
+manage_dirs_pattern(dn42ctl_agent_t, dn42ctl_bird_conf_t, dn42ctl_bird_conf_t)
+manage_files_pattern(dn42ctl_agent_t, dn42ctl_bird_conf_t, dn42ctl_bird_conf_t)
+filetrans_pattern(dn42ctl_agent_t, dn42ctl_bird_conf_t, dn42ctl_bird_conf_t, file)
+files_etc_filetrans(dn42ctl_agent_t, dn42ctl_bird_conf_t, dir, "bird")
+
+# /etc/systemd/network 目录本身保持 etc_t——里面通常还有管理员手写的 .network
+# 文件,改变目录类型会波及 systemd-networkd 对它们的读取。只有 dn42ctl 渲染出
+# 的文件带独立类型,因此这里需要一条无名的 filetrans：接口名是运行期决定的,
+# 按名字转换无法覆盖。agent 能在任意 etc_t 目录下新建 dn42ctl_networkd_conf_t
+# 文件,但读不到也改不了已有的 etc_t 文件,可造成的影响止于产生一个别的域都
+# 读不出内容的孤立文件。
+files_list_etc(dn42ctl_agent_t)
+files_rw_etc_dirs(dn42ctl_agent_t)
+manage_files_pattern(dn42ctl_agent_t, etc_t, dn42ctl_networkd_conf_t)
+filetrans_pattern(dn42ctl_agent_t, etc_t, dn42ctl_networkd_conf_t, file)
+
+# 用 ip link show / ip -6 addr show 判断 dummy 接口的现状。
+sysnet_exec_ifconfig(dn42ctl_agent_t)
+
+# apply 把配置写入文件之后,要让两个守护进程重读它们:networkctl reload 与
+# birdc configure。语义与"不自动修改路由表"的约束不冲突,理由见
+# src/dn42ctl/services/reload.py。
+files_search_pids(dn42ctl_agent_t)
+
+# bird 目前没有独立策略,以 unconfined_service_t 运行,控制套接字
+# /run/bird/bird.ctl 落在 var_run_t。bird 若将来获得独立域,这里连同
+# dn42ctl_read_bird_conf() 一起改。
+allow dn42ctl_agent_t var_run_t:sock_file write_sock_file_perms;
+
+optional_policy(`
+	unconfined_server_stream_connectto(dn42ctl_agent_t)
+')
+
+optional_policy(`
+	gen_require(`
+		type systemd_networkd_t;
+		type systemd_networkd_var_run_t;
+	')
+
+	stream_connect_pattern(dn42ctl_agent_t, systemd_networkd_var_run_t, systemd_networkd_var_run_t, systemd_networkd_t)
+
+	dn42ctl_read_networkd_conf(systemd_networkd_t)
+')
+
+# dummy_backend = "networkmanager" 时,dn42ctl 通过 nmcli 建立并激活 dummy 接口,
+# 同时清理早期版本遗留的 .nmconnection 文件。
+optional_policy(`
+	gen_require(`
+		type NetworkManager_etc_rw_t;
+	')
+
+	delete_files_pattern(dn42ctl_agent_t, NetworkManager_etc_rw_t, NetworkManager_etc_rw_t)
+
+	networkmanager_read_conf(dn42ctl_agent_t)
+	networkmanager_write_rw_conf(dn42ctl_agent_t)
+	networkmanager_dbus_chat(dn42ctl_agent_t)
+
+	dbus_system_bus_client(dn42ctl_agent_t)
+')

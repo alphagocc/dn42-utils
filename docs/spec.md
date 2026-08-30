@@ -52,6 +52,7 @@
 | [`architecture/node_addressing.md`](architecture/node_addressing.md) | 节点地址集中管理（传播、下发、reload） |
 | [`architecture/sync_ws_protocol.md`](architecture/sync_ws_protocol.md) | 节点同步 WebSocket 协议 |
 | [`architecture/deployment.md`](architecture/deployment.md) | 部署（systemd + nginx） |
+| [`architecture/selinux.md`](architecture/selinux.md) | SELinux 策略模块（两个受限域与文件类型） |
 | [`architecture/validation.md`](architecture/validation.md) | 输入校验 |
 | [`architecture/testing.md`](architecture/testing.md) | 测试基础设施 |
 | [`architecture/language_check.md`](architecture/language_check.md) | 中文语言规范的提交前校验 |

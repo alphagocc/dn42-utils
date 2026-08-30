@@ -15,6 +15,13 @@ ExecStart=/usr/local/bin/dn42ctl node agent
 Restart=always
 RestartSec=5s
 
+# ---- SELinux ----
+# server 与 agent 共用同一个可执行文件，SELinux 按入口文件转换无法区分两者，
+# 自动转换留给权限较小的 dn42ctl_server_t,agent 在这里显式指定。前缀 "-"
+# 让未加载 dn42ctl 策略模块或未启用 SELinux 的机器忽略这一行。
+# 策略模块见 selinux/,说明见 docs/architecture/selinux.md。
+SELinuxContext=-system_u:system_r:dn42ctl_agent_t:s0
+
 # ---- 文件系统 ----
 ReadWritePaths=/etc/bird /etc/systemd/network /etc/NetworkManager/system-connections /var/lib/dn42ctl /etc/dn42ctl
 ProtectSystem=strict

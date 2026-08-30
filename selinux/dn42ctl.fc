@@ -1,0 +1,19 @@
+# dn42ctl deploy daemon 把 uv 建立的 venv 放在 /opt/dn42ctl,
+# 并在 /usr/local/bin 留下入口脚本；两处都是 systemd 的 ExecStart 候选。
+/usr/local/bin/dn42ctl			--	gen_context(system_u:object_r:dn42ctl_exec_t,s0)
+/opt/dn42ctl/dn42ctl/bin/dn42ctl	--	gen_context(system_u:object_r:dn42ctl_exec_t,s0)
+
+/etc/dn42ctl(/.*)?			gen_context(system_u:object_r:dn42ctl_etc_t,s0)
+
+/var/lib/dn42ctl(/.*)?			gen_context(system_u:object_r:dn42ctl_var_lib_t,s0)
+
+/etc/bird(/.*)?				gen_context(system_u:object_r:dn42ctl_bird_conf_t,s0)
+
+# /etc/systemd/network 目录保持 etc_t,只标注 dn42ctl 渲染出来的文件。
+# 前缀与 src/dn42ctl/services/core.py、node_apply.py、dummy.py 中的命名一致。
+/etc/systemd/network/dn42_.*\.netdev	--	gen_context(system_u:object_r:dn42ctl_networkd_conf_t,s0)
+/etc/systemd/network/dn42_.*\.network	--	gen_context(system_u:object_r:dn42ctl_networkd_conf_t,s0)
+/etc/systemd/network/wg_.*\.netdev	--	gen_context(system_u:object_r:dn42ctl_networkd_conf_t,s0)
+/etc/systemd/network/wg_.*\.network	--	gen_context(system_u:object_r:dn42ctl_networkd_conf_t,s0)
+/etc/systemd/network/dn42-dummy\.netdev	--	gen_context(system_u:object_r:dn42ctl_networkd_conf_t,s0)
+/etc/systemd/network/dn42-dummy\.network	--	gen_context(system_u:object_r:dn42ctl_networkd_conf_t,s0)

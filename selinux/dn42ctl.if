@@ -1,0 +1,112 @@
+## <summary>dn42ctl：DN42 配置生成与节点同步工具</summary>
+
+########################################
+## <summary>
+##	把一个域声明为 systemd 守护进程域,但不建立按入口文件的自动转换。
+## </summary>
+## <desc>
+##	<p>
+##	dn42ctl-server.service 与 dn42ctl-node-agent.service 共用同一个可执行
+##	文件。SELinux 的域转换以入口文件类型为键,同一入口文件只能存在一条
+##	type_transition 规则,两个 unit 无法各自获得自动转换。因此其中一个域
+##	必须由 unit 中的 SELinuxContext= 显式指定,本接口提供该场景所需的规则,
+##	等价于去掉 type_transition 之后的 init_daemon_domain()。
+##	</p>
+##	<p>
+##	自动转换留给权限较小的 dn42ctl_server_t：unit 遗漏 SELinuxContext= 时,
+##	进程落在能力不足的域里会产生可见的拒绝记录,而非静默获得多余权限。
+##	</p>
+## </desc>
+## <param name="domain">
+##	<summary>
+##	要声明的守护进程域。
+##	</summary>
+## </param>
+## <param name="entrypoint">
+##	<summary>
+##	该域的入口文件类型。
+##	</summary>
+## </param>
+#
+interface(`dn42ctl_explicit_daemon_domain',`
+	gen_require(`
+		attribute daemon;
+		type init_t;
+		role system_r;
+	')
+
+	typeattribute $1 daemon;
+
+	domain_type($1)
+	domain_entry_file($1, $2)
+	role system_r types $1;
+
+	allow init_t $1:process { transition siginh rlimitinh noatsecure };
+	allow $1 init_t:process sigchld;
+')
+
+########################################
+## <summary>
+##	读取 dn42ctl 渲染出的 Bird 配置。
+## </summary>
+## <desc>
+##	<p>
+##	Fedora 目前没有 bird 的策略模块,bird 以 unconfined_service_t 运行,
+##	读取 dn42ctl_bird_conf_t 无需额外授权。将来 bird 若获得独立域,
+##	该域需要调用本接口,否则 bird 无法读取 /etc/bird 下的任何文件。
+##	</p>
+## </desc>
+## <param name="domain">
+##	<summary>
+##	被授权的域。
+##	</summary>
+## </param>
+#
+interface(`dn42ctl_read_bird_conf',`
+	gen_require(`
+		type dn42ctl_bird_conf_t;
+	')
+
+	files_search_etc($1)
+	list_dirs_pattern($1, dn42ctl_bird_conf_t, dn42ctl_bird_conf_t)
+	read_files_pattern($1, dn42ctl_bird_conf_t, dn42ctl_bird_conf_t)
+')
+
+########################################
+## <summary>
+##	读取 dn42ctl 渲染出的 systemd-networkd 配置。
+## </summary>
+## <param name="domain">
+##	<summary>
+##	被授权的域。
+##	</summary>
+## </param>
+#
+interface(`dn42ctl_read_networkd_conf',`
+	gen_require(`
+		type dn42ctl_networkd_conf_t;
+	')
+
+	files_search_etc($1)
+	allow $1 dn42ctl_networkd_conf_t:file read_file_perms;
+')
+
+########################################
+## <summary>
+##	读取 dn42ctl 的持久状态（权威数据库、节点缓存、self node id）。
+## </summary>
+## <param name="domain">
+##	<summary>
+##	被授权的域。
+##	</summary>
+## </param>
+#
+interface(`dn42ctl_read_var_lib',`
+	gen_require(`
+		type dn42ctl_var_lib_t;
+	')
+
+	files_search_var_lib($1)
+	list_dirs_pattern($1, dn42ctl_var_lib_t, dn42ctl_var_lib_t)
+	read_files_pattern($1, dn42ctl_var_lib_t, dn42ctl_var_lib_t)
+')
