@@ -52,14 +52,18 @@ Notes:
 ## Comment policy
 
 - **If the code already says it clearly, don't write the comment.** A comment that
-  restates the next line (`# 打开数据库` above `Database.open(...)`, `# 第二次 apply`
-  above a second `apply()` call) is noise — delete it, or rename the variable/helper
-  so the code carries the meaning itself.
+  restates the next line (`# open the database` above `Database.open(...)`, `# second
+  apply` above a second `apply()` call) is noise — delete it, or rename the
+  variable/helper so the code carries the meaning itself.
 - Keep comments that record **why**: a non-obvious constraint, a rejected alternative,
   a bug the code is defending against, an invariant that isn't visible locally. These
   are the expensive knowledge and must survive.
 - Same rule in tests. A test name that describes the behaviour beats a comment above
   the assertion; the docstring is for *why this case matters*, not *what it does*.
+- **Never justify a change with a claim broader than what you verified.** A reassuring
+  generalisation about content that is user-supplied, or that later commits may add,
+  cannot be checked and yet will be trusted by whoever reads it next. Write the narrow
+  fact you actually established, scoped to what you actually inspected.
 
 ## Ruff lint policy
 
