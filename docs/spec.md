@@ -72,7 +72,7 @@
 | [`commands/scan.md`](commands/scan.md) | `scan` |
 | [`commands/node.md`](commands/node.md) | `node`（admin + 节点同步） |
 | [`commands/system.md`](commands/system.md) | `system`（系统组件安装/卸载） |
-| [`commands/web.md`](commands/web.md) | `deploy`（web / daemon 部署） |
+| [`commands/deploy.md`](commands/deploy.md) | `deploy`（web / daemon 部署） |
 
 ### 其他
 
