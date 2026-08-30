@@ -104,8 +104,8 @@ def _apply(cfg: NodeConfig, tmp_path: Path, **kwargs: Any) -> ApplyResult:
 def _defaults_under_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """把内置默认值改指 tmp_path。
 
-    config.toml 缺失或损坏时 apply 会落到默认值,那是 `/etc` 下的真实位置——一次
-    单元测试不该读写它们。
+    config.toml 缺失或损坏时 apply 会落到默认值,那是 `/etc` 下的真实位置,
+    一次单元测试不该读写它们。
     """
     locations = _paths(tmp_path)
     monkeypatch.setattr(
@@ -315,6 +315,41 @@ class TestLocationResolution:
         assert (Path(_paths(tmp_path)["peers_dir"]) / "dn42_1234.conf").exists()
 
 
+class TestFileModes:
+    def test_bird_files_are_readable_by_the_bird_user(self, tmp_path: Path) -> None:
+        """bird.conf 权限为 0600 root 会让 birdc configure 失败。"""
+        cfg = _cfg(tmp_path)
+        payload = _make_payload(tmp_path, bgp=[_bgp_peer()], ibgp=[_ibgp_peer()])
+        payload["node"] = {"own_ipv6": "fd42:4242:1234::9", "router_id": "172.23.0.9"}
+        _seed_cache(cfg.cache_db_path, payload)
+        _apply(cfg, tmp_path)
+
+        locations = _paths(tmp_path)
+        bird_files = [
+            Path(locations["bird_conf_path"]),
+            Path(locations["babel_conf_path"]),
+            Path(locations["bird_extra_conf_path"]),
+            Path(locations["peers_dir"]) / "dn42_1234.conf",
+            Path(locations["peers_dir"]) / "ibgp_alpha.conf",
+        ]
+        for path in bird_files:
+            assert path.stat().st_mode & 0o044 == 0o044, path
+
+    def test_secrets_stay_private(self, tmp_path: Path) -> None:
+        """私钥在 .netdev 里,config.toml 是 dn42ctl 自己的配置,两者都不放宽。"""
+        cfg = _cfg(tmp_path)
+        payload = _make_payload(tmp_path, bgp=[_bgp_peer()])
+        payload["node"] = {"own_ipv6": "fd42:4242:1234::9"}
+        _seed_cache(cfg.cache_db_path, payload)
+        config_path = _local_config(tmp_path)
+        apply(node_config=cfg, config_path=config_path)
+
+        netdev = Path(_paths(tmp_path)["networkd_dir"]) / "dn42_1234.netdev"
+        assert "PRIV" in netdev.read_text()
+        assert netdev.stat().st_mode & 0o007 == 0
+        assert config_path.stat().st_mode & 0o077 == 0
+
+
 class TestAtomicWrite:
     def test_no_tmp_files_left(self, tmp_path: Path) -> None:
         cfg = _cfg(tmp_path)
@@ -438,7 +473,7 @@ class TestStaleDeletion:
         assert marker.exists()
 
     def test_bird_conf_parent_dir_is_never_scanned(self, tmp_path: Path) -> None:
-        """主配置指向 /etc/bird.conf 时,它的父目录是 /etc——扫描那里会波及无关文件。"""
+        """主配置指向 /etc/bird.conf 时,它的父目录是 /etc,扫描那里会波及无关文件。"""
         local_config = _local_config(tmp_path, bird_conf_path=tmp_path / "bird.conf")
         cfg = _cfg(tmp_path)
         payload = _make_payload(tmp_path)
@@ -575,7 +610,7 @@ class TestNodeBlockApplied:
 
     def test_missing_config_toml_warns_and_skips(self, tmp_path: Path) -> None:
         """纯 spoke 可能从没有过 config.toml。bird.conf 还需要 own_asn 等 AS 级字段,
-        缺了就渲染不出来 —— 只能跳过并告警,绝不伪造。"""
+        缺了就渲染不出来,只能跳过并告警,绝不伪造。"""
         cfg = _cfg(tmp_path)
         local_config = tmp_path / "etc" / "nope.toml"
         payload = _make_payload(tmp_path)

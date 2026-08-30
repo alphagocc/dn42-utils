@@ -30,6 +30,7 @@ from typing import Any
 
 from dn42ctl.config import AppConfig, ConfigError, dumps_config, load_config
 from dn42ctl.constants import (
+    FILE_MODE_BIRD,
     FILE_MODE_NETDEV,
     FILE_MODE_PRIVATE,
     NET_BACKEND_NETWORKD,
@@ -204,7 +205,7 @@ def _render_bgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths, node_id: 
         (
             bird_path,
             render_bird_bgp_peer_conf(ifname=ifname, peer_lla=peer["peer_lla"], peer_asn=int(peer["peer_asn"])),
-            FILE_MODE_PRIVATE,
+            FILE_MODE_BIRD,
         )
     )
 
@@ -247,7 +248,7 @@ def _render_ibgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths, node_id:
             (
                 paths.bird_peers_dir / f"ibgp_{name}.conf",
                 render_bird_ibgp_peer_conf(name=name, ifname=ifname, peer_ip=peer["peer_ip"]),
-                FILE_MODE_PRIVATE,
+                FILE_MODE_BIRD,
             )
         )
     if not peer["has_wg"]:
@@ -333,7 +334,7 @@ def _render_node_config_files(
                 # The ROA file is not managed by apply, so it has no ResolvedPaths entry.
                 bird_roa_v6_conf_path=Path(merged.bird_roa_v6_conf_path),
             ),
-            FILE_MODE_PRIVATE,
+            FILE_MODE_BIRD,
         )
     )
 
@@ -341,7 +342,7 @@ def _render_node_config_files(
     # the operator: putting the placeholder in the list unconditionally would let every
     # 900-second reconcile diff it against whatever they wrote and overwrite it.
     if not paths.bird_extra_conf_path.exists():
-        files.append((paths.bird_extra_conf_path, render_bird_extra_conf_placeholder(), FILE_MODE_PRIVATE))
+        files.append((paths.bird_extra_conf_path, render_bird_extra_conf_placeholder(), FILE_MODE_BIRD))
 
     if merged.dummy_backend != NET_BACKEND_NETWORKD:
         # When dn42-dummy is managed by NetworkManager, writing networkd's
@@ -381,7 +382,7 @@ def _render_babel(payload: dict[str, Any], paths: ResolvedPaths) -> tuple[Path, 
                 str(peer["babel_type"]),
             )
         )
-    return paths.babel_conf_path, render_babel_conf(interfaces=interfaces), FILE_MODE_PRIVATE
+    return paths.babel_conf_path, render_babel_conf(interfaces=interfaces), FILE_MODE_BIRD
 
 
 def _managed_paths(paths: ResolvedPaths) -> list[tuple[Path, tuple[tuple[str, str], ...]]]:

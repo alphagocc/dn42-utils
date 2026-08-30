@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from dn42ctl.config import AppConfig
-from dn42ctl.constants import UNSET, _Unset
+from dn42ctl.constants import FILE_MODE_BIRD, UNSET, _Unset
 from dn42ctl.db import DatabaseError, IbgpPeerRecord
 from dn42ctl.render import render_bird_ibgp_peer_conf
 from dn42ctl.services.core import (
@@ -155,7 +155,7 @@ def create_ibgp_peer(
                 bird_conf_text = render_bird_ibgp_peer_conf(name=peer_name, ifname=ifname, peer_ip=peer_ip)
             except ValueError as exc:
                 raise Dn42CtlError(str(exc)) from exc
-            write_text(bird_peer_path, bird_conf_text)
+            write_text(bird_peer_path, bird_conf_text, mode=FILE_MODE_BIRD)
             generated.append(bird_peer_path)
 
             if has_wg:
@@ -356,7 +356,7 @@ def modify_ibgp_peer(
                 bird_conf_text = render_bird_ibgp_peer_conf(name=peer_name, ifname=ifname, peer_ip=peer_ip)
             except ValueError as exc:
                 raise Dn42CtlError(str(exc)) from exc
-            write_text(bird_peer_path, bird_conf_text)
+            write_text(bird_peer_path, bird_conf_text, mode=FILE_MODE_BIRD)
             generated.append(bird_peer_path)
 
             write_net_backend_files(

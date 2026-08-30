@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import cast
 
 from dn42ctl.config import AppConfig
-from dn42ctl.constants import FILE_MODE_NETDEV, WG_PORT_RANGE
+from dn42ctl.constants import FILE_MODE_BIRD, FILE_MODE_NETDEV, WG_PORT_RANGE
 from dn42ctl.db import Database, DatabaseError
 from dn42ctl.fs import chmod_best_effort, chown_best_effort
 from dn42ctl.render import (
@@ -347,7 +347,7 @@ def regenerate_babel_conf(*, config: AppConfig, db: Database, node_id: str) -> P
         raise Dn42CtlError(str(exc)) from exc
     babel_text = render_babel_conf(interfaces=interfaces)
     babel_path = Path(config.bird_babel_conf_path)
-    write_text(babel_path, babel_text)
+    write_text(babel_path, babel_text, mode=FILE_MODE_BIRD)
     return babel_path
 
 
@@ -397,5 +397,5 @@ def write_bird_bgp_peer(*, config: AppConfig, ifname: str, peer_lla: str, peer_a
         bird_conf_text = render_bird_bgp_peer_conf(ifname=ifname, peer_lla=peer_lla, peer_asn=peer_asn)
     except ValueError as exc:
         raise Dn42CtlError(str(exc)) from exc
-    write_text(bird_peer_path, bird_conf_text)
+    write_text(bird_peer_path, bird_conf_text, mode=FILE_MODE_BIRD)
     generated.append(bird_peer_path)
