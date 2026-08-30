@@ -25,6 +25,7 @@ const columns: Column<ManagedNode>[] = [
   { label: "Self", get: (r) => (r.is_self ? "yes" : "") },
   { label: "Token", get: (r) => (r.has_token ? "set" : "none") },
   { label: "Enabled", get: (r) => (r.enabled ? "yes" : "no") },
+  { label: "Auto-peer", get: (r) => (r.auto_peer ? "open" : "closed") },
   { label: "Endpoint host", get: (r) => r.endpoint_host || "—" },
   { label: "own_ipv6", get: (r) => r.own_ipv6 || "—" },
   { label: "router_id", get: (r) => r.router_id || "—" },
@@ -69,6 +70,12 @@ export function Nodes() {
   const editFields = (n: ManagedNode): FieldDef[] => [
     { name: "name", label: "Display name", value: n.name, required: true },
     { name: "enabled", label: "Enabled", type: "checkbox", value: n.enabled },
+    {
+      name: "auto_peer",
+      label: "Listed on the public auto-peer page",
+      type: "checkbox",
+      value: n.auto_peer,
+    },
     { name: "endpoint_host", label: "Endpoint host (no port; blank = not managed)", value: n.endpoint_host || "" },
     { name: "own_ipv6", label: "own_ipv6 (blank = not managed)", value: n.own_ipv6 || "" },
     { name: "router_id", label: "router_id (blank = not managed)", value: n.router_id || "" },
@@ -178,6 +185,7 @@ export function Nodes() {
                 name: d.name,
                 // An unchecked checkbox is absent from FormData, not false.
                 enabled: !!d.enabled,
+                auto_peer: !!d.auto_peer,
                 endpoint_host: orNull(d.endpoint_host),
                 own_ipv6: orNull(d.own_ipv6),
                 router_id: orNull(d.router_id),

@@ -10,6 +10,8 @@ dependencies = [
   "fastapi>=0.115.0",
   "uvicorn[standard]>=0.30.0",
   "httpx>=0.27",
+  # auto-peer 校验 Kioubit 认证响应的 ECDSA P-521 签名。
+  "cryptography>=42",
   # WS 服务端由 starlette 提供;这两个是显式直接依赖:
   #   anyio      —— hub 侧连接管理与 to_thread(阻塞 service 调用)
   #   websockets —— 节点 agent 的客户端(uvicorn[standard] 只是碰巧带上它,不能依赖)
@@ -65,12 +67,10 @@ ignore = ["S101"]
 "src/dn42ctl/wg.py" = ["S603", "S607", "S311"]
 "src/dn42ctl/render.py" = ["S701"]
 "src/dn42ctl/services/core.py" = ["S311", "E402"]
-"src/dn42ctl/services/crypto_verify.py" = ["S603", "S607"]
 "src/dn42ctl/services/dummy.py" = ["S603", "S607"]
 "src/dn42ctl/services/show.py" = ["S603", "S607"]
 "src/dn42ctl/services/init_sys.py" = ["S603", "S607", "S310", "F841"]
 "src/dn42ctl/services/scan.py" = ["SIM102", "SIM105"]
-"tests/test_services_crypto_verify.py" = ["S603", "S607"]
 
 [tool.pyright]
 pythonVersion = "3.11"

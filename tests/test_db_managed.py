@@ -101,6 +101,13 @@ class TestUpsertSelf:
         ).fetchone()[0]
         assert count == 1
 
+    def test_rename_survives_later_upserts(self, store: ManagedNodeStore) -> None:
+        """每次 serve 启动都会 upsert 一次,改过的名字不能被默认值盖回去。"""
+        store.upsert_self(NODE_SELF)
+        store.set_name(NODE_SELF, "Frankfurt")
+
+        assert store.upsert_self(NODE_SELF).name == "Frankfurt"
+
     def test_get_self(self, store: ManagedNodeStore) -> None:
         assert store.get_self() is None
         store.upsert_self(NODE_SELF)
@@ -334,6 +341,27 @@ class TestNodeAddresses:
         store.add(NODE_A, "alpha")
         assert store.set_enabled(NODE_A, enabled=False).enabled is False
         assert store.set_enabled(NODE_A, enabled=True).enabled is True
+
+
+class TestAutoPeer:
+    def test_default_is_closed(self, store: ManagedNodeStore) -> None:
+        assert store.add(NODE_A, "alpha").auto_peer is False
+
+    def test_apply_address_update_toggles(self, store: ManagedNodeStore) -> None:
+        store.add(NODE_A, "alpha")
+        assert store.apply_address_update(NODE_A, auto_peer=True).auto_peer is True
+        assert store.apply_address_update(NODE_A, auto_peer=False).auto_peer is False
+
+    def test_list_auto_peer_needs_both_flags(self, store: ManagedNodeStore) -> None:
+        """禁用一个节点同时关掉它的 auto-peer 入口,无需再记得改第二个开关。"""
+        store.add(NODE_A, "alpha")
+        store.add(NODE_B, "beta")
+        store.apply_address_update(NODE_A, auto_peer=True)
+
+        assert [n.node_id for n in store.list_auto_peer()] == [NODE_A]
+
+        store.set_enabled(NODE_A, enabled=False)
+        assert store.list_auto_peer() == []
 
 
 class TestTouchLastSeen:

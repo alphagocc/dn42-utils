@@ -22,7 +22,7 @@ selinux/
 
 | 域 | unit | 运行身份 | 可写类型 | 网络 |
 | --- | --- | --- | --- | --- |
-| `dn42ctl_server_t` | `dn42ctl-server.service` | `dn42ctl` 用户 | `dn42ctl_etc_t`、`dn42ctl_var_lib_t`、`dn42ctl_tmp_t` | 监听 TCP，回环 |
+| `dn42ctl_server_t` | `dn42ctl-server.service` | `dn42ctl` 用户 | `dn42ctl_etc_t`、`dn42ctl_var_lib_t` | 监听 TCP，回环 |
 | `dn42ctl_agent_t` | `dn42ctl-node-agent.service` | root | 前者全部，外加 `dn42ctl_bird_conf_t`、`dn42ctl_networkd_conf_t` | 向外发起 TCP 与 DNS |
 
 server 域没有 `/etc/bird` 与 `/etc/systemd/network` 的任何权限，与 `deployment.md` 里“server 不碰系统配置”的划分一致。agent 域没有监听端口的权限。
@@ -50,21 +50,12 @@ SELinuxContext=-system_u:system_r:dn42ctl_agent_t:s0
 | `dn42ctl_var_lib_t` | `/var/lib/dn42ctl(/.*)?` | 权威库、节点缓存、`self_node_id` |
 | `dn42ctl_bird_conf_t` | `/etc/bird(/.*)?`、`/etc/bird.conf` | 渲染出的 Bird 配置与用户维护的 `extra.conf` |
 | `dn42ctl_networkd_conf_t` | `/etc/systemd/network/` 下的 `dn42_*`、`wg_*`、`dn42-dummy.*` | netdev 与 network 文件 |
-| `dn42ctl_registry_t` | 无默认标注 | DN42 registry 的本地克隆，位置由 `config.toml` 决定 |
-| `dn42ctl_tmp_t` | 运行时生成 | `ssh-keygen -Y verify` 与 `gpg --verify` 的临时目录 |
 
 `/etc/systemd/network` 目录本身保持 `etc_t`。管理员手写的 `.network` 文件通常与 dn42ctl 渲染的文件混放在同一目录，改变目录类型会波及 systemd-networkd 对前者的读取。代价是 agent 需要 `etc_t` 目录的写权限，因而能在 `/etc` 下任意位置新建 `dn42ctl_networkd_conf_t` 文件——它读不到也改不了已有的 `etc_t` 文件，能造成的后果止于产生一个别的域都读不出内容的孤立文件。
 
 `/etc/bird` 整个目录换成 `dn42ctl_bird_conf_t`。bird 在 Fedora 尚无独立策略模块，以 `unconfined_service_t` 运行，读取任何类型都不受限。bird 将来若获得独立域，该域需要调用 `dn42ctl.if` 里的 `dn42ctl_read_bird_conf()`。
 
 `/etc/bird.conf` 单列一条。上一条的正则整体锚定在完整位置上，匹配不到 `/etc` 下的这个文件，而发行版编译内置的 bird 主配置就在那里。它的父目录是 `etc_t`，因此策略中另有一条 `manage_files_pattern(dn42ctl_agent_t, etc_t, dn42ctl_bird_conf_t)`；没有配套的 file transition，该文件由 `genconf` 在无沙盒环境下创建，agent 只覆写已有文件。采用该布局的完整前置条件见 [`paths.md`](paths.md)。
-
-registry 目录没有默认标注，部署时按实际位置补：
-
-```bash
-sudo semanage fcontext -a -t dn42ctl_registry_t '/srv/dn42-registry(/.*)?'
-sudo restorecon -Rv /srv/dn42-registry
-```
 
 ## 构建
 
@@ -95,7 +86,7 @@ ps -eZ | grep dn42ctl        # 应显示 dn42ctl_server_t 与 dn42ctl_agent_t
 
 ## 首次上线
 
-任何新策略模块都应当先在宽容模式下跑满一个完整的业务周期，再切回强制。dn42ctl 的完整周期包括一次 `node apply` 写入全部渲染目标、一次 `networkctl reload` 与 `birdc configure`、一次 auto-peer 的签名校验。
+任何新策略模块都应当先在宽容模式下跑满一个完整的业务周期，再切回强制。dn42ctl 的完整周期包括一次 `node apply` 写入全部渲染目标、一次 `networkctl reload` 与 `birdc configure`、一次 auto-peer 的提案提交。
 
 ```bash
 cd selinux

@@ -98,7 +98,7 @@ desired state JSON schema 详见 `docs/architecture/sync_hub_spoke.md`。
 | `GET` | `/api/admin/nodes` | `node list` | 列出所有 managed_nodes |
 | `POST` | `/api/admin/nodes` | `node add` | 注册新节点 |
 | `GET` | `/api/admin/nodes/{node_id}` | `node show` | 查看单节点详情 |
-| `PATCH` | `/api/admin/nodes/{node_id}` | `node set-address` | 修改 `name` / `enabled` / 三个地址字段，并按需传播到 mesh |
+| `PATCH` | `/api/admin/nodes/{node_id}` | `node set-address`、`node auto-peer` | 修改 `name` / `enabled` / `auto_peer` / 三个地址字段，并按需传播到 mesh |
 | `DELETE` | `/api/admin/nodes/{node_id}` | `node remove` | 注销节点（self 节点需 `?force=true`） |
 | `POST` | `/api/admin/nodes/{node_id}/token` | `node token rotate` | 重签 node token，返回明文一次；对 self 节点另带 `self_node_toml_updated` / `self_node_toml_error` |
 | `PATCH` | `/api/admin/nodes/{node_id}/policy` | `node policy set` | 修改 `write_policy` JSON |
@@ -116,12 +116,12 @@ desired state JSON schema 详见 `docs/architecture/sync_hub_spoke.md`。
 #### `PATCH /api/admin/nodes/{node_id}`
 
 ```json
-{"name": "...", "enabled": true,
+{"name": "...", "enabled": true, "auto_peer": false,
  "endpoint_host": "...", "own_ipv6": "...", "router_id": "...",
  "propagate": true, "dry_run": false}
 ```
 
-**字段缺席 = 不改动；显式传 `null` = 清除（交还本地管理）。** 这个区分靠 `model_fields_set` 实现，不能简化成 `is not None` 判断。响应在节点对象之外附带 `propagated[]`（被改写的其他节点的 peer 行）与 `warnings[]`（无法自动推导、需人工处理的行）。语义详见 [`node_addressing.md`](node_addressing.md)。
+**字段缺席 = 不改动；显式传 `null` = 清除（交还本地管理）。** 这个区分靠 `model_fields_set` 实现，不能简化成 `is not None` 判断。响应在节点对象之外附带 `propagated[]`（被改写的其他节点的 peer 行）与 `warnings[]`（无法自动推导、需人工处理的行）。语义详见 [`node_addressing.md`](node_addressing.md)。`auto_peer` 决定该节点是否出现在公共 auto-peer 页面上，语义见 [`auto_peer.md`](auto_peer.md)。
 
 #### `/api/admin/db/*`
 
@@ -129,14 +129,13 @@ desired state JSON schema 详见 `docs/architecture/sync_hub_spoke.md`。
 
 ### 公共路由（无 bearer / peer-session bearer）
 
-启用条件：`config.toml` 中设置了 `dn42_registry_path`。未配置时所有 `/api/public/auto-peer/*` 返回 503。详见 `docs/architecture/auto_peer.md`。
+启用条件：环境变量 `DN42CTL_AUTOPEER_DOMAIN` 设为 peer 页面的公开域名。未配置时所有 `/api/public/auto-peer/*` 返回 503。详见 `docs/architecture/auto_peer.md`。
 
 | 方法 | 路径 | Bearer | 说明 |
 |------|------|--------|------|
-| `POST` | `/api/public/auto-peer/lookup` | （无） | 输入 ASN，返回该 AS 的 mnt-by 列表及每个 mntner 中受支持的 `auth:` 选项 |
-| `POST` | `/api/public/auto-peer/challenge` | （无） | 选定 mntner + auth_index，返回 `challenge_id` 与 32 字节随机 nonce（hex），TTL 10 分钟、一次性 |
-| `POST` | `/api/public/auto-peer/verify` | （无） | 提交签名；服务端通过 `ssh-keygen -Y verify` 或 `gpg --verify` 校验，成功后返回 `peer_session_token`（TTL 15 分钟，绑定到该 ASN） |
-| `POST` | `/api/public/auto-peer/submit` | peer-session | 提交 WG pubkey/endpoint/peer_lla 等字段，服务端转换为 `peer_add` proposal 写入 self 节点队列 |
+| `POST` | `/api/public/auto-peer/session` | （无） | 提交 Kioubit 认证服务回跳带来的 `params` 与 `signature`，验签通过后返回 `peer_session_token`（TTL 15 分钟，绑定到该 ASN），同一份认证响应只能兑换一次 |
+| `GET` | `/api/public/auto-peer/nodes` | （无） | 列出开放了 auto-peer 的受管节点（`auto_peer=1 AND enabled=1`），每项含 `node_id`、`name`、`endpoint_host` |
+| `POST` | `/api/public/auto-peer/submit` | peer-session | 提交 `node_id` 与 WG pubkey/endpoint/peer_lla 等字段，服务端转换为 `peer_add` proposal 写入该节点队列；`node_id` 不在开放列表里返回 400 |
 
 peer-session bearer 与 admin / node token 使用完全独立的解析实现，作用域仅限 `/api/public/auto-peer/submit`，由 in-memory TTL store 管理。
 

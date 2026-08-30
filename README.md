@@ -77,7 +77,7 @@ sudo DN42CTL_API_TOKEN=<token> uv run dn42ctl serve --host ::1 --port 4242
 `web/` 是一个 Vite 多页应用（React 19 + TypeScript + Tailwind CSS v4），nginx 托管网站，FastAPI 只返回 JSON：
 
 - **`web/src/admin/`**：管理后台，负责节点/peer 管理、提案审批、配置快照回滚。
-- **`web/src/peer/`**：公共 auto-peer 向导，4 步完成 peering 请求。
+- **`web/src/peer/`**：公共 auto-peer 向导，2 步完成 peering 请求。
 
 ```bash
 cd web && pnpm install && pnpm build   # 产物在 web/dist/

@@ -8,6 +8,7 @@ export interface ManagedNode extends NodeSummary {
   is_self: boolean;
   has_token: boolean;
   enabled: boolean;
+  auto_peer: boolean;
   last_seen_at: string | null;
   write_policy: Record<string, string>;
   endpoint_host: string | null;

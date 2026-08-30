@@ -51,7 +51,7 @@ systemd/
 ### dn42ctl-server.service
 
 - 以专用用户 `dn42ctl` 运行（非 root）。
-- `EnvironmentFile=/etc/dn42ctl/server.env` 注入 `DN42CTL_API_TOKEN` 和 `DN42CTL_CORS_ORIGINS`。
+- `EnvironmentFile=/etc/dn42ctl/server.env` 注入 `DN42CTL_API_TOKEN`、`DN42CTL_CORS_ORIGINS` 与 `DN42CTL_AUTOPEER_DOMAIN`。后者是 auto-peer 向导页面的公开域名，同时充当公共接口的开关，详见 [`auto_peer.md`](auto_peer.md)。
 - 严格 sandbox：`ProtectSystem=strict`、清空 `CapabilityBoundingSet`、`IPAddressAllow=localhost` + `IPAddressDeny=any`（强制仅 loopback 通信）。
 - 调试时先 `journalctl -u dn42ctl-server` 查报错，再有针对性地放宽 sandbox 指令。
 

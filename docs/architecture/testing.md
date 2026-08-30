@@ -53,8 +53,8 @@ tests/
 ├── test_services_dummy.py                 # dummy 接口管理
 ├── test_services_init_sys.py              # init + genconf
 ├── test_services_system.py                # system install/uninstall
-├── test_services_auto_peer.py             # auto-peer 公共 API 逻辑
-├── test_services_crypto_verify.py         # 签名验证
+├── test_services_auto_peer.py             # auto-peer 会话与提案提交
+├── test_services_kioubit_auth.py          # Kioubit 认证响应验签
 ├── test_services_desired_state.py         # desired state 生成
 ├── test_services_node_admin.py            # 节点管理服务
 ├── test_services_node_admin_self_toml.py  # self 节点 TOML 管理
@@ -62,7 +62,6 @@ tests/
 ├── test_services_node_apply.py            # 节点 apply 服务
 ├── test_services_proposal_decisions.py    # proposal accept/reject
 ├── test_services_proposals_reports.py     # proposal/report 提交
-├── test_services_registry.py              # DN42 registry 解析
 ├── test_services_revisions.py             # revision 管理
 ├── test_api_admin_nodes.py                # REST API: admin 节点
 ├── test_api_bgp_peers.py                  # REST API: BGP peers

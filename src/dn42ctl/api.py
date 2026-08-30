@@ -50,10 +50,9 @@ from dn42ctl.services.auto_peer import (
     AutoPeerError,
     AutoPeerExpiredError,
     AutoPeerSessionError,
-    start_challenge,
-    start_lookup,
+    list_peer_targets,
+    open_session,
     submit_peer,
-    verify_challenge,
 )
 from dn42ctl.services.db_browse import (
     DEFAULT_LIMIT,
@@ -61,6 +60,11 @@ from dn42ctl.services.db_browse import (
     browse_table,
     list_tables,
     table_page_to_dict,
+)
+from dn42ctl.services.kioubit_auth import (
+    KioubitAuthError,
+    KioubitExpiredError,
+    verify_auth_response,
 )
 from dn42ctl.services.node_address import set_node_addresses
 from dn42ctl.services.show import show_bgp_peers, show_ibgp_peers, show_wg_tunnels
@@ -88,6 +92,7 @@ _bearer = HTTPBearer(auto_error=False)
 _config: AppConfig | None = None
 _db_path: Path | None = None
 _admin_token: str = ""
+_auto_peer_domain: str = ""
 _sync_poll_interval: float = DEFAULT_SYNC_POLL_INTERVAL
 
 # In-process map of live node WebSockets. Correct only because `dn42ctl serve`
@@ -100,6 +105,7 @@ def configure(
     config: AppConfig,
     db_path: Path,
     token: str,
+    auto_peer_domain: str = "",
     sync_poll_interval: float = DEFAULT_SYNC_POLL_INTERVAL,
 ) -> None:
     """Inject runtime config. `token` becomes the admin token.
@@ -107,13 +113,18 @@ def configure(
     Node tokens are managed separately via `dn42ctl node token rotate` and stored
     as SHA-256 hashes in `managed_nodes.api_token_hash`; they are not configured here.
 
+    `auto_peer_domain` is this deployment's public peer hostname. It doubles as the
+    auto-peer switch: empty means the public routes stay off, because the signed
+    authentication response can only be bound to a host we know in advance.
+
     `sync_poll_interval` is how often the watcher scans `sync_events`, i.e. the
     worst-case delay between a config change and the node being told about it.
     """
-    global _config, _db_path, _admin_token, _sync_poll_interval
+    global _config, _db_path, _admin_token, _auto_peer_domain, _sync_poll_interval
     _config = config
     _db_path = db_path
     _admin_token = token
+    _auto_peer_domain = auto_peer_domain
     _sync_poll_interval = sync_poll_interval
 
 
@@ -275,6 +286,7 @@ class NodePatchRequest(BaseModel):
 
     name: str | None = None
     enabled: bool | None = None
+    auto_peer: bool | None = None
     endpoint_host: str | None = None
     own_ipv6: str | None = None
     router_id: str | None = None
@@ -303,6 +315,7 @@ def _managed_node_to_dict(node) -> dict:  # noqa: ANN001 — ManagedNode datacla
         "name": node.name,
         "write_policy": node.write_policy,
         "enabled": node.enabled,
+        "auto_peer": node.auto_peer,
         "is_self": node.is_self,
         "last_seen_at": node.last_seen_at,
         "created_at": node.created_at,
@@ -352,6 +365,7 @@ def api_patch_managed_node(node_id: str, body: NodePatchRequest) -> dict:
             node_id=node_id,
             name=body.name if "name" in given and body.name is not None else UNSET,
             enabled=body.enabled if "enabled" in given and body.enabled is not None else UNSET,
+            auto_peer=body.auto_peer if "auto_peer" in given and body.auto_peer is not None else UNSET,
             endpoint_host=body.endpoint_host if "endpoint_host" in given else UNSET,
             own_ipv6=body.own_ipv6 if "own_ipv6" in given else UNSET,
             router_id=body.router_id if "router_id" in given else UNSET,
@@ -1013,20 +1027,19 @@ def api_genconf(body: GenconfRequest) -> dict:
     }
 
 
-# --- Public auto-peer routes (no admin/node bearer for steps 1-3) ---
+# --- Public auto-peer routes (peer-session bearer only on submit) ---
 
 
 _AUTO_PEER_BEARER = HTTPBearer(auto_error=False)
 
 
-def _require_registry() -> AppConfig:
-    config = _get_config()
-    if not config.dn42_registry_path:
+def _require_auto_peer() -> str:
+    if not _auto_peer_domain:
         raise HTTPException(
             status_code=503,
-            detail="auto-peer disabled (dn42_registry_path not set)",
+            detail="auto-peer disabled (DN42CTL_AUTOPEER_DOMAIN not set)",
         )
-    return config
+    return _auto_peer_domain
 
 
 def _map_auto_peer_error(exc: AutoPeerError) -> HTTPException:
@@ -1037,59 +1050,33 @@ def _map_auto_peer_error(exc: AutoPeerError) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc))
 
 
-class AutoPeerLookupRequest(BaseModel):
-    asn: int
-
-    @field_validator("asn")
-    @classmethod
-    def _check_asn(cls, v: int) -> int:
-        return validate_asn(v)
-
-
-class AutoPeerChallengeRequest(BaseModel):
-    asn: int
-    mntner: str
-    auth_index: int
-
-    @field_validator("asn")
-    @classmethod
-    def _check_asn(cls, v: int) -> int:
-        return validate_asn(v)
-
-    @field_validator("mntner")
-    @classmethod
-    def _check_mntner(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("mntner 不能为空")
-        return v
-
-    @field_validator("auth_index")
-    @classmethod
-    def _check_idx(cls, v: int) -> int:
-        if v < 0:
-            raise ValueError("auth_index 必须 >= 0")
-        return v
-
-
-class AutoPeerVerifyRequest(BaseModel):
-    challenge_id: str
+class AutoPeerSessionRequest(BaseModel):
+    params: str
     signature: str
 
-    @field_validator("challenge_id")
+    @field_validator("params", "signature")
     @classmethod
-    def _check_cid(cls, v: str) -> str:
+    def _check_present(cls, v: str) -> str:
         v = v.strip()
         if not v:
-            raise ValueError("challenge_id 不能为空")
+            raise ValueError("params 与 signature 都不能为空")
         return v
 
 
 class AutoPeerSubmitRequest(BaseModel):
+    node_id: str
     wg_public_key: str
     endpoint: str = ""
     peer_lla: str
     listen_port: int | None = None
+
+    @field_validator("node_id")
+    @classmethod
+    def _check_node_id(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("node_id 不能为空")
+        return v
 
     @field_validator("wg_public_key")
     @classmethod
@@ -1114,67 +1101,16 @@ class AutoPeerSubmitRequest(BaseModel):
         return v
 
 
-@_public_router.post("/auto-peer/lookup")
-def api_auto_peer_lookup(body: AutoPeerLookupRequest) -> dict:
-    config = _require_registry()
+@_public_router.post("/auto-peer/session")
+def api_auto_peer_session(body: AutoPeerSessionRequest) -> dict:
+    domain = _require_auto_peer()
     try:
-        result = start_lookup(config=config, asn=body.asn)
-    except AutoPeerError as exc:
-        raise _map_auto_peer_error(exc) from exc
-    except Dn42CtlError as exc:
-        # registry-not-found / parse errors
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return {
-        "asn": result.asn,
-        "mntners": [
-            {
-                "name": m.name,
-                "auth_options": [
-                    {
-                        "index": opt.index,
-                        "scheme": opt.scheme,
-                        "fingerprint": opt.fingerprint,
-                    }
-                    for opt in m.auth_options
-                ],
-            }
-            for m in result.mntners
-        ],
-    }
-
-
-@_public_router.post("/auto-peer/challenge")
-def api_auto_peer_challenge(body: AutoPeerChallengeRequest) -> dict:
-    config = _require_registry()
-    try:
-        challenge = start_challenge(
-            config=config,
-            asn=body.asn,
-            mntner=body.mntner,
-            auth_index=body.auth_index,
-        )
-    except AutoPeerError as exc:
-        raise _map_auto_peer_error(exc) from exc
-    except Dn42CtlError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return {
-        "challenge_id": challenge.challenge_id,
-        "nonce": challenge.nonce_hex,
-        "namespace": challenge.namespace,
-        "scheme": challenge.scheme,
-        "expires_in_seconds": max(0, int(challenge.expires_at - _monotonic_now())),
-    }
-
-
-@_public_router.post("/auto-peer/verify")
-def api_auto_peer_verify(body: AutoPeerVerifyRequest) -> dict:
-    config = _require_registry()
-    try:
-        result = verify_challenge(
-            config=config,
-            challenge_id=body.challenge_id,
-            signature=body.signature,
-        )
+        identity = verify_auth_response(body.params, body.signature, domain=domain)
+        result = open_session(identity)
+    except KioubitExpiredError as exc:
+        raise HTTPException(status_code=410, detail=str(exc)) from exc
+    except KioubitAuthError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except AutoPeerError as exc:
         raise _map_auto_peer_error(exc) from exc
     return {
@@ -1185,12 +1121,29 @@ def api_auto_peer_verify(body: AutoPeerVerifyRequest) -> dict:
     }
 
 
+@_public_router.get("/auto-peer/nodes")
+def api_auto_peer_nodes() -> dict:
+    _require_auto_peer()
+    targets = list_peer_targets(db_path=_get_db_path())
+    return {
+        "nodes": [
+            {
+                "node_id": t.node_id,
+                "name": t.name,
+                "endpoint_host": t.endpoint_host,
+            }
+            for t in targets
+        ]
+    }
+
+
 @_public_router.post("/auto-peer/submit", status_code=201)
 def api_auto_peer_submit(
     body: AutoPeerSubmitRequest,
     cred: Annotated[HTTPAuthorizationCredentials | None, Depends(_AUTO_PEER_BEARER)],
 ) -> dict:
-    config = _require_registry()
+    _require_auto_peer()
+    config = _get_config()
     if cred is None or not cred.credentials:
         raise HTTPException(status_code=401, detail="missing peer-session token")
     try:
@@ -1198,6 +1151,7 @@ def api_auto_peer_submit(
             config=config,
             db_path=_get_db_path(),
             session_token=cred.credentials,
+            node_id=body.node_id,
             wg_public_key=body.wg_public_key,
             endpoint=body.endpoint,
             peer_lla=body.peer_lla,
@@ -1211,7 +1165,8 @@ def api_auto_peer_submit(
     return {
         "proposal_id": result.proposal.id,
         "status": result.proposal.status,
-        "node_id": result.our_node_id,
+        "node_id": result.node_id,
+        "node_name": result.node_name,
         "received_at": result.proposal.received_at,
         "message": (
             "Your peer request is pending operator approval."

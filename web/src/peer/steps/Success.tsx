@@ -19,7 +19,7 @@ export function Success({ result, onRestart }: Props) {
           <span className="text-zinc-500">Status:</span> {result.status}
         </p>
         <p>
-          <span className="text-zinc-500">Node ID:</span>{" "}
+          <span className="text-zinc-500">Node:</span> {result.node_name}{" "}
           <code className="text-xs">{result.node_id}</code>
         </p>
       </div>

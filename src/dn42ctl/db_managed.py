@@ -32,7 +32,7 @@ class PropagatedChange:
 
 
 # 允许 _update_fields 写的列。列名拼进 SQL,必须是白名单,不能来自外部输入。
-_UPDATABLE_NODE_COLUMNS = frozenset({"name", "enabled", "endpoint_host", "own_ipv6", "router_id"})
+_UPDATABLE_NODE_COLUMNS = frozenset({"name", "enabled", "auto_peer", "endpoint_host", "own_ipv6", "router_id"})
 _PROPAGATABLE_PEER_COLUMNS = frozenset({"peer_ip", "endpoint"})
 
 
@@ -102,6 +102,8 @@ class ManagedNode:
     endpoint_host: str | None = None
     own_ipv6: str | None = None
     router_id: str | None = None
+    # 该节点是否出现在公共 auto-peer 页面上(v14)。默认关闭。
+    auto_peer: bool = False
 
 
 def _row_to_managed_node(row: sqlite3.Row) -> ManagedNode:
@@ -118,6 +120,7 @@ def _row_to_managed_node(row: sqlite3.Row) -> ManagedNode:
         endpoint_host=row["endpoint_host"],
         own_ipv6=row["own_ipv6"],
         router_id=row["router_id"],
+        auto_peer=bool(row["auto_peer"]),
     )
 
 
@@ -206,6 +209,20 @@ class ManagedNodeStore:
             raise DatabaseError("列出 managed_nodes 失败") from exc
         return [_row_to_managed_node(r) for r in rows]
 
+    def list_auto_peer(self) -> list[ManagedNode]:
+        """开放给公共 auto-peer 页面的节点。
+
+        两个条件都要满足:`auto_peer=1` 是运维的显式开放,`enabled=1` 是节点仍在服役。
+        禁用一个节点因此同时关掉它的 auto-peer 入口,无需再记得改第二个开关。
+        """
+        try:
+            rows = self._conn.execute(
+                "SELECT * FROM managed_nodes WHERE auto_peer=1 AND enabled=1 ORDER BY is_self DESC, name",
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise DatabaseError("列出 auto-peer 节点失败") from exc
+        return [_row_to_managed_node(r) for r in rows]
+
     def get_self(self) -> ManagedNode | None:
         try:
             # ORDER BY 是防御性的:upsert_self 保证至多一行,但没有排序的 LIMIT 1 会在
@@ -225,6 +242,10 @@ class ManagedNodeStore:
         """Insert or update the row marking this node as the central host's self node.
 
         Idempotent. Does not touch api_token_hash.
+
+        `name` applies to the insert only. Every `dn42ctl serve` start calls this with
+        the default, so writing it on conflict too would undo an operator's rename on
+        the next restart — and that name is what the public auto-peer page shows.
 
         Demotes any other `is_self=1` row first. Losing `/var/lib/dn42ctl/self_node_id`
         mints a fresh UUID, and without the demotion the old row keeps its flag: two
@@ -252,7 +273,6 @@ class ManagedNodeStore:
                     enabled, is_self, last_seen_at, created_at, updated_at
                 ) VALUES (?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(node_id) DO UPDATE SET
-                    name=excluded.name,
                     is_self=1,
                     enabled=1,
                     updated_at=excluded.updated_at
@@ -409,6 +429,7 @@ class ManagedNodeStore:
         *,
         name: str | _Unset = UNSET,
         enabled: bool | _Unset = UNSET,
+        auto_peer: bool | _Unset = UNSET,
         endpoint_host: str | None | _Unset = UNSET,
         own_ipv6: str | None | _Unset = UNSET,
         router_id: str | None | _Unset = UNSET,
@@ -426,6 +447,8 @@ class ManagedNodeStore:
             fields["name"] = name
         if not isinstance(enabled, _Unset):
             fields["enabled"] = 1 if enabled else 0
+        if not isinstance(auto_peer, _Unset):
+            fields["auto_peer"] = 1 if auto_peer else 0
 
         events: list[tuple[str, str]] = []
         if "own_ipv6" in fields or "router_id" in fields:

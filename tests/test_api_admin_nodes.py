@@ -182,6 +182,17 @@ class TestPatchNode:
             is True
         )
 
+    def test_open_and_close_auto_peer(self, admin_client: TestClient) -> None:
+        """新节点默认不出现在公共 auto-peer 页面上,开放是一次显式动作。"""
+        _add_node(admin_client, NODE_A, "alpha")
+        assert admin_client.get(f"/api/admin/nodes/{NODE_A}", headers=ADMIN_H).json()["auto_peer"] is False
+
+        opened = admin_client.patch(f"/api/admin/nodes/{NODE_A}", json={"auto_peer": True}, headers=ADMIN_H)
+        assert opened.json()["auto_peer"] is True
+
+        closed = admin_client.patch(f"/api/admin/nodes/{NODE_A}", json={"auto_peer": False}, headers=ADMIN_H)
+        assert closed.json()["auto_peer"] is False
+
     @pytest.mark.parametrize(
         "payload",
         [

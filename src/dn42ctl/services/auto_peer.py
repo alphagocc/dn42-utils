@@ -1,8 +1,7 @@
 """Auto-peer orchestration service.
 
-In-memory challenge + session store, registry lookup, and proposal submission.
-Process restart drops all challenges/sessions (by design — that's the only way
-to forcibly invalidate everything).
+In-memory session store and proposal submission. Process restart drops all
+sessions (by design — that's the only way to forcibly invalidate everything).
 """
 
 from __future__ import annotations
@@ -17,22 +16,15 @@ from dn42ctl.config import AppConfig
 from dn42ctl.db import Database
 from dn42ctl.db_managed import ConfigProposal, ManagedNodeStore
 from dn42ctl.services.core import Dn42CtlError
-from dn42ctl.services.crypto_verify import verify_pgp, verify_ssh
+from dn42ctl.services.kioubit_auth import MAX_AGE_SECONDS, KioubitIdentity
 from dn42ctl.services.node_push import build_peer_add_payload
 from dn42ctl.services.proposals import submit_proposal
-from dn42ctl.services.registry import (
-    PGP_SCHEME,
-    SSH_SCHEMES,
-    AuthOption,
-    RegistryError,
-    read_aut_num,
-    read_mntner_auth,
-    read_pgp_key,
-)
 
-CHALLENGE_NAMESPACE = "dn42ctl-autopeer"
-_CHALLENGE_TTL_SECONDS = 600.0  # 10 minutes
 _SESSION_TTL_SECONDS = 900.0  # 15 minutes
+# A verified response stays replayable until its own freshness window closes, so
+# remembering consumed signatures for twice that span covers the whole exposure
+# regardless of which direction the clocks are skewed.
+_CONSUMED_TTL_SECONDS = MAX_AGE_SECONDS * 2
 
 
 class AutoPeerError(Dn42CtlError):
@@ -40,7 +32,7 @@ class AutoPeerError(Dn42CtlError):
 
 
 class AutoPeerExpiredError(AutoPeerError):
-    """Challenge / session expired or already consumed (HTTP 410)."""
+    """Session expired or already consumed (HTTP 410)."""
 
 
 class AutoPeerSessionError(AutoPeerError):
@@ -48,28 +40,7 @@ class AutoPeerSessionError(AutoPeerError):
 
 
 @dataclass(frozen=True)
-class MntnerOptions:
-    name: str
-    auth_options: list[AuthOption]
-
-
-@dataclass(frozen=True)
-class LookupResult:
-    asn: int
-    mntners: list[MntnerOptions]
-
-
-@dataclass(frozen=True)
-class ChallengeIssued:
-    challenge_id: str
-    nonce_hex: str
-    namespace: str
-    scheme: str
-    expires_at: float
-
-
-@dataclass(frozen=True)
-class VerifyResult:
+class SessionIssued:
     peer_session_token: str
     verified_asn: int
     verified_mntner: str
@@ -77,28 +48,17 @@ class VerifyResult:
 
 
 @dataclass(frozen=True)
+class PeerTarget:
+    node_id: str
+    name: str
+    endpoint_host: str | None
+
+
+@dataclass(frozen=True)
 class SubmitResult:
     proposal: ConfigProposal
-    our_node_id: str
-
-
-# Internal records (not part of the public dataclass surface)
-
-
-@dataclass
-class _Challenge:
-    id: str
-    nonce: bytes
-    namespace: str
-    asn: int
-    mntner: str
-    scheme: str
-    auth_raw: str  # full auth-line value (without `auth:` prefix)
-    fingerprint: str | None
-    expires_at: float  # time.monotonic() deadline
-    # 已被某个请求认领。验证要跑 ssh-keygen / gpg 子进程,不能持锁,所以用标记代替
-    # 长时间持锁:第一个请求认领,其余立刻被拒。见 docs/architecture/auto_peer.md。
-    in_flight: bool = False
+    node_id: str
+    node_name: str
 
 
 @dataclass
@@ -111,8 +71,8 @@ class _Session:
 
 
 _lock = threading.Lock()
-_challenges: dict[str, _Challenge] = {}
 _sessions: dict[str, _Session] = {}
+_consumed: dict[str, float] = {}
 
 
 def _now() -> float:
@@ -120,196 +80,75 @@ def _now() -> float:
 
 
 def _purge_expired_locked(now: float) -> None:
-    expired_c = [k for k, v in _challenges.items() if v.expires_at <= now]
-    for k in expired_c:
-        _challenges.pop(k, None)
-    expired_s = [k for k, v in _sessions.items() if v.expires_at <= now]
-    for k in expired_s:
-        _sessions.pop(k, None)
+    for token in [k for k, v in _sessions.items() if v.expires_at <= now]:
+        _sessions.pop(token, None)
+    for digest in [k for k, deadline in _consumed.items() if deadline <= now]:
+        _consumed.pop(digest, None)
 
 
 def reset_state() -> None:
-    """Clear all in-memory challenges and sessions. Tests call this between cases."""
+    """Clear all in-memory sessions. Tests call this between cases."""
     with _lock:
-        _challenges.clear()
         _sessions.clear()
+        _consumed.clear()
 
 
-# --- step 1: lookup ---
+# --- step 1: exchange a verified identity for a peer session ---
 
 
-def start_lookup(*, config: AppConfig, asn: int) -> LookupResult:
-    """Read aut-num + mntner files and return supported auth options per mntner."""
-    if asn <= 0:
-        raise AutoPeerError(f"ASN 必须为正整数: {asn}")
-    registry_path = config.dn42_registry_path
-    if not registry_path:
-        # Shouldn't be reached if the API guard runs first, but be defensive.
-        raise AutoPeerError("auto-peer 未启用 (dn42_registry_path 未配置)")
+def open_session(identity: KioubitIdentity) -> SessionIssued:
+    """Issue a peer-session token for an already-verified identity.
 
-    mntner_names = read_aut_num(registry_path, asn)
-    mntner_results: list[MntnerOptions] = []
-    for name in mntner_names:
-        try:
-            opts = read_mntner_auth(registry_path, name)
-        except RegistryError:
-            # Skip mntners whose files are broken/missing; report what we can.
-            continue
-        mntner_results.append(MntnerOptions(name=name, auth_options=opts))
-    if not any(m.auth_options for m in mntner_results):
-        raise AutoPeerError(f"AS{asn} 的 mntner 没有可用的 auth 方式（仅支持 SSH / PGP）")
-    return LookupResult(asn=asn, mntners=mntner_results)
-
-
-# --- step 2: challenge ---
-
-
-def start_challenge(*, config: AppConfig, asn: int, mntner: str, auth_index: int) -> ChallengeIssued:
-    """Issue a single-use challenge bound to (asn, mntner, auth_index)."""
-    registry_path = config.dn42_registry_path
-    if not registry_path:
-        raise AutoPeerError("auto-peer 未启用 (dn42_registry_path 未配置)")
-    # Verify mntner is actually one of the AS's mnt-by entries — prevents
-    # a caller from challenging against arbitrary mntners.
-    mnt_by = read_aut_num(registry_path, asn)
-    if mntner not in mnt_by:
-        raise AutoPeerError(f"{mntner} 不在 AS{asn} 的 mnt-by 列表中")
-    options = read_mntner_auth(registry_path, mntner)
-    if auth_index < 0 or auth_index >= len(options):
-        raise AutoPeerError(f"auth_index 越界: {auth_index}")
-    option = options[auth_index]
-
-    if option.scheme in SSH_SCHEMES:
-        kind = "ssh"
-    elif option.scheme == PGP_SCHEME:
-        kind = "pgp"
-    else:  # pragma: no cover — read_mntner_auth already filters
-        raise AutoPeerError(f"不支持的 auth 方案: {option.scheme}")
-
-    challenge_id = secrets.token_urlsafe(16)
-    nonce = secrets.token_bytes(32)
+    The signature digest is burned so a response captured from the browser's URL
+    cannot be handed in twice while it is still fresh.
+    """
     now = _now()
-    expires_at = now + _CHALLENGE_TTL_SECONDS
+    expires_at = now + _SESSION_TTL_SECONDS
+    token = secrets.token_urlsafe(32)
 
     with _lock:
         _purge_expired_locked(now)
-        _challenges[challenge_id] = _Challenge(
-            id=challenge_id,
-            nonce=nonce,
-            namespace=CHALLENGE_NAMESPACE,
-            asn=asn,
-            mntner=mntner,
-            scheme=kind,
-            auth_raw=option.raw,
-            fingerprint=option.fingerprint,
+        if identity.digest in _consumed:
+            raise AutoPeerExpiredError("该认证响应已被使用，请重新认证")
+        _consumed[identity.digest] = now + _CONSUMED_TTL_SECONDS
+        _sessions[token] = _Session(
+            token=token,
+            asn=identity.asn,
+            mntner=identity.mntner,
             expires_at=expires_at,
         )
 
-    return ChallengeIssued(
-        challenge_id=challenge_id,
-        nonce_hex=nonce.hex(),
-        namespace=CHALLENGE_NAMESPACE,
-        scheme=kind,
+    return SessionIssued(
+        peer_session_token=token,
+        verified_asn=identity.asn,
+        verified_mntner=identity.mntner,
         expires_at=expires_at,
     )
 
 
-# --- step 3: verify ---
+# --- step 2: choose a node and submit ---
 
 
-def _release_challenge(challenge_id: str) -> None:
-    """清除 in-flight 标记,让用户可以重试。"""
-    with _lock:
-        challenge = _challenges.get(challenge_id)
-        if challenge is not None:
-            challenge.in_flight = False
-
-
-def _run_verification(challenge: _Challenge, signature: str, registry_path: str) -> bool:
-    if challenge.scheme == "ssh":
-        # auth_raw is the full ssh pubkey line ("ssh-ed25519 AAAA... comment").
-        identity = f"dn42@AS{challenge.asn}-{challenge.mntner}"
-        return verify_ssh(
-            message=challenge.nonce.hex().encode("ascii"),
-            signature=signature,
-            allowed_pubkey=challenge.auth_raw,
-            namespace=challenge.namespace,
-            identity=identity,
-        )
-    if challenge.scheme == "pgp":
-        if not challenge.fingerprint:
-            raise AutoPeerError("PGP 挑战缺少 fingerprint")
-        try:
-            ascii_key = read_pgp_key(registry_path, challenge.fingerprint)
-        except RegistryError as exc:
-            raise AutoPeerError(str(exc)) from exc
-        return verify_pgp(
-            message=challenge.nonce.hex().encode("ascii"),
-            signature=signature,
-            ascii_key=ascii_key,
-        )
-    raise AutoPeerError(f"未知 challenge scheme: {challenge.scheme}")  # pragma: no cover
-
-
-def verify_challenge(*, config: AppConfig, challenge_id: str, signature: str) -> VerifyResult:
-    """Validate the user's signature against the stored challenge.
-
-    On success: burn the challenge, issue a peer_session_token.
-    On failure: leave the challenge in place (until TTL) so the user can retry.
-    On expired/missing challenge: raise AutoPeerExpiredError.
-
-    Verification runs a subprocess, far longer than the lock should be held, so the
-    challenge is claimed with an in-flight flag instead: concurrent callers would
-    otherwise all read the same challenge, all verify successfully, and each walk away
-    with its own session.
-    """
-    registry_path = config.dn42_registry_path
-    if not registry_path:
-        raise AutoPeerError("auto-peer 未启用 (dn42_registry_path 未配置)")
-    if not signature or not signature.strip():
-        raise AutoPeerError("signature 不能为空")
-
-    now = _now()
-    with _lock:
-        _purge_expired_locked(now)
-        challenge = _challenges.get(challenge_id)
-        if challenge is None:
-            raise AutoPeerExpiredError("挑战不存在或已过期")
-        if challenge.expires_at <= now:
-            raise AutoPeerExpiredError("挑战已过期")
-        if challenge.in_flight:
-            raise AutoPeerError("该挑战正在校验中，请稍候重试")
-        challenge.in_flight = True
-
+def list_peer_targets(*, db_path: Path) -> list[PeerTarget]:
+    """开放给公共页面的节点。运维没开过任何节点时返回空列表。"""
+    db = Database.open(db_path)
     try:
-        ok = _run_verification(challenge, signature, registry_path)
-    except Exception:
-        _release_challenge(challenge_id)
-        raise
-    if not ok:
-        _release_challenge(challenge_id)
-        raise AutoPeerError("签名校验失败")
-
-    session_token = secrets.token_urlsafe(32)
-    session_expires = now + _SESSION_TTL_SECONDS
-    with _lock:
-        _challenges.pop(challenge_id, None)
-        _sessions[session_token] = _Session(
-            token=session_token,
-            asn=challenge.asn,
-            mntner=challenge.mntner,
-            expires_at=session_expires,
-        )
-
-    return VerifyResult(
-        peer_session_token=session_token,
-        verified_asn=challenge.asn,
-        verified_mntner=challenge.mntner,
-        expires_at=session_expires,
-    )
+        nodes = ManagedNodeStore(db.connection).list_auto_peer()
+    finally:
+        db.close()
+    return [PeerTarget(node_id=n.node_id, name=n.name, endpoint_host=n.endpoint_host) for n in nodes]
 
 
-# --- step 4: submit ---
+def _resolve_target(db_path: Path, node_id: str) -> tuple[str, str]:
+    """把请求里的 node_id 解析成 (node_id, name)。
+
+    判定只认 `list_auto_peer` 返回的那批节点。提交与列表因此共用同一处规则,运维关掉开关
+    之后停留在旧页面上的人也提交不进来。
+    """
+    for target in list_peer_targets(db_path=db_path):
+        if target.node_id == node_id:
+            return target.node_id, target.name
+    raise AutoPeerError(f"节点不接受 auto-peer 请求: {node_id}")
 
 
 def _claim_session(token: str) -> _Session:
@@ -340,23 +179,18 @@ def submit_peer(
     config: AppConfig,
     db_path: Path,
     session_token: str,
+    node_id: str,
     wg_public_key: str,
     endpoint: str,
     peer_lla: str,
     net_backend: str = "networkd",
     listen_port: int | None = None,
 ) -> SubmitResult:
-    """Resolve the session, look up the self node_id, submit a peer_add proposal."""
+    """Resolve the session and the chosen node, submit a peer_add proposal."""
     session = _claim_session(session_token)
 
     try:
-        db = Database.open(db_path)
-        try:
-            self_node = ManagedNodeStore(db.connection).get_self()
-        finally:
-            db.close()
-        if self_node is None:
-            raise AutoPeerError("self 节点尚未注册：先启动一次 `dn42ctl serve` 让 bootstrap 跑完")
+        target_id, target_name = _resolve_target(db_path, node_id)
 
         payload = build_peer_add_payload(
             peer_kind="bgp",
@@ -372,18 +206,18 @@ def submit_peer(
 
         proposal = submit_proposal(
             db_path=db_path,
-            node_id=self_node.node_id,
+            node_id=target_id,
             source="push",
             kind="peer_add",
             payload=payload,
             config=None,
         )
     except Exception:
-        # 失败保留 session,让用户改字段重交(与 challenge 的重试语义一致)。
+        # 失败保留 session,让用户改字段重交。
         _release_session(session_token)
         raise
 
     with _lock:
         _sessions.pop(session_token, None)
 
-    return SubmitResult(proposal=proposal, our_node_id=self_node.node_id)
+    return SubmitResult(proposal=proposal, node_id=target_id, node_name=target_name)

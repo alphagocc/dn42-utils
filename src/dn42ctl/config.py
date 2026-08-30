@@ -40,7 +40,6 @@ class AppConfig:
     networkd_dir: str
     nm_system_connections_dir: str
     dummy_backend: str = "networkd"
-    dn42_registry_path: str | None = None
 
 
 class ConfigError(RuntimeError):
@@ -132,7 +131,6 @@ def load_config(path: Path) -> AppConfig:
         networkd_dir=_require_str(paths, "networkd_dir"),
         nm_system_connections_dir=_require_str(paths, "nm_system_connections_dir"),
         dummy_backend=dummy_backend,
-        dn42_registry_path=_optional_str(raw, "dn42_registry_path"),
     )
 
 
@@ -162,8 +160,6 @@ def dumps_config(config: AppConfig) -> str:
             "nm_system_connections_dir": config.nm_system_connections_dir,
         },
     }
-    if config.dn42_registry_path is not None:
-        data["dn42_registry_path"] = config.dn42_registry_path
     return tomli_w.dumps(data)
 
 

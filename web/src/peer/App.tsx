@@ -1,61 +1,69 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ThemeToggle } from "../shared/components/ThemeToggle";
 import { VersionFooter } from "../shared/components/VersionFooter";
-import { Step1Lookup } from "./steps/Step1Lookup";
-import { Step2Auth } from "./steps/Step2Auth";
-import { Step3Sign } from "./steps/Step3Sign";
-import { Step4Submit } from "./steps/Step4Submit";
+import { AUTOPEER_API } from "../shared/api";
+import { StepAuth } from "./steps/StepAuth";
+import { StepSubmit } from "./steps/StepSubmit";
 import { Success } from "./steps/Success";
-
-interface AuthOption {
-  index: number;
-  scheme: string;
-  fingerprint: string | null;
-}
-
-export interface Mntner {
-  name: string;
-  auth_options: AuthOption[];
-}
-
-export interface Challenge {
-  challenge_id: string;
-  nonce: string;
-  scheme: string;
-  namespace: string;
-  mntner: string;
-}
 
 export interface SubmitResult {
   proposal_id: number;
   status: string;
   node_id: string;
+  node_name: string;
   message: string;
 }
 
-export interface PeerState {
+export interface Verified {
   asn: number;
-  mntners: Mntner[];
-  challenge: Challenge | null;
-  session: string | null;
-  result: SubmitResult | null;
+  mntner: string;
+  session: string;
 }
-
-const INITIAL_STATE: PeerState = {
-  asn: 0,
-  mntners: [],
-  challenge: null,
-  session: null,
-  result: null,
-};
 
 export function App() {
   const [step, setStep] = useState(1);
-  const [state, setState] = useState<PeerState>({ ...INITIAL_STATE });
+  const [verified, setVerified] = useState<Verified | null>(null);
+  const [result, setResult] = useState<SubmitResult | null>(null);
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(() => hasAuthResponse());
+
+  useEffect(() => {
+    const query = new URLSearchParams(location.search);
+    const params = query.get("params");
+    const signature = query.get("signature");
+    if (!params || !signature) return;
+
+    // 兑换后立刻从地址栏抹掉响应:刷新页面会把同一个签名再交一次,而它是一次性的。
+    history.replaceState(null, "", location.origin + location.pathname);
+
+    (async () => {
+      try {
+        const res = await fetch(`${AUTOPEER_API}/session`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ params, signature }),
+        });
+        const json = await res.json().catch(() => ({ detail: res.statusText }));
+        if (!res.ok) throw new Error(json.detail || JSON.stringify(json));
+        setVerified({
+          asn: json.verified_asn,
+          mntner: json.verified_mntner,
+          session: json.peer_session_token,
+        });
+        setStep(2);
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        setPending(false);
+      }
+    })();
+  }, []);
 
   const restart = () => {
     setStep(1);
-    setState({ ...INITIAL_STATE });
+    setVerified(null);
+    setResult(null);
+    setError("");
   };
 
   return (
@@ -68,51 +76,17 @@ export function App() {
       <StepIndicator current={step} />
 
       <main className="w-full max-w-2xl">
-        {step === 1 && (
-          <Step1Lookup
-            asn={state.asn}
-            onResult={(asn, mntners) => {
-              setState((s) => ({ ...s, asn, mntners }));
-              setStep(2);
-            }}
-          />
-        )}
-        {step === 2 && (
-          <Step2Auth
-            asn={state.asn}
-            mntners={state.mntners}
-            onResult={(challenge) => {
-              setState((s) => ({ ...s, challenge }));
+        {step === 1 && <StepAuth pending={pending} error={error} />}
+        {step === 2 && verified && (
+          <StepSubmit
+            verified={verified}
+            onResult={(r) => {
+              setResult(r);
               setStep(3);
             }}
-            onBack={() => setStep(1)}
           />
         )}
-        {step === 3 && state.challenge && (
-          <Step3Sign
-            asn={state.asn}
-            challenge={state.challenge}
-            onResult={(session) => {
-              setState((s) => ({ ...s, session }));
-              setStep(4);
-            }}
-            onBack={() => setStep(2)}
-          />
-        )}
-        {step === 4 && state.session && (
-          <Step4Submit
-            asn={state.asn}
-            challenge={state.challenge!}
-            session={state.session}
-            onResult={(result) => {
-              setState((s) => ({ ...s, result }));
-              setStep(5);
-            }}
-          />
-        )}
-        {step === 5 && state.result && (
-          <Success result={state.result} onRestart={restart} />
-        )}
+        {step === 3 && result && <Success result={result} onRestart={restart} />}
       </main>
 
       <footer className="mt-12 text-xs text-zinc-500 text-center space-y-1">
@@ -123,10 +97,15 @@ export function App() {
   );
 }
 
+function hasAuthResponse(): boolean {
+  const query = new URLSearchParams(location.search);
+  return Boolean(query.get("params") && query.get("signature"));
+}
+
 function StepIndicator({ current }: { current: number }) {
   return (
     <nav className="w-full max-w-2xl flex items-center justify-center gap-2 mb-8">
-      {[1, 2, 3, 4].map((n, i) => (
+      {[1, 2, 3].map((n, i) => (
         <span key={n}>
           {i > 0 && <span className="inline-block w-8 border-t border-zinc-300 dark:border-zinc-700 align-middle" />}
           <span

@@ -41,6 +41,15 @@ def _migration_10(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ibgp_peers_remote ON ibgp_peers(remote_node_id)")
 
 
+def _migration_14(conn: sqlite3.Connection) -> None:
+    """auto-peer 的每节点开关。
+
+    默认 0:公共 peer 页面只列出运维显式开放的节点,新增或升级出来的节点不会因为存在
+    就被暴露。语义见 docs/architecture/auto_peer.md。
+    """
+    ensure_column(conn, "managed_nodes", "auto_peer", "INTEGER NOT NULL DEFAULT 0")
+
+
 MIGRATIONS: list[tuple[int, MigrationStep]] = [
     (
         1,
@@ -224,4 +233,5 @@ MIGRATIONS: list[tuple[int, MigrationStep]] = [
             ON managed_nodes(is_self) WHERE is_self = 1;
         """.strip(),
     ),
+    (14, _migration_14),
 ]

@@ -56,6 +56,36 @@ class TestNodeShow:
         assert "write_policy" in result.output
 
 
+class TestNodeRename:
+    def test_rename(self, runner: CliRunner, base_args: list[str]) -> None:
+        runner.invoke(app, [*base_args, "node", "add", NODE_A, "--name", "alpha"])
+        result = runner.invoke(app, [*base_args, "node", "rename", NODE_A, "Frankfurt"])
+        assert result.exit_code == 0, result.output
+        assert "name=Frankfurt" in result.output
+
+    def test_blank_name_rejected(self, runner: CliRunner, base_args: list[str]) -> None:
+        runner.invoke(app, [*base_args, "node", "add", NODE_A, "--name", "alpha"])
+        result = runner.invoke(app, [*base_args, "node", "rename", NODE_A, "   "])
+        assert result.exit_code != 0
+
+    def test_unknown_node_rejected(self, runner: CliRunner, base_args: list[str]) -> None:
+        result = runner.invoke(app, [*base_args, "node", "rename", NODE_A, "Frankfurt"])
+        assert result.exit_code != 0
+
+
+class TestNodeAutoPeer:
+    def test_enable_and_disable(self, runner: CliRunner, base_args: list[str]) -> None:
+        runner.invoke(app, [*base_args, "node", "add", NODE_A, "--name", "alpha"])
+
+        opened = runner.invoke(app, [*base_args, "node", "auto-peer", NODE_A, "--enable"])
+        assert opened.exit_code == 0, opened.output
+        assert "auto_peer:     on" in opened.output
+
+        closed = runner.invoke(app, [*base_args, "node", "auto-peer", NODE_A, "--disable"])
+        assert closed.exit_code == 0, closed.output
+        assert "auto_peer:     off" in closed.output
+
+
 class TestNodeRemove:
     def test_remove(self, runner: CliRunner, base_args: list[str]) -> None:
         runner.invoke(app, [*base_args, "node", "add", NODE_A, "--name", "alpha"])

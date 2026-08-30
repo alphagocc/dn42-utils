@@ -77,6 +77,16 @@ hub 以非 root 的 `dn42ctl` 用户运行，而 `node.toml` 是 `0600 root:root
 
 未指定的字段不变。传播规则、无法自动推导的情形、以及为什么端口永不自动改写，见 [`../architecture/node_addressing.md`](../architecture/node_addressing.md)。
 
+### `dn42ctl node rename <node-id> <name>`
+
+修改节点的显示名。等价于 `PATCH /api/admin/nodes/{node_id}` 只传 `name`，不触发地址传播。
+
+### `dn42ctl node auto-peer <node-id> --enable|--disable`
+
+开放或收回该节点在公共 auto-peer 页面上的入口。默认关闭，`--enable` 之后它才出现在 `GET /api/public/auto-peer/nodes` 的返回里，并接受指向自己的 peering 提案。
+
+禁用节点（`enabled=0`）同时收回入口，无需再执行 `--disable`。语义见 [`../architecture/auto_peer.md`](../architecture/auto_peer.md)。
+
 ### `dn42ctl node mesh backfill [--dry-run]`
 
 一次性回填 `ibgp_peers.remote_node_id`：按 `managed_nodes.own_ipv6 == ibgp_peers.peer_ip` 唯一匹配。匹配不唯一或匹配不到的行会被跳过并列出。

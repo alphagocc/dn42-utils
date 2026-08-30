@@ -45,7 +45,7 @@ web/
     │       ├── Bgp.tsx          # CRUD
     │       ├── Ibgp.tsx         # CRUD
     │       ├── Wg.tsx           # 只读
-    │       ├── Nodes.tsx        # CRUD + rotate token + 地址编辑
+    │       ├── Nodes.tsx        # CRUD + rotate token + 地址与 auto-peer 开关编辑
     │       ├── Proposals.tsx    # accept/reject
     │       ├── Reports.tsx      # import
     │       ├── Revisions.tsx    # pin/unpin
@@ -55,10 +55,8 @@ web/
         ├── main.tsx
         ├── App.tsx              # 步骤状态机 + 步骤指示器
         └── steps/
-            ├── Step1Lookup.tsx
-            ├── Step2Auth.tsx
-            ├── Step3Sign.tsx
-            ├── Step4Submit.tsx
+            ├── StepAuth.tsx     # 跳转到 Kioubit 认证服务
+            ├── StepSubmit.tsx   # 选节点 + WireGuard 表单
             └── Success.tsx
 ```
 
@@ -133,7 +131,7 @@ HTML `<head>` 内尽早执行的内联脚本（防 FOUC）：
 | BGP peers | `GET /api/admin/bgp/peers?live=false` | + Add / row Edit / row Delete |
 | iBGP peers | `GET /api/admin/ibgp/peers?live=false` | + Add / row Edit / row Delete |
 | WG tunnels | `GET /api/admin/wg/tunnels?live=false` | 只读 |
-| Nodes | `GET /api/admin/nodes` | + Add / Edit (name/enabled/地址) / Policy / Status / Rotate token (一次性明文) / Delete |
+| Nodes | `GET /api/admin/nodes` | + Add / Edit (name/enabled/auto-peer/地址) / Policy / Status / Rotate token (一次性明文) / Delete |
 | Proposals | `GET /api/admin/nodes/{id}/proposals` | Accept / Reject (带 reason) |
 | Reports | `GET /api/admin/nodes/{id}/reports` | Import |
 | Revisions | `GET /api/admin/nodes/{id}/revisions` | Pin (rollback) / Unpin |
@@ -166,17 +164,18 @@ Tab 切换使用 React `useState`，刷新按钮递增 `refreshKey` 强制组件
 - **未勾选的 checkbox 在 `FormData` 里是缺席而非 `false`**，取值要写 `!!d.enabled`。
 - **空文本框产出 `""` 而非缺席。** 涉及"可清除"语义的字段（节点的三个地址字段）必须显式把 `"" → null` 再序列化。`""` 是 UI 表达"取消中心管理"的方式，而 `null` 才是 API 的表达方式。
 
-## peer: 4 步向导
+## peer: 2 步向导
 
 | 步骤 | 操作 | 关键 API |
 |------|------|---------|
-| 1. Identify | 输入 ASN | `POST /api/public/auto-peer/lookup {asn}` |
-| 2. Choose mntner | 后端返回 mnt-by × auth_lines 矩阵，用户点选一行 | `POST /api/public/auto-peer/challenge {asn, mntner, auth_index}` |
-| 3. Sign challenge | 页面展示 nonce + 复制粘贴命令，用户回填签名 | `POST /api/public/auto-peer/verify {challenge_id, signature}` → `peer_session_token` |
-| 4. Submit peer | 表单：WG pubkey, endpoint (可空), peer LLA, net_backend, listen_port | `POST /api/public/auto-peer/submit` (带 Bearer peer-session) |
+| 1. Authenticate | 跳转到 Kioubit 认证服务，回跳后页面把 query 中的 `params` 与 `signature` 交给后端 | `POST /api/public/auto-peer/session {params, signature}` → `peer_session_token` |
+| 2. Submit peer | 表单：目标节点下拉、WG pubkey, endpoint (可空), peer LLA, listen_port | `GET /api/public/auto-peer/nodes`、`POST /api/public/auto-peer/submit` (带 Bearer peer-session) |
 
+- 跳转用一个 `method="get"` 的表单指向 `https://dn42.g-load.eu/auth/`，隐藏字段 `return` 是页面自身地址；页面不加载第三方脚本。
+- 兑换成功后立刻 `history.replaceState` 清掉 query：认证响应是一次性的，刷新会把它再交一次。
+- 节点下拉的内容来自 `GET /nodes`，每个选项由节点名称与 endpoint host 组成。列表为空时该步只显示一句说明，不渲染表单。
 - `peer_session_token` 只放在 React 组件状态中，不写 storage，因此刷新即作废。
-- 成功后展示：`Proposal #N is pending operator approval`。
+- 成功后展示：`Proposal #N is pending operator approval`，并给出提案所属节点。
 
 ## 构建与开发
 

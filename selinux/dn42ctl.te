@@ -28,19 +28,11 @@ files_config_file(dn42ctl_etc_t)
 type dn42ctl_var_lib_t;
 files_type(dn42ctl_var_lib_t)
 
-type dn42ctl_tmp_t;
-files_tmp_file(dn42ctl_tmp_t)
-
 type dn42ctl_bird_conf_t;
 files_config_file(dn42ctl_bird_conf_t)
 
 type dn42ctl_networkd_conf_t;
 files_config_file(dn42ctl_networkd_conf_t)
-
-# DN42 registry 的本地克隆。位置由 config.toml 指定,无法在 .fc 中穷举,
-# 部署时用 semanage fcontext 把实际目录标成本类型。
-type dn42ctl_registry_t;
-files_type(dn42ctl_registry_t)
 
 ########################################
 #
@@ -92,19 +84,6 @@ corenet_tcp_bind_generic_node(dn42ctl_server_t)
 corenet_tcp_bind_all_unreserved_ports(dn42ctl_server_t)
 corenet_tcp_sendrecv_generic_if(dn42ctl_server_t)
 corenet_tcp_sendrecv_generic_node(dn42ctl_server_t)
-
-read_files_pattern(dn42ctl_server_t, dn42ctl_registry_t, dn42ctl_registry_t)
-list_dirs_pattern(dn42ctl_server_t, dn42ctl_registry_t, dn42ctl_registry_t)
-
-# auto-peer 的签名校验调用 ssh-keygen -Y verify 与 gpg --verify。两者都在
-# PrivateTmp 提供的私有 /tmp 里建临时目录,用完即删,不做域转换：转换后的
-# gpg_t / ssh_keygen_t 读不到调用方创建的临时文件,反而要放开更多规则。
-ssh_exec_keygen(dn42ctl_server_t)
-gpg_exec(dn42ctl_server_t)
-
-manage_dirs_pattern(dn42ctl_server_t, dn42ctl_tmp_t, dn42ctl_tmp_t)
-manage_files_pattern(dn42ctl_server_t, dn42ctl_tmp_t, dn42ctl_tmp_t)
-files_tmp_filetrans(dn42ctl_server_t, dn42ctl_tmp_t, { dir file })
 
 ########################################
 #

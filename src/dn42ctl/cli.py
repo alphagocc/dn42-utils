@@ -1153,6 +1153,12 @@ def cmd_serve(
         envvar="DN42CTL_CORS_ORIGINS",
         help="允许的 CORS origin (逗号分隔，如 https://admin.example.com,https://peer.example.com)",
     ),
+    autopeer_domain: str = typer.Option(
+        "",
+        "--autopeer-domain",
+        envvar="DN42CTL_AUTOPEER_DOMAIN",
+        help="auto-peer 页面的公开域名 (如 peer.example.com)，留空则关闭公共 auto-peer 接口",
+    ),
     no_self_register: bool = typer.Option(
         False, "--no-self-register", help="跳过 self node 自动注册 (测试 / 不希望中心机自管时使用)"
     ),
@@ -1173,7 +1179,13 @@ def cmd_serve(
         typer.echo("输入错误: --sync-poll-interval 必须大于 0", err=True)
         raise typer.Exit(2)
 
-    configure(config=config, db_path=appctx.db_path, token=token, sync_poll_interval=sync_poll_interval)
+    configure(
+        config=config,
+        db_path=appctx.db_path,
+        token=token,
+        auto_peer_domain=autopeer_domain.strip(),
+        sync_poll_interval=sync_poll_interval,
+    )
 
     origins = [o.strip() for o in cors_origin.split(",") if o.strip()] if cors_origin else []
     if origins:
@@ -1241,6 +1253,7 @@ def _print_managed_node(node) -> None:
     has_token = "yes" if node.api_token_hash else "no"
     typer.echo(f"node_id={node.node_id}{flag} name={node.name} enabled={node.enabled} token={has_token}")
     typer.echo(f"  write_policy: {json.dumps(node.write_policy, ensure_ascii=False)}")
+    typer.echo(f"  auto_peer:     {'on' if node.auto_peer else 'off'}")
     typer.echo(f"  endpoint_host: {node.endpoint_host or '-'}")
     typer.echo(f"  own_ipv6:      {node.own_ipv6 or '-'}")
     typer.echo(f"  router_id:     {node.router_id or '-'}")
@@ -1472,6 +1485,61 @@ def cmd_node_set_address(
             typer.echo(f"    {change.node_id}/{change.name} {change.field}: {change.old or '-'} -> {change.new}")
     for warning in result.warnings:
         typer.echo(f"  警告: {warning}", err=True)
+
+
+@node_app.command("rename")
+def cmd_node_rename(
+    ctx: typer.Context,
+    node_id: str = typer.Argument(..., help="节点 UUID"),
+    name: str = typer.Argument(..., help="新的显示名"),
+) -> None:
+    """修改节点的显示名。"""
+    appctx: AppContext = ctx.obj
+    from dn42ctl.services.node_address import set_node_addresses
+
+    if not name.strip():
+        raise typer.BadParameter("name 不能为空")
+
+    try:
+        result = set_node_addresses(
+            db_path=appctx.db_path,
+            node_id=node_id,
+            name=name.strip(),
+            propagate=False,
+        )
+    except Dn42CtlError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except DatabaseError as exc:
+        typer.echo(_db_open_hint(appctx.db_path), err=True)
+        raise typer.Exit(code=1) from exc
+
+    _print_managed_node(result.node)
+
+
+@node_app.command("auto-peer")
+def cmd_node_auto_peer(
+    ctx: typer.Context,
+    node_id: str = typer.Argument(..., help="节点 UUID"),
+    enable: bool = typer.Option(..., "--enable/--disable", help="是否把该节点开放给公共 auto-peer 页面"),
+) -> None:
+    """开放或收回一个节点的公共 auto-peer 入口。"""
+    appctx: AppContext = ctx.obj
+    from dn42ctl.services.node_address import set_node_addresses
+
+    try:
+        result = set_node_addresses(
+            db_path=appctx.db_path,
+            node_id=node_id,
+            auto_peer=enable,
+            propagate=False,
+        )
+    except Dn42CtlError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except DatabaseError as exc:
+        typer.echo(_db_open_hint(appctx.db_path), err=True)
+        raise typer.Exit(code=1) from exc
+
+    _print_managed_node(result.node)
 
 
 @node_app.command("mesh-backfill")

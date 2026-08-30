@@ -11,15 +11,6 @@ dn42ctl 默认写入系统目录，因此大部分命令需要 root（例如 `su
 
 > SQLite 中会存放 WireGuard 私钥，代码会尝试 `chmod 0600`，请保持限制性权限。
 
-## dn42 registry（可选）
-
-在 `config.toml` 中通过 `dn42_registry_path = "/var/lib/dn42-registry"` 配置。
-
-- 启用 auto-peer 公共 API 时必需。
-- 未配置时 `/api/public/auto-peer/*` 返回 503。
-
-详见 [`auto_peer.md`](auto_peer.md)。
-
 ## 生成的配置文件
 
 | 用途 | 默认路径 | 覆盖方式 |
