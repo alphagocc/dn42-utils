@@ -2,6 +2,27 @@
 
 本文件记录已从 dn42ctl 移除的功能，按移除日期倒序排列。用于确认某项功能是否曾经存在、因何移除、替代方案是什么，便于判断旧文档与旧部署环境中的残留配置。
 
+## 2026-08-30
+
+### desired state 的 `paths` 键
+
+中心不再随期望状态下发 `bird_conf_path`、`peers_dir`、`babel_conf_path`、`bird_extra_conf_path`、`networkd_dir`、`nm_dir` 六个写入位置。文件布局是每台机器自己的属性，中心不掌握它，也不应当有能力指定一个 root 常驻进程的写入目标。
+
+替代方案是读本机 `config.toml` 的 `[paths]` 段，与 CLI 的 `genconf` 同源；该文件缺失时落到 `src/dn42ctl/paths.py` 的内置默认值。详见 [`architecture/paths.md`](architecture/paths.md)。
+
+- 使用默认布局的部署**无需任何操作**：被删除的下发值与内置默认值逐字节相同。
+- 在中心侧改过 `services/desired_state.py` 的 `DEFAULT_PATHS` 的部署，升级前需要把相同的值写进各节点 `config.toml` 的 `[paths]`，否则文件会迁回默认位置。
+- 报文中仍带 `paths` 的缓存（升级过程中的旧快照）不再生效，`node apply` 会为此列一条 warning。
+- 该键此前参与内容哈希，移除后每个节点的 digest 变化一次，各收到一次推送、各写一行 `config_revisions`，此后恢复稳定。
+
+### `node.toml` 的 `[apply]` 位置覆盖键
+
+`peers_dir`、`babel_conf_path`、`networkd_dir`、`nm_dir`、`bird_conf_path`、`bird_extra_conf_path`、`config_path` 不再被接受，`[apply]` 段只保留 `reload`。同一台机器的写入位置由 `config.toml` 的 `[paths]` 一处决定，两个文件各说一遍会写出两份 `bird.conf`。
+
+- 这些键留在 `node.toml` 里会让 `load_node_config` 报错，agent 拒绝启动。选择报错而非忽略，是因为被忽略的覆盖会让人以为它仍然生效。
+- 迁移方式是把值移进本机 `config.toml` 的 `[paths]`（键名对照：`peers_dir` → `bird_peers_dir`，`babel_conf_path` → `bird_babel_conf`，`nm_dir` → `nm_system_connections_dir`，`bird_conf_path` → `bird_conf`，`bird_extra_conf_path` → `bird_extra_conf`，`networkd_dir` 同名），随后删除 `[apply]` 中的对应行。
+- `config_path` 的替代是全局参数 `--config-path` 或环境变量 `DN42CTL_CONFIG`。
+
 ## 2026-07-30
 
 ### 节点侧轮询同步（`dn42ctl-node-once.timer`）

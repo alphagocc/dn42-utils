@@ -10,8 +10,10 @@
 MODULE := dn42ctl
 DEVEL  := /usr/share/selinux/devel/Makefile
 
+# /etc/bird.conf 只在采用发行版默认布局的机器上存在,因此 restorecon 带 -i
+# 忽略缺失项,否则默认布局的机器上 install 会失败。
 RELABEL_PATHS := /usr/local/bin/dn42ctl /opt/dn42ctl /etc/dn42ctl \
-                 /var/lib/dn42ctl /etc/bird /etc/systemd/network
+                 /var/lib/dn42ctl /etc/bird /etc/bird.conf /etc/systemd/network
 
 .PHONY: all install permissive enforcing uninstall clean
 
@@ -22,7 +24,7 @@ $(MODULE).pp: $(MODULE).te $(MODULE).fc $(MODULE).if
 
 install: $(MODULE).pp
 	semodule -i $(MODULE).pp
-	restorecon -RvF $(RELABEL_PATHS)
+	restorecon -iRvF $(RELABEL_PATHS)
 
 # 首次上线先跑宽容模式,收集完 AVC 再切回强制。
 permissive:
@@ -35,7 +37,7 @@ enforcing:
 
 uninstall:
 	semodule -r $(MODULE)
-	restorecon -RvF $(RELABEL_PATHS)
+	restorecon -iRvF $(RELABEL_PATHS)
 
 clean:
 	rm -rf tmp $(MODULE).pp $(MODULE).mod $(MODULE).mod.fc

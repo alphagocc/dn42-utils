@@ -20,8 +20,32 @@ def runner() -> CliRunner:
 
 @pytest.fixture
 def base_args(db_path: Path, tmp_path: Path) -> list[str]:
+    """`--config-path` 指向一份把写入位置全部落在 tmp_path 的 config.toml。
+
+    apply 的写入位置就取自这份文件;给一份空文件的话它会退回内置默认值,写到真实的 /etc。
+    """
+    from dn42ctl.config import AppConfig, save_config
+
     cfg = tmp_path / "config.toml"
-    cfg.write_text("")
+    save_config(
+        cfg,
+        AppConfig(
+            node_id=NODE_A,
+            own_asn=4242421234,
+            router_id="172.23.0.1",
+            own_ipv6="fd42:4242:1234::1",
+            ownnet_v6="fd42:4242:1234::/48",
+            ownnetset_v6="[fd42:4242:1234::/48+]",
+            bird_conf_path=str(tmp_path / "bird/bird.conf"),
+            bird_peers_dir=str(tmp_path / "peers"),
+            bird_babel_conf_path=str(tmp_path / "babel.conf"),
+            bird_roa_v6_conf_path=str(tmp_path / "bird/roa_dn42_v6.conf"),
+            bird_extra_conf_path=str(tmp_path / "bird/extra.conf"),
+            networkd_dir=str(tmp_path / "networkd"),
+            nm_system_connections_dir=str(tmp_path / "nm"),
+            dummy_backend="networkd",
+        ),
+    )
     return ["--db-path", str(db_path), "--config-path", str(cfg)]
 
 
@@ -37,7 +61,6 @@ def _desired(rev: str = "rev-1") -> dict:
         "generated_at": "2026-05-19T00:00:00+00:00",
         "bgp_peers": [],
         "ibgp_peers": [],
-        "paths": {},
     }
 
 
@@ -89,17 +112,9 @@ class TestNodePull:
 class TestNodeApply:
     def test_apply_dry_run(self, runner: CliRunner, base_args: list[str], node_toml_path: Path, tmp_path: Path) -> None:
         cache_db = tmp_path / "node-cache.sqlite3"
-        peers_dir = tmp_path / "peers"
         babel = tmp_path / "babel.conf"
-        networkd_dir = tmp_path / "networkd"
-        nm_dir = tmp_path / "nm"
-        apply_overrides = (
-            f'[apply]\npeers_dir = "{peers_dir}"\n'
-            f'babel_conf_path = "{babel}"\nnetworkd_dir = "{networkd_dir}"\nnm_dir = "{nm_dir}"\n'
-        )
         node_toml_path.write_text(
-            f'server = "{SERVER}"\nnode_id = "{NODE_A}"\ntoken = "tok"\n'
-            f'{apply_overrides}[cache]\ndb_path = "{cache_db}"\n',
+            f'server = "{SERVER}"\nnode_id = "{NODE_A}"\ntoken = "tok"\n[cache]\ndb_path = "{cache_db}"\n',
             encoding="utf-8",
         )
         with respx.mock(base_url=SERVER) as router:
@@ -118,10 +133,7 @@ class TestNodeApply:
         cache_db = tmp_path / "node-cache.sqlite3"
         babel = tmp_path / "babel.conf"
         node_toml_path.write_text(
-            f'server = "{SERVER}"\nnode_id = "{NODE_A}"\ntoken = "tok"\n'
-            f'[apply]\nbabel_conf_path = "{babel}"\npeers_dir = "{tmp_path / "peers"}"\n'
-            f'networkd_dir = "{tmp_path / "networkd"}"\n'
-            f'[cache]\ndb_path = "{cache_db}"\n',
+            f'server = "{SERVER}"\nnode_id = "{NODE_A}"\ntoken = "tok"\n[cache]\ndb_path = "{cache_db}"\n',
             encoding="utf-8",
         )
         with respx.mock(base_url=SERVER) as router:
@@ -142,12 +154,7 @@ class TestNodeOnce:
         cache_db = tmp_path / "node-cache.sqlite3"
         babel = tmp_path / "babel.conf"
         node_toml_path.write_text(
-            f'server = "{SERVER}"\nnode_id = "{NODE_A}"\ntoken = "tok"\n'
-            f'[apply]\nbabel_conf_path = "{babel}"\n'
-            f'peers_dir = "{tmp_path / "peers"}"\n'
-            f'networkd_dir = "{tmp_path / "networkd"}"\n'
-            f'nm_dir = "{tmp_path / "nm"}"\n'
-            f'[cache]\ndb_path = "{cache_db}"\n',
+            f'server = "{SERVER}"\nnode_id = "{NODE_A}"\ntoken = "tok"\n[cache]\ndb_path = "{cache_db}"\n',
             encoding="utf-8",
         )
         with respx.mock(base_url=SERVER) as router:

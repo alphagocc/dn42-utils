@@ -226,7 +226,7 @@ class TestRotatePreservesAllFields:
         rotate_token(db_path=db_path, node_id=NODE_SELF, self_node_toml_path=toml)
         assert load_node_config(toml).agent == tuned
 
-    def test_preserves_apply_overrides_and_cache_path(self, db_path: Path, tmp_path: Path) -> None:
+    def test_preserves_cache_path(self, db_path: Path, tmp_path: Path) -> None:
         _register_self(db_path)
         toml = tmp_path / "node.toml"
         cache = tmp_path / "custom-cache.sqlite3"
@@ -236,14 +236,14 @@ class TestRotatePreservesAllFields:
                 server="http://[::1]:4242",
                 node_id=NODE_SELF,
                 token="stale",
-                apply_overrides={"peers_dir": "/etc/bird/peers"},
                 cache_db_path=cache,
+                reload_policy="never",
             ),
         )
         rotate_token(db_path=db_path, node_id=NODE_SELF, self_node_toml_path=toml)
         loaded = load_node_config(toml)
-        assert loaded.apply_overrides == {"peers_dir": "/etc/bird/peers"}
         assert loaded.cache_db_path == cache
+        assert loaded.reload_policy == "never"
 
     def test_still_updates_token_and_node_id(self, db_path: Path, tmp_path: Path) -> None:
         _register_self(db_path)

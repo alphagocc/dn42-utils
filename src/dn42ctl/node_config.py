@@ -7,17 +7,10 @@ The schema:
     token   = "<plaintext>"
 
     [apply]
-    bird_conf_path = "..."         # all optional; override default paths returned
-    peers_dir      = "..."         # by central server's desired-state response.
-    babel_conf_path = "..."
-    bird_extra_conf_path = "..."   # 用户自定义 Bird 配置,中心只下发位置,内容由本机维护
-    networkd_dir = "..."
-    nm_dir = "..."
-    config_path = "..."            # 本机 /etc/dn42ctl/config.toml,仅在中心下发
-                                   # own_ipv6/router_id 时才会被读写
     reload = "auto"                # "auto" | "never" —— apply 后是否 reload
-                                   # networkd/bird。不是路径,单独解析到
-                                   # NodeConfig.reload_policy。
+                                   # networkd/bird。这是本段唯一的键。
+                                   # 文件写入位置由本机 config.toml 的 [paths] 决定,
+                                   # 见 docs/architecture/paths.md。
 
     [cache]
     db_path = "/var/lib/dn42ctl/node-cache.sqlite3"
@@ -75,7 +68,6 @@ class NodeConfig:
     server: str
     node_id: str
     token: str
-    apply_overrides: dict[str, str] = field(default_factory=dict)
     cache_db_path: Path = field(default_factory=lambda: NODE_CACHE_DB_PATH)
     agent: AgentOptions = field(default_factory=AgentOptions)
     # apply 之后是否 reload networkd/bird。reload 是**节点本地决策**,hub 侧不设开关。
@@ -121,23 +113,22 @@ def load_node_config(path: Path) -> NodeConfig:
     node_id = _require_str(raw, "node_id", file=path)
     token = _require_str(raw, "token", file=path)
 
-    apply_overrides: dict[str, str] = {}
     reload_policy = RELOAD_POLICY_AUTO
     apply_block = raw.get("apply")
     if apply_block is not None:
         if not isinstance(apply_block, dict):
             raise NodeConfigError(f"{path}: [apply] 段格式错误")
         for k, v in apply_block.items():
-            if not isinstance(v, str):
-                raise NodeConfigError(f"{path}: [apply].{k} 必须是字符串")
-            if k == "reload":
-                # reload 不是路径覆盖,不能混进 apply_overrides(那是 _resolve_paths
-                # 消费的 dict[str, str] 路径表)。
-                if v not in VALID_RELOAD_POLICIES:
-                    raise NodeConfigError(f"{path}: [apply].reload 必须是 {' 或 '.join(VALID_RELOAD_POLICIES)}")
-                reload_policy = v
-                continue
-            apply_overrides[k] = v
+            # `reload` is the only key. Older versions accepted file locations here;
+            # those now live in config.toml's [paths] and are rejected rather than
+            # ignored, so a stale node.toml cannot quietly point apply elsewhere.
+            if k != "reload":
+                raise NodeConfigError(
+                    f"{path}: [apply] 未知字段 '{k}';文件写入位置改由本机 config.toml 的 [paths] 决定"
+                )
+            if not isinstance(v, str) or v not in VALID_RELOAD_POLICIES:
+                raise NodeConfigError(f"{path}: [apply].reload 必须是 {' 或 '.join(VALID_RELOAD_POLICIES)}")
+            reload_policy = v
 
     cache_db_path = NODE_CACHE_DB_PATH
     cache_block = raw.get("cache")
@@ -159,7 +150,6 @@ def load_node_config(path: Path) -> NodeConfig:
         server=server,
         node_id=node_id,
         token=token,
-        apply_overrides=apply_overrides,
         cache_db_path=cache_db_path,
         agent=agent,
         reload_policy=reload_policy,
@@ -173,10 +163,8 @@ def save_node_config(path: Path, config: NodeConfig) -> None:
         "node_id": config.node_id,
         "token": config.token,
     }
-    if config.apply_overrides:
-        data["apply"] = dict(config.apply_overrides)
     if config.reload_policy != RELOAD_POLICY_AUTO:
-        data.setdefault("apply", {})["reload"] = config.reload_policy
+        data["apply"] = {"reload": config.reload_policy}
     if config.cache_db_path != NODE_CACHE_DB_PATH:
         data["cache"] = {"db_path": str(config.cache_db_path)}
     if config.agent != DEFAULT_AGENT_OPTIONS:

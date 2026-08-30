@@ -23,7 +23,12 @@ RestartSec=5s
 SELinuxContext=-system_u:system_r:dn42ctl_agent_t:s0
 
 # ---- 文件系统 ----
-ReadWritePaths=/etc/bird /etc/systemd/network /etc/NetworkManager/system-connections /var/lib/dn42ctl /etc/dn42ctl
+# 末尾的 /etc/bird.conf 供发行版默认布局使用: bird 编译内置的主配置位置在 /etc 下,
+# 不在 /etc/bird 目录里。前缀 "-" 让文件不存在的机器忽略该项,也因此 agent 无法创建
+# 它 —— 需要先由 dn42ctl genconf 以 root 在无沙盒的环境下生成。该位置以单文件
+# bind mount 暴露,无法用 rename 替换,node_apply 会退回原地覆写。
+# 详见 docs/architecture/paths.md。
+ReadWritePaths=/etc/bird /etc/systemd/network /etc/NetworkManager/system-connections /var/lib/dn42ctl /etc/dn42ctl -/etc/bird.conf
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true

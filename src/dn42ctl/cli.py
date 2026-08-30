@@ -466,8 +466,8 @@ def cmd_scan(ctx: typer.Context) -> None:
     discovery = discover_bird_paths(
         candidate_bird_conf_paths=[
             Path(config.bird_conf_path),
-            Path("/etc/bird/bird.conf"),
             Path("/etc/bird.conf"),
+            Path("/etc/bird/bird.conf"),
         ]
     )
 
@@ -1619,7 +1619,12 @@ def cmd_node_apply(
             raise typer.Exit(1) from exc
 
     try:
-        result = apply(node_config=node_cfg, dry_run=dry_run, no_reload=no_reload)
+        result = apply(
+            node_config=node_cfg,
+            config_path=appctx.config_path,
+            dry_run=dry_run,
+            no_reload=no_reload,
+        )
     except Dn42CtlError as exc:
         typer.echo(f"错误 (apply): {exc}", err=True)
         raise typer.Exit(1) from exc
@@ -1658,7 +1663,7 @@ def cmd_node_once(
     try:
         pull_res = pull(node_config=node_cfg)
         typer.echo(f"pulled: revision={pull_res.revision}")
-        apply_res = apply(node_config=node_cfg)
+        apply_res = apply(node_config=node_cfg, config_path=appctx.config_path)
         typer.echo(apply_summary(apply_res))
         if not no_report:
             try:
@@ -1720,7 +1725,7 @@ def cmd_node_agent(
         raise typer.Exit(2) from exc
 
     try:
-        asyncio.run(run_agent(node_config_path=path))
+        asyncio.run(run_agent(node_config_path=path, config_path=appctx.config_path))
     except KeyboardInterrupt:
         # systemctl stop sends SIGTERM/SIGINT; a clean stop is not a failure.
         typer.echo("已停止")

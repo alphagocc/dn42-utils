@@ -4,9 +4,9 @@
 
 ## 解决的问题
 
-节点侧 agent 是一个全天候运行的 root 进程，通过 WebSocket 接受中心推送的期望状态。推送内容里包含要写入的文件位置——`services/desired_state.py` 会把 `bird.conf`、`peers/`、networkd 目录一并下发，节点按收到的值写入。中心一旦失守，攻击者能让各节点的 agent 以 root 身份写入这些位置指向的任何地方。`docs/architecture/deployment.md` 记录了这一影响面。
+节点侧 agent 是一个全天候运行的 root 进程，通过 WebSocket 接受中心推送的期望状态。推送的内容是 peer 数据，写入位置由节点自行解析，中心无从指定（见 [`paths.md`](paths.md)）。即便如此，中心失守仍然意味着攻击者能让各节点的 agent 以 root 身份改写 `/etc/bird` 与 `/etc/systemd/network` 下的配置——peer 的接口名、密钥、endpoint 都来自推送。`docs/architecture/deployment.md` 记录了这一影响面。
 
-unit 中的 `ReadWritePaths=` 已经把可写范围限制在五个目录。SELinux 在此之上按类型再限制一层：agent 能写的是带 dn42ctl 类型标记的文件，`/etc` 下其余内容既读不到也改不了。两层限制的失效条件互不相同，systemd 的沙盒依赖 unit 文件完整，SELinux 依赖策略模块已加载。
+unit 中的 `ReadWritePaths=` 已经把可写范围限制在五个目录加上可选的 `/etc/bird.conf`。SELinux 在此之上按类型再限制一层：agent 能写的是带 dn42ctl 类型标记的文件，`/etc` 下其余内容既读不到也改不了。两层限制的失效条件互不相同，systemd 的沙盒依赖 unit 文件完整，SELinux 依赖策略模块已加载。
 
 ## 文件清单
 
@@ -48,7 +48,7 @@ SELinuxContext=-system_u:system_r:dn42ctl_agent_t:s0
 | `dn42ctl_exec_t` | `/usr/local/bin/dn42ctl`、`/opt/dn42ctl/dn42ctl/bin/dn42ctl` | 两个域的入口文件 |
 | `dn42ctl_etc_t` | `/etc/dn42ctl(/.*)?` | `config.toml`、`node.toml`、`server.env` |
 | `dn42ctl_var_lib_t` | `/var/lib/dn42ctl(/.*)?` | 权威库、节点缓存、`self_node_id` |
-| `dn42ctl_bird_conf_t` | `/etc/bird(/.*)?` | 渲染出的 Bird 配置与用户维护的 `extra.conf` |
+| `dn42ctl_bird_conf_t` | `/etc/bird(/.*)?`、`/etc/bird.conf` | 渲染出的 Bird 配置与用户维护的 `extra.conf` |
 | `dn42ctl_networkd_conf_t` | `/etc/systemd/network/` 下的 `dn42_*`、`wg_*`、`dn42-dummy.*` | netdev 与 network 文件 |
 | `dn42ctl_registry_t` | 无默认标注 | DN42 registry 的本地克隆，位置由 `config.toml` 决定 |
 | `dn42ctl_tmp_t` | 运行时生成 | `ssh-keygen -Y verify` 与 `gpg --verify` 的临时目录 |
@@ -56,6 +56,8 @@ SELinuxContext=-system_u:system_r:dn42ctl_agent_t:s0
 `/etc/systemd/network` 目录本身保持 `etc_t`。管理员手写的 `.network` 文件通常与 dn42ctl 渲染的文件混放在同一目录，改变目录类型会波及 systemd-networkd 对前者的读取。代价是 agent 需要 `etc_t` 目录的写权限，因而能在 `/etc` 下任意位置新建 `dn42ctl_networkd_conf_t` 文件——它读不到也改不了已有的 `etc_t` 文件，能造成的后果止于产生一个别的域都读不出内容的孤立文件。
 
 `/etc/bird` 整个目录换成 `dn42ctl_bird_conf_t`。bird 在 Fedora 尚无独立策略模块，以 `unconfined_service_t` 运行，读取任何类型都不受限。bird 将来若获得独立域，该域需要调用 `dn42ctl.if` 里的 `dn42ctl_read_bird_conf()`。
+
+`/etc/bird.conf` 单列一条。上一条的正则整体锚定在完整位置上，匹配不到 `/etc` 下的这个文件，而发行版编译内置的 bird 主配置就在那里。它的父目录是 `etc_t`，因此策略中另有一条 `manage_files_pattern(dn42ctl_agent_t, etc_t, dn42ctl_bird_conf_t)`；没有配套的 file transition，该文件由 `genconf` 在无沙盒环境下创建，agent 只覆写已有文件。采用该布局的完整前置条件见 [`paths.md`](paths.md)。
 
 registry 目录没有默认标注，部署时按实际位置补：
 
@@ -80,7 +82,7 @@ cd selinux
 sudo make install
 ```
 
-`install` 目标执行 `semodule -i dn42ctl.pp`，随后对以下位置执行 `restorecon -RvF`：`/usr/local/bin/dn42ctl`、`/opt/dn42ctl`、`/etc/dn42ctl`、`/var/lib/dn42ctl`、`/etc/bird`、`/etc/systemd/network`。已经存在的文件需要这一步才会带上新类型。
+`install` 目标执行 `semodule -i dn42ctl.pp`，随后对以下位置执行 `restorecon -iRvF`：`/usr/local/bin/dn42ctl`、`/opt/dn42ctl`、`/etc/dn42ctl`、`/var/lib/dn42ctl`、`/etc/bird`、`/etc/bird.conf`、`/etc/systemd/network`。已经存在的文件需要这一步才会带上新类型。`-i` 让 `/etc/bird.conf` 这类只在部分布局下存在的位置在缺失时被跳过。
 
 加载模块后重启两个服务，让它们在新域中启动：
 

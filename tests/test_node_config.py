@@ -26,25 +26,15 @@ class TestSaveLoadRoundTrip:
         assert loaded.server == "http://[::1]:4242"
         assert loaded.node_id == "abc"
         assert loaded.token == "tok"
-        assert loaded.apply_overrides == {}
         assert loaded.cache_db_path == NODE_CACHE_DB_PATH
 
-    def test_with_apply_overrides(self, tmp_path: Path) -> None:
+    def test_rejects_stale_location_keys(self, tmp_path: Path) -> None:
+        """写入位置改由本机 config.toml 的 [paths] 决定。留在 node.toml 里的旧键
+        被忽略的话,操作员会以为它还生效。"""
         path = tmp_path / "node.toml"
-        peers = tmp_path / "peers"
-        babel = tmp_path / "babel"
-        save_node_config(
-            path,
-            NodeConfig(
-                server="https://center.example",
-                node_id="abc",
-                token="tok",
-                apply_overrides={"bird_peers_dir": str(peers), "babel_conf_path": str(babel)},
-            ),
-        )
-        loaded = load_node_config(path)
-        assert loaded.apply_overrides["bird_peers_dir"] == str(peers)
-        assert loaded.apply_overrides["babel_conf_path"] == str(babel)
+        path.write_text('server = "http://x"\nnode_id = "n"\ntoken = "t"\n\n[apply]\npeers_dir = "/etc/bird/peers"\n')
+        with pytest.raises(NodeConfigError, match="peers_dir"):
+            load_node_config(path)
 
     def test_with_cache_db_override(self, tmp_path: Path) -> None:
         path = tmp_path / "node.toml"
@@ -171,17 +161,6 @@ class TestReloadPolicy:
         with pytest.raises(NodeConfigError, match="reload"):
             load_node_config(path)
 
-    def test_does_not_leak_into_apply_overrides(self, tmp_path: Path) -> None:
-        """apply_overrides 是 _resolve_paths 消费的路径表,reload 不是路径。"""
-        path = tmp_path / "node.toml"
-        path.write_text(
-            'server = "http://x"\nnode_id = "n"\ntoken = "t"\n\n'
-            '[apply]\nreload = "never"\npeers_dir = "/etc/bird/peers"\n'
-        )
-        cfg = load_node_config(path)
-        assert cfg.apply_overrides == {"peers_dir": "/etc/bird/peers"}
-        assert "reload" not in cfg.apply_overrides
-
     def test_round_trips_through_save(self, tmp_path: Path) -> None:
         path = tmp_path / "node.toml"
         save_node_config(path, NodeConfig(server="http://x", node_id="n", token="t", reload_policy="never"))
@@ -192,8 +171,3 @@ class TestReloadPolicy:
         path = tmp_path / "node.toml"
         save_node_config(path, NodeConfig(server="http://x", node_id="n", token="t"))
         assert "reload" not in path.read_text()
-
-    def test_config_path_is_a_normal_override(self, tmp_path: Path) -> None:
-        path = tmp_path / "node.toml"
-        path.write_text('server = "http://x"\nnode_id = "n"\ntoken = "t"\n\n[apply]\nconfig_path = "/etc/x.toml"\n')
-        assert load_node_config(path).apply_overrides["config_path"] == "/etc/x.toml"

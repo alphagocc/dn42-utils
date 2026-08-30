@@ -20,7 +20,7 @@
 
 扫描开始前，尽力读取当前系统的 Bird 主配置文件并识别 include 路径，用于修正本地 `config.toml` 的 `[paths]`：
 
-- Bird 主配置候选路径：优先使用 `config.paths.bird_conf`，若不存在/不可读则尝试 `/etc/bird/bird.conf` 与 `/etc/bird.conf`。
+- Bird 主配置候选位置：优先使用 `config.paths.bird_conf`，若不存在或不可读则依次尝试 `/etc/bird.conf` 与 `/etc/bird/bird.conf`。
 - 从 bird.conf 中识别：
   - peers include（推导 `bird_peers_dir`）
   - `babel.conf` include（推导 `bird_babel_conf_path`）

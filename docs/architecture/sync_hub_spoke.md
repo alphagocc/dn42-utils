@@ -105,7 +105,7 @@ self token 轮换：`dn42ctl node token rotate <self-id>` 同时更新 hash 与 
 
 ## 节点本地状态
 
-- `/etc/dn42ctl/node.toml`（`0600`）：server URL / node_id / token / apply 路径覆盖 / `[agent]` 调优参数。
+- `/etc/dn42ctl/node.toml`（`0600`）：server URL / node_id / token / `[apply] reload` / `[agent]` 调优参数。
 - `/var/lib/dn42ctl/node-cache.sqlite3`：缓存最近 desired state 与 revision。**仅缓存**，丢失不影响权威状态。agent 启动时会先用这份缓存跑一次 `apply()`，然后才尝试连接，以此保证 hub 不可达时 `/etc/bird` 仍会被渲染。该设计的完整论证见 `docs/architecture/sync_ws_protocol.md`。
 
 ## desired state JSON Schema
@@ -151,14 +151,6 @@ self token 轮换：`dn42ctl node token rotate <self-id>` 同时更新 hash 与 
       "babel_type": "tunnel"
     }
   ],
-  "paths": {
-    "bird_conf_path": "/etc/bird/bird.conf",
-    "peers_dir": "/etc/bird/peers/",
-    "babel_conf_path": "/etc/bird/babel.conf",
-    "bird_extra_conf_path": "/etc/bird/extra.conf",
-    "networkd_dir": "/etc/systemd/network/",
-    "nm_dir": "/etc/NetworkManager/system-connections/"
-  },
   "node": {
     "own_ipv6": "fd42:4242:1234::1",
     "router_id": "172.20.1.1"
@@ -166,7 +158,6 @@ self token 轮换：`dn42ctl node token rotate <self-id>` 同时更新 hash 与 
 }
 ```
 
-- `paths` 是中心返回的默认值；节点 `node.toml [apply]` 段可覆盖。`bird_extra_conf_path` 下发的仅是写入位置，该文件的内容由节点本地维护，既不上报也不推送，语义见 [`bird_extra_conf.md`](bird_extra_conf.md)。
 - 字段语义与现有 `bgp_peers` / `ibgp_peers` 表一一对应。
 - `node` 是**节点自身地址块**，来自 `managed_nodes` 的 `own_ipv6` / `router_id`。列为 NULL 时对应的键整个省略；**整块为空时 `node` 键本身不出现，且不参与内容哈希**（否则升级瞬间全网每个节点都会收到一次无意义推送）。收到非空 `node` 块的节点才会重写 `config.toml` / `bird.conf` / `dn42-dummy.*`。完整语义见 [`node_addressing.md`](node_addressing.md)。
 - `endpoint_host` **不在**下发范围内——节点不会拨自己。

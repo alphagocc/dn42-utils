@@ -25,9 +25,11 @@ include "/etc/bird/extra.conf";
 | 默认位置 | `/etc/bird/extra.conf` |
 | 配置键 | `config.toml` 的 `[paths].bird_extra_conf` |
 | init 参数 | `dn42ctl init --bird-extra-conf` |
-| 节点侧覆盖 | `node.toml` 的 `[apply].bird_extra_conf_path` |
+| 解析来源 | 本机 `config.toml` |
 
-旧版本写出的 `config.toml` 中没有这个键。读取配置时缺键按 `bird_conf` 所在目录推导为同级的 `extra.conf`，因此升级 dn42ctl 之后无需重跑 `init`。推导使用 `bird_conf` 而非固定的 `/etc/bird`，是为了让把配置指向可写目录的开发与测试环境保持自洽。
+旧版本写出的 `config.toml` 中没有这个键。读取配置时缺键按 `bird_peers_dir` 的上一级目录推导为其中的 `extra.conf`，因此升级 dn42ctl 之后无需重跑 `init`。
+
+锚点选择 peers 目录而非 `bird_conf`，是因为发行版编译内置的 bird 主配置位置在 `/etc/bird.conf`，按它的同级目录会推出 `/etc/extra.conf`——既不是用户期望的位置，也不在 agent 沙盒的可写范围内。锚点也没有固定成 `/etc/bird`，那样把配置指向可写目录的开发与测试环境就不自洽了。peers 目录同时满足这两点。主配置位于 `/etc/bird.conf` 的部署见 [`paths.md`](paths.md)。
 
 ## 生成规则
 
@@ -39,11 +41,9 @@ include "/etc/bird/extra.conf";
 
 ## 与多节点同步的关系
 
-中心下发的 desired-state `paths` 中增加了 `bird_extra_conf_path` 键，节点可在 `node.toml` 的 `[apply]` 段覆盖。中心下发的仅仅是写入位置，文件内容始终是节点本地的，既不上报也不推送。
+写入位置属于节点本地信息，中心不下发。`extra.conf` 的位置由本机 `config.toml` 的 `[paths].bird_extra_conf` 决定，与 `genconf` 读的是同一处，解析规则见 [`paths.md`](paths.md)。文件内容同样始终是节点本地的，既不上报也不推送。
 
 `node apply` 在收到非空 `node` 块时会重新渲染 `bird.conf`（语义见 [`node_addressing.md`](node_addressing.md)），其中的 `include` 使用解析后的位置，与 `peers_dir`、`babel_conf_path` 的处理方式一致。占位文件同样由 apply 负责创建，但**仅在文件缺失时才进入写入列表**：占位内容一旦进入常规的 diff 与原子写管线，agent 每 900 秒一次的 reconcile 就会把用户写的配置抹掉。
-
-> `paths` 参与 desired-state 的内容哈希。新增这个键会让每个节点的 digest 发生一次变化，升级后每个节点各收到一次推送、各写一行 `config_revisions`。此处的变动是必要的：`bird.conf` 的内容确实随之改变，节点本就需要重新渲染。此后 digest 恢复稳定。
 
 ## 未纳入范围
 

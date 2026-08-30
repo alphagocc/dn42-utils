@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -52,7 +53,7 @@ class TestLoadConfig:
         with pytest.raises(ConfigError, match="paths"):
             load_config(cfg_path)
 
-    def test_missing_bird_extra_conf_derives_from_bird_conf(self, tmp_path: Path, sample_config: AppConfig) -> None:
+    def test_missing_bird_extra_conf_derives_from_peers_dir(self, tmp_path: Path, sample_config: AppConfig) -> None:
         """该键晚于其余路径引入,旧配置里没有,缺失时不应报错,也不应指向 /etc/bird。"""
         cfg_path = tmp_path / "config.toml"
         save_config(cfg_path, sample_config)
@@ -62,7 +63,24 @@ class TestLoadConfig:
         cfg_path.write_text(content + "\n")
 
         loaded = load_config(cfg_path)
-        assert loaded.bird_extra_conf_path == str(Path(sample_config.bird_conf_path).parent / "extra.conf")
+        assert loaded.bird_extra_conf_path == str(Path(sample_config.bird_peers_dir).parent / "extra.conf")
+
+    def test_missing_bird_extra_conf_with_distro_bird_conf(self, tmp_path: Path, sample_config: AppConfig) -> None:
+        """bird 编译内置的主配置位置在 /etc 下,按它的同级目录会推出 /etc/extra.conf。"""
+        cfg_path = tmp_path / "config.toml"
+        distro_layout = replace(
+            sample_config,
+            bird_conf_path="/etc/bird.conf",
+            bird_peers_dir="/etc/bird/peers",
+        )
+        save_config(cfg_path, distro_layout)
+        content = "\n".join(
+            line for line in cfg_path.read_text().splitlines() if not line.startswith("bird_extra_conf = ")
+        )
+        cfg_path.write_text(content + "\n")
+
+        loaded = load_config(cfg_path)
+        assert loaded.bird_extra_conf_path == "/etc/bird/extra.conf"
 
     def test_invalid_asn(self, tmp_path: Path, sample_config: AppConfig) -> None:
         cfg_path = tmp_path / "config.toml"

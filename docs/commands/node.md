@@ -175,8 +175,8 @@ server  = "https://center.example"
 node_id = "<id>"
 token   = "<token>"
 
-# [apply] 与 [cache] 段使用 paths.py 的默认值，可手动覆盖
-# [apply] 段除路径覆盖外还支持 reload = "auto" 或 "never"（默认 auto）
+# [cache] 段可省略；省略时使用 /var/lib/dn42ctl/node-cache.sqlite3
+# [apply] 段只有 reload = "auto" 或 "never"（默认 auto）一个键
 ```
 
 - self 节点**不需要**手工 `init`，`dn42ctl serve` 启动时已经自动写好（`server = "http://[::1]:4242"`）。

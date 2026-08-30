@@ -111,6 +111,7 @@ def load_config(path: Path) -> AppConfig:
         raise ConfigError(f"配置项不合法: {exc}") from exc
 
     bird_conf_path = _require_str(paths, "bird_conf")
+    bird_peers_dir = _require_str(paths, "bird_peers_dir")
 
     return AppConfig(
         node_id=_require_str(raw, "node_id"),
@@ -120,13 +121,14 @@ def load_config(path: Path) -> AppConfig:
         ownnet_v6=ownnet_v6,
         ownnetset_v6=ownnetset_v6,
         bird_conf_path=bird_conf_path,
-        bird_peers_dir=_require_str(paths, "bird_peers_dir"),
+        bird_peers_dir=bird_peers_dir,
         bird_babel_conf_path=_require_str(paths, "bird_babel_conf"),
         bird_roa_v6_conf_path=_require_str(paths, "bird_roa_v6_conf"),
-        # 该键晚于其余路径引入,旧配置里没有,缺失时按 bird.conf 的同级目录推导,
-        # 让升级后无需重跑 init。用 bird_conf 推导而非固定 /etc/bird,是为了让把
-        # 配置指向可写目录的开发与测试环境保持自洽。
-        bird_extra_conf_path=_optional_str(paths, "bird_extra_conf") or str(Path(bird_conf_path).parent / "extra.conf"),
+        # 该键晚于其余路径引入,旧配置里没有,缺失时按 peers 目录的上一级推导,让升级后
+        # 无需重跑 init。锚点不能用 bird_conf: 发行版默认把主配置放在 /etc/bird.conf,
+        # 按它的同级目录会推出 /etc/extra.conf。也不固定成 /etc/bird,那样把配置指向
+        # 可写目录的开发与测试环境就不自洽了。peers 目录同时满足这两点。
+        bird_extra_conf_path=_optional_str(paths, "bird_extra_conf") or str(Path(bird_peers_dir).parent / "extra.conf"),
         networkd_dir=_require_str(paths, "networkd_dir"),
         nm_system_connections_dir=_require_str(paths, "nm_system_connections_dir"),
         dummy_backend=dummy_backend,

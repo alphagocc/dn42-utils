@@ -32,7 +32,6 @@ def _desired_payload(revision: str = "2026-05-18T10:00:00+00:00-abcd1234") -> di
         "generated_at": "2026-05-18T10:00:00+00:00",
         "bgp_peers": [],
         "ibgp_peers": [],
-        "paths": {},
     }
 
 

@@ -24,6 +24,7 @@ from typing import Any
 from dn42ctl import __version__
 from dn42ctl.node_client import build_auth_headers, build_ws_url
 from dn42ctl.node_config import AgentOptions, NodeConfig, NodeConfigError, load_node_config
+from dn42ctl.paths import DEFAULT_CONFIG_PATH
 from dn42ctl.services.core import Dn42CtlError
 from dn42ctl.services.node_agent import read_cache, store_desired
 from dn42ctl.services.node_apply import apply, apply_summary
@@ -79,12 +80,14 @@ class _Session:
         *,
         ws: Any,
         node_config: NodeConfig,
+        config_path: Path,
         settings: AgentOptions,
         emit: Emit,
         sleep: Sleep,
     ) -> None:
         self._ws = ws
         self._cfg = node_config
+        self._config_path = config_path
         self._settings = settings
         self._emit = emit
         self._sleep = sleep
@@ -157,7 +160,7 @@ class _Session:
         try:
             async with self._apply_lock:
                 await asyncio.to_thread(store_desired, node_config=self._cfg, payload=desired)
-                result = await asyncio.to_thread(apply, node_config=self._cfg)
+                result = await asyncio.to_thread(apply, node_config=self._cfg, config_path=self._config_path)
         except (Dn42CtlError, OSError) as exc:
             # One bad push must never take the connection down with it.
             self._emit(f"错误: apply 失败: {exc}")
@@ -207,7 +210,7 @@ class _Session:
             await self._send(Envelope(type=MSG_DESIRED_REQUEST, payload={"reason": "reconcile"}))
 
 
-def _apply_from_cache(node_config: NodeConfig, emit: Emit) -> None:
+def _apply_from_cache(node_config: NodeConfig, config_path: Path, emit: Emit) -> None:
     """Render from the local cache before the first connection attempt.
 
     Deleting `node-once.timer` also deleted its `OnBootSec`, so without this a
@@ -218,7 +221,7 @@ def _apply_from_cache(node_config: NodeConfig, emit: Emit) -> None:
     if read_cache(node_config=node_config) is None:
         return
     try:
-        result = apply(node_config=node_config)
+        result = apply(node_config=node_config, config_path=config_path)
     except (Dn42CtlError, OSError) as exc:
         emit(f"警告: 启动时从缓存 apply 失败: {exc}")
         return
@@ -228,6 +231,7 @@ def _apply_from_cache(node_config: NodeConfig, emit: Emit) -> None:
 async def run_agent(
     *,
     node_config_path: Path,
+    config_path: Path = DEFAULT_CONFIG_PATH,
     settings: AgentOptions | None = None,
     connect_factory: ConnectFactory | None = None,
     sleep: Sleep = asyncio.sleep,
@@ -238,6 +242,9 @@ async def run_agent(
 
     `node_config_path` rather than a loaded `NodeConfig`: the file is re-read on
     every reconnect, so a rotated token recovers without `systemctl restart`.
+
+    `config_path` names this machine's own config.toml, which is where apply reads
+    its write locations from.
     """
     connect = connect_factory or _default_connect_factory
     rng = rng or random.Random()  # noqa: S311 — jitter, not cryptography
@@ -255,7 +262,7 @@ async def run_agent(
 
         if not bootstrapped:
             bootstrapped = True
-            await asyncio.to_thread(_apply_from_cache, cfg, emit)
+            await asyncio.to_thread(_apply_from_cache, cfg, config_path, emit)
 
         close_code: int | None = None
         try:
@@ -266,7 +273,14 @@ async def run_agent(
             ) as ws:
                 attempt = 0
                 try:
-                    await _Session(ws=ws, node_config=cfg, settings=effective, emit=emit, sleep=sleep).run()
+                    await _Session(
+                        ws=ws,
+                        node_config=cfg,
+                        config_path=config_path,
+                        settings=effective,
+                        emit=emit,
+                        sleep=sleep,
+                    ).run()
                 finally:
                     # Read inside the `async with`, where `ws` is in scope; a
                     # failure to connect at all leaves this None (normal backoff).

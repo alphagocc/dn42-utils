@@ -76,9 +76,9 @@ class TestBuildDesiredState:
         assert ds.ibgp_peers == []
         assert ds.node_id == NODE_A
         assert ds.revision
-        assert "bird_conf_path" in ds.paths
-        # apply 渲染的 bird.conf 会 include 它,缺了这个键节点只能退回 /etc/bird/extra.conf。
-        assert "bird_extra_conf_path" in ds.paths
+        # 文件位置属于节点本地信息,中心不下发。节点自行按 node.toml [apply]、本机
+        # config.toml、内置默认值三级解析,见 services/node_apply._resolve_paths。
+        assert "paths" not in ds.to_dict()
 
     def test_with_peers(self, db_path: Path) -> None:
         _seed_node_with_peers(db_path)
@@ -248,17 +248,17 @@ class TestComputeDesiredFingerprint:
 class TestComputeContentDigest:
     def test_ignores_generated_at(self) -> None:
         """Two builds of identical content must agree regardless of when they ran."""
-        args = {"node_id": NODE_A, "bgp_peers": [], "ibgp_peers": [], "paths": {"a": "b"}}
+        args = {"node_id": NODE_A, "bgp_peers": [], "ibgp_peers": []}
         assert compute_content_digest(**args) == compute_content_digest(**args)
 
     def test_key_order_insensitive(self) -> None:
-        a = compute_content_digest(node_id=NODE_A, bgp_peers=[{"x": 1, "y": 2}], ibgp_peers=[], paths={})
-        b = compute_content_digest(node_id=NODE_A, bgp_peers=[{"y": 2, "x": 1}], ibgp_peers=[], paths={})
+        a = compute_content_digest(node_id=NODE_A, bgp_peers=[{"x": 1, "y": 2}], ibgp_peers=[])
+        b = compute_content_digest(node_id=NODE_A, bgp_peers=[{"y": 2, "x": 1}], ibgp_peers=[])
         assert a == b
 
     def test_distinguishes_nodes(self) -> None:
-        a = compute_content_digest(node_id=NODE_A, bgp_peers=[], ibgp_peers=[], paths={})
-        b = compute_content_digest(node_id=NODE_B, bgp_peers=[], ibgp_peers=[], paths={})
+        a = compute_content_digest(node_id=NODE_A, bgp_peers=[], ibgp_peers=[])
+        b = compute_content_digest(node_id=NODE_B, bgp_peers=[], ibgp_peers=[])
         assert a != b
 
 
@@ -270,17 +270,17 @@ class TestNodeBlockDigest:
     """
 
     def test_empty_block_digest_unchanged(self) -> None:
-        args = {"node_id": NODE_A, "bgp_peers": [], "ibgp_peers": [], "paths": {"a": "b"}}
+        args = {"node_id": NODE_A, "bgp_peers": [], "ibgp_peers": []}
         baseline = compute_content_digest(**args)
         assert compute_content_digest(**args, node=None) == baseline
         assert compute_content_digest(**args, node={}) == baseline
 
     def test_non_empty_block_changes_digest(self) -> None:
-        args = {"node_id": NODE_A, "bgp_peers": [], "ibgp_peers": [], "paths": {}}
+        args = {"node_id": NODE_A, "bgp_peers": [], "ibgp_peers": []}
         assert compute_content_digest(**args, node={"own_ipv6": "fd42::1"}) != compute_content_digest(**args)
 
     def test_block_contents_distinguished(self) -> None:
-        args = {"node_id": NODE_A, "bgp_peers": [], "ibgp_peers": [], "paths": {}}
+        args = {"node_id": NODE_A, "bgp_peers": [], "ibgp_peers": []}
         a = compute_content_digest(**args, node={"own_ipv6": "fd42::1"})
         b = compute_content_digest(**args, node={"own_ipv6": "fd42::2"})
         assert a != b
@@ -330,7 +330,7 @@ class TestNodeBlockInDesiredState:
         assert before != after
 
     def test_old_pinned_payload_without_node_key(self, db_path: Path) -> None:
-        """老快照里没有 node 键,回放路径不能 KeyError。"""
+        """老快照里没有 node 键、却带着已经废弃的 paths,回放不能 KeyError 也不能把它带出来。"""
         _seed_node_with_peers(db_path)
         db = Database.open(db_path)
         try:
@@ -345,7 +345,7 @@ class TestNodeBlockInDesiredState:
                     "generated_at": "2026-01-01T00:00:00+00:00",
                     "bgp_peers": [],
                     "ibgp_peers": [],
-                    "paths": {},
+                    "paths": {"bird_conf_path": "/etc/bird/bird.conf"},
                 },
             )
             store.pin(NODE_A, "2026-01-01T00:00:00+00:00-deadbeef")
@@ -354,6 +354,7 @@ class TestNodeBlockInDesiredState:
 
         state = build_desired_state(db_path=db_path, node_id=NODE_A)
         assert state.node == {}
+        assert "paths" not in state.to_dict()
         fp = compute_desired_fingerprint(db_path=db_path, node_id=NODE_A)
         assert fp.pinned_revision == "2026-01-01T00:00:00+00:00-deadbeef"
 

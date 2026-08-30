@@ -9,6 +9,9 @@
 
 /etc/bird(/.*)?				gen_context(system_u:object_r:dn42ctl_bird_conf_t,s0)
 
+# 发行版编译内置的 bird 主配置位置。上一条的正则整体锚定,匹配不到 /etc 下的这个文件。
+/etc/bird\.conf				--	gen_context(system_u:object_r:dn42ctl_bird_conf_t,s0)
+
 # /etc/systemd/network 目录保持 etc_t,只标注 dn42ctl 渲染出来的文件。
 # 前缀与 src/dn42ctl/services/core.py、node_apply.py、dummy.py 中的命名一致。
 /etc/systemd/network/dn42_.*\.netdev	--	gen_context(system_u:object_r:dn42ctl_networkd_conf_t,s0)

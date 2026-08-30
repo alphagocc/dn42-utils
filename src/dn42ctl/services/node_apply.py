@@ -11,21 +11,24 @@ what it was before this feature landed. See
 `docs/architecture/node_addressing.md` for the semantics.
 
 Atomic writes (tmp + rename) ensure we never leave a half-written file behind.
-Once the files are on disk, networkd and bird are reloaded based on which paths
-actually changed; that step is best-effort and a failure only records a warning.
+The one exception is a target the sandbox exposes as a single bind-mounted file,
+where rename is impossible and `_write_in_place` takes over. Once the files are on
+disk, networkd and bird are reloaded based on which paths actually changed; that
+step is best-effort and a failure only records a warning.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import difflib
+import errno
 import os
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from dn42ctl.config import ConfigError, dumps_config, load_config
+from dn42ctl.config import AppConfig, ConfigError, dumps_config, load_config
 from dn42ctl.constants import (
     FILE_MODE_NETDEV,
     FILE_MODE_PRIVATE,
@@ -34,7 +37,15 @@ from dn42ctl.constants import (
 )
 from dn42ctl.fs import chmod_best_effort
 from dn42ctl.node_config import NodeConfig
-from dn42ctl.paths import DEFAULT_CONFIG_PATH
+from dn42ctl.paths import (
+    DEFAULT_BIRD_BABEL_CONF_PATH,
+    DEFAULT_BIRD_CONF_PATH,
+    DEFAULT_BIRD_EXTRA_CONF_PATH,
+    DEFAULT_BIRD_PEERS_DIR,
+    DEFAULT_CONFIG_PATH,
+    DEFAULT_NETWORKD_DIR,
+    DEFAULT_NM_SYSTEM_CONNECTIONS_DIR,
+)
 from dn42ctl.render import (
     render_babel_conf,
     render_bird_bgp_peer_conf,
@@ -85,42 +96,81 @@ class ApplyResult:
     reloads: list[ReloadAction] = field(default_factory=list)
 
 
-def _resolve_paths(payload: dict[str, Any], node_config: NodeConfig) -> ResolvedPaths:
-    """Merge desired-state.paths with node.toml [apply] overrides.
+# config.toml 的 [paths] 键名与 ResolvedPaths 的字段名不一致,这里是唯一把两者对上的
+# 地方: (ResolvedPaths 的字段, AppConfig 的属性, 内置默认值)。
+_PATH_SOURCES: tuple[tuple[str, str, Path], ...] = (
+    ("bird_peers_dir", "bird_peers_dir", DEFAULT_BIRD_PEERS_DIR),
+    ("babel_conf_path", "bird_babel_conf_path", DEFAULT_BIRD_BABEL_CONF_PATH),
+    ("networkd_dir", "networkd_dir", DEFAULT_NETWORKD_DIR),
+    ("nm_dir", "nm_system_connections_dir", DEFAULT_NM_SYSTEM_CONNECTIONS_DIR),
+    ("bird_conf_path", "bird_conf_path", DEFAULT_BIRD_CONF_PATH),
+    ("bird_extra_conf_path", "bird_extra_conf_path", DEFAULT_BIRD_EXTRA_CONF_PATH),
+)
 
-    Override key names (in node.toml [apply]) shadow the server's defaults.
-    Recognized keys: bird_peers_dir, babel_conf_path, networkd_dir, nm_dir,
-    bird_conf_path, bird_extra_conf_path, config_path.
+
+def _resolve_paths(app_config: AppConfig | None, config_path: Path) -> ResolvedPaths:
+    """Decide where this node writes: its own config.toml, else the built-in defaults.
+
+    Same source as `genconf`, so the two outputs cannot drift apart. A node with no
+    config.toml has no opinion and takes the defaults; that is not a degradation and
+    is not reported.
     """
-    defaults = payload.get("paths") or {}
-    overrides = node_config.apply_overrides
+    fields = {
+        field_name: Path(getattr(app_config, attr)) if app_config is not None else default
+        for field_name, attr, default in _PATH_SOURCES
+    }
+    return ResolvedPaths(config_path=config_path, **fields)
 
-    def pick(key: str, default: str) -> str:
-        if key in overrides:
-            return overrides[key]
-        v = defaults.get(key)
-        return v if isinstance(v, str) and v else default
 
-    return ResolvedPaths(
-        bird_peers_dir=Path(pick("peers_dir", "/etc/bird/peers/")),
-        babel_conf_path=Path(pick("babel_conf_path", "/etc/bird/babel.conf")),
-        networkd_dir=Path(pick("networkd_dir", "/etc/systemd/network/")),
-        nm_dir=Path(pick("nm_dir", "/etc/NetworkManager/system-connections/")),
-        bird_conf_path=Path(pick("bird_conf_path", "/etc/bird/bird.conf")),
-        bird_extra_conf_path=Path(pick("bird_extra_conf_path", "/etc/bird/extra.conf")),
-        config_path=Path(pick("config_path", str(DEFAULT_CONFIG_PATH))),
-    )
+def _write_in_place(path: Path, content: str, *, mode: int) -> None:
+    """Overwrite through the existing inode, for targets that cannot be replaced.
+
+    `ReadWritePaths=` on a single file bind-mounts it over an otherwise read-only
+    /etc: the parent stays read-only so mkstemp fails, and the file is a mount point
+    so rename onto it fails. A distro-default `/etc/bird.conf` is that case.
+
+    Truncate and write go out back to back because this path gives up atomicity:
+    dying in that window leaves a truncated file, and `bird.service` runs `bird -p`
+    as ExecStartPre, so an empty bird.conf blocks the next boot until `genconf`
+    rewrites it.
+    """
+    data = content.encode("utf-8")
+    fd = os.open(path, os.O_WRONLY | os.O_TRUNC)
+    try:
+        written = 0
+        while written < len(data):
+            written += os.write(fd, data[written:])
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    chmod_best_effort(path, mode)
+
+
+# What mkstemp raises when the target's parent directory is read-only.
+_NO_TMPFILE_ERRNOS = frozenset({errno.EROFS, errno.EACCES, errno.EPERM})
 
 
 def _atomic_write(path: Path, content: str, *, mode: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    try:
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    except OSError as exc:
+        if exc.errno not in _NO_TMPFILE_ERRNOS or not path.exists():
+            raise
+        _write_in_place(path, content, mode=mode)
+        return
     tmp = Path(tmp_name)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
         chmod_best_effort(tmp, mode)
-        os.replace(tmp, path)
+        try:
+            os.replace(tmp, path)
+        except OSError as exc:
+            if exc.errno != errno.EBUSY or not path.exists():
+                raise
+            tmp.unlink(missing_ok=True)
+            _write_in_place(path, content, mode=mode)
     except Exception:
         tmp.unlink(missing_ok=True)
         raise
@@ -233,23 +283,20 @@ def _render_ibgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths, node_id:
 def _render_node_config_files(
     node_block: dict[str, Any],
     paths: ResolvedPaths,
+    app_config: AppConfig | None,
 ) -> tuple[list[tuple[Path, str, int]], list[str]]:
     """Turn the hub-pushed node addresses into config.toml / bird.conf / dn42-dummy.*.
 
-    When there is no local config.toml, or it cannot be read, all three steps are
-    skipped and a warning is recorded; a config is never fabricated. `bird.conf` also
-    needs the AS-level fields own_asn / ownnet_v6 / ownnetset_v6, which are outside
-    what the hub pushes, and without them the template cannot render at all since it
-    runs under StrictUndefined. A pure spoke may well have only ever run `node init`
-    and never had a config.toml.
+    Without a local config.toml all three steps are skipped and a warning is recorded;
+    a config is never fabricated. `bird.conf` needs the AS-level fields own_asn /
+    ownnet_v6 / ownnetset_v6, which are outside what the hub pushes, and without them
+    the template cannot render at all since it runs under StrictUndefined.
     """
     files: list[tuple[Path, str, int]] = []
     warnings: list[str] = []
 
-    try:
-        app_config = load_config(paths.config_path)
-    except ConfigError as exc:
-        warnings.append(f"中心下发了节点地址,但本机 config.toml 不可用,已跳过 config.toml/bird.conf/dummy: {exc}")
+    if app_config is None:
+        warnings.append("中心下发了节点地址,但本机 config.toml 不可用,已跳过 config.toml/bird.conf/dummy")
         return files, warnings
 
     updates: dict[str, str] = {}
@@ -322,38 +369,6 @@ def _render_node_config_files(
     return files, warnings
 
 
-def _render_config_toml(config: Any) -> str:  # noqa: ANN401 — AppConfig
-    """Render an AppConfig to TOML text so it goes through the same atomic-write + diff
-    pipeline as every other file.
-    """
-    import io
-
-    import tomli_w
-
-    data: dict[str, Any] = {
-        "node_id": config.node_id,
-        "own_asn": config.own_asn,
-        "router_id": config.router_id,
-        "own_ipv6": config.own_ipv6,
-        "ownnet_v6": config.ownnet_v6,
-        "ownnetset_v6": config.ownnetset_v6,
-        "dummy_backend": config.dummy_backend,
-        "paths": {
-            "bird_conf": config.bird_conf_path,
-            "bird_peers_dir": config.bird_peers_dir,
-            "bird_babel_conf": config.bird_babel_conf_path,
-            "bird_roa_v6_conf": config.bird_roa_v6_conf_path,
-            "networkd_dir": config.networkd_dir,
-            "nm_system_connections_dir": config.nm_system_connections_dir,
-        },
-    }
-    if config.dn42_registry_path is not None:
-        data["dn42_registry_path"] = config.dn42_registry_path
-    buf = io.BytesIO()
-    tomli_w.dump(data, buf)
-    return buf.getvalue().decode("utf-8")
-
-
 def _render_babel(payload: dict[str, Any], paths: ResolvedPaths) -> tuple[Path, str, int]:
     interfaces: list[tuple[str, int, str]] = []
     for peer in payload.get("ibgp_peers", []):
@@ -424,6 +439,7 @@ def _collect_stale(expected: set[Path], paths: ResolvedPaths) -> list[Path]:
 def apply(
     *,
     node_config: NodeConfig,
+    config_path: Path = DEFAULT_CONFIG_PATH,
     dry_run: bool = False,
     no_reload: bool = False,
     runner: Runner | None = None,
@@ -436,8 +452,13 @@ def apply(
         raise Dn42CtlError("本地缓存为空,先运行 dn42ctl node pull")
 
     payload = cached.payload
-    paths = _resolve_paths(payload, node_config)
     node_id = node_config.node_id
+
+    try:
+        app_config: AppConfig | None = load_config(config_path)
+    except ConfigError:
+        app_config = None
+    paths = _resolve_paths(app_config, config_path)
     warnings: list[str] = []
 
     files: list[tuple[Path, str, int]] = []
@@ -451,7 +472,7 @@ def apply(
     # files is byte-for-byte what it was before this feature landed.
     node_block = payload.get("node") or {}
     if node_block:
-        node_files, node_warnings = _render_node_config_files(node_block, paths)
+        node_files, node_warnings = _render_node_config_files(node_block, paths, app_config)
         files.extend(node_files)
         warnings.extend(node_warnings)
 

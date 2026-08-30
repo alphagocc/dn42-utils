@@ -6,7 +6,9 @@ DEFAULT_CONFIG_PATH = Path("/etc/dn42ctl/config.toml")
 DEFAULT_DB_PATH = Path("/var/lib/dn42ctl/dn42.sqlite3")
 
 DEFAULT_BIRD_DIR = Path("/etc/bird")
-DEFAULT_BIRD_CONF_PATH = DEFAULT_BIRD_DIR / "bird.conf"
+# 主配置在 /etc 下而非 /etc/bird 里: bird 编译内置的位置就是这里,Fedora 与 Debian 的
+# bird.service 都不带 -c,改成 /etc/bird/bird.conf 会让渲染出的文件无人加载。
+DEFAULT_BIRD_CONF_PATH = Path("/etc/bird.conf")
 DEFAULT_BIRD_PEERS_DIR = DEFAULT_BIRD_DIR / "peers"
 DEFAULT_BIRD_BABEL_CONF_PATH = DEFAULT_BIRD_DIR / "babel.conf"
 DEFAULT_BIRD_ROA_V6_CONF_PATH = DEFAULT_BIRD_DIR / "roa_dn42_v6.conf"

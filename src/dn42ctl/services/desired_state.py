@@ -17,15 +17,6 @@ from typing import Any
 from dn42ctl.db import Database
 from dn42ctl.services.core import Dn42CtlError, parse_allowed_ips_json
 
-DEFAULT_PATHS = {
-    "bird_conf_path": "/etc/bird/bird.conf",
-    "peers_dir": "/etc/bird/peers/",
-    "babel_conf_path": "/etc/bird/babel.conf",
-    "bird_extra_conf_path": "/etc/bird/extra.conf",
-    "networkd_dir": "/etc/systemd/network/",
-    "nm_dir": "/etc/NetworkManager/system-connections/",
-}
-
 
 @dataclass(frozen=True)
 class DesiredState:
@@ -34,7 +25,11 @@ class DesiredState:
     generated_at: str
     bgp_peers: list[dict[str, Any]] = field(default_factory=list)
     ibgp_peers: list[dict[str, Any]] = field(default_factory=list)
-    paths: dict[str, str] = field(default_factory=dict)
+    # No file locations here. Where a node writes bird.conf / peers / netdev files is
+    # that machine's own property: the hub does not know it and has no business
+    # dictating it. `node_apply._resolve_paths` resolves it locally from node.toml
+    # [apply], the node's config.toml and the built-in defaults.
+    #
     # The node's own address block (own_ipv6 / router_id). A NULL column is left out
     # of the dict; an empty block means the hub does not manage this node's addresses,
     # and apply leaves config.toml / bird.conf alone.
@@ -47,7 +42,6 @@ class DesiredState:
             "generated_at": self.generated_at,
             "bgp_peers": list(self.bgp_peers),
             "ibgp_peers": list(self.ibgp_peers),
-            "paths": dict(self.paths),
         }
         # An empty block stays out of the payload; see the no-churn rule in
         # compute_content_digest.
@@ -127,7 +121,6 @@ def compute_content_digest(
     node_id: str,
     bgp_peers: list[dict[str, Any]],
     ibgp_peers: list[dict[str, Any]],
-    paths: dict[str, str],
     node: dict[str, Any] | None = None,
 ) -> str:
     """8-char hex digest of everything that makes a desired state distinct.
@@ -146,7 +139,6 @@ def compute_content_digest(
         "node_id": node_id,
         "bgp_peers": bgp_peers,
         "ibgp_peers": ibgp_peers,
-        "paths": paths,
     }
     if node:
         canon_obj["node"] = node
@@ -214,7 +206,6 @@ def compute_desired_fingerprint(*, db_path: Path, node_id: str) -> DesiredFinger
                 node_id=payload.get("node_id", node_id),
                 bgp_peers=payload.get("bgp_peers", []),
                 ibgp_peers=payload.get("ibgp_peers", []),
-                paths=payload.get("paths", {}),
                 # Older snapshots do not carry this key.
                 node=payload.get("node", {}),
             ),
@@ -227,7 +218,6 @@ def compute_desired_fingerprint(*, db_path: Path, node_id: str) -> DesiredFinger
             node_id=node_id,
             bgp_peers=[_bgp_row_to_dict(r) for r in bgp_rows],
             ibgp_peers=[_ibgp_row_to_dict(r) for r in ibgp_rows],
-            paths=dict(DEFAULT_PATHS),
             node=node_block,
         ),
         pinned_revision=None,
@@ -262,13 +252,11 @@ def build_desired_state(
 
     bgp_peers = [_bgp_row_to_dict(r) for r in bgp_rows]
     ibgp_peers = [_ibgp_row_to_dict(r) for r in ibgp_rows]
-    paths = dict(DEFAULT_PATHS)
     generated_at = _now_iso()
     base: dict[str, Any] = {
         "node_id": node_id,
         "bgp_peers": bgp_peers,
         "ibgp_peers": ibgp_peers,
-        "paths": paths,
     }
     # Must match compute_content_digest: an empty block stays out of the canonical
     # JSON, otherwise every node's revision would change the moment this ships.
@@ -298,7 +286,6 @@ def build_desired_state(
                     "generated_at": generated_at,
                     "bgp_peers": bgp_peers,
                     "ibgp_peers": ibgp_peers,
-                    "paths": paths,
                 }
                 if node_block:
                     payload["node"] = node_block
@@ -320,7 +307,6 @@ def build_desired_state(
                 generated_at=pin.payload["generated_at"],
                 bgp_peers=pin.payload.get("bgp_peers", []),
                 ibgp_peers=pin.payload.get("ibgp_peers", []),
-                paths=pin.payload.get("paths", {}),
                 # Older snapshots do not carry this key.
                 node=pin.payload.get("node", {}),
             )
@@ -331,7 +317,6 @@ def build_desired_state(
         generated_at=generated_at,
         bgp_peers=bgp_peers,
         ibgp_peers=ibgp_peers,
-        paths=paths,
         node=node_block,
     )
 

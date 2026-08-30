@@ -130,6 +130,12 @@ manage_files_pattern(dn42ctl_agent_t, dn42ctl_bird_conf_t, dn42ctl_bird_conf_t)
 filetrans_pattern(dn42ctl_agent_t, dn42ctl_bird_conf_t, dn42ctl_bird_conf_t, file)
 files_etc_filetrans(dn42ctl_agent_t, dn42ctl_bird_conf_t, dir, "bird")
 
+# 发行版默认布局把 bird 主配置放在 /etc/bird.conf,父目录是 etc_t,上面那条
+# manage_files_pattern 只覆盖 /etc/bird 目录内部。不配 filetrans:该文件由
+# genconf 在无沙盒的环境下创建,agent 只覆写已有文件,而且下面已经有一条针对
+# etc_t 的无名 file transition,同一组合再加一条会冲突。
+manage_files_pattern(dn42ctl_agent_t, etc_t, dn42ctl_bird_conf_t)
+
 # /etc/systemd/network 目录本身保持 etc_t——里面通常还有管理员手写的 .network
 # 文件,改变目录类型会波及 systemd-networkd 对它们的读取。只有 dn42ctl 渲染出
 # 的文件带独立类型,因此这里需要一条无名的 filetrans：接口名是运行期决定的,
