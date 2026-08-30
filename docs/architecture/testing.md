@@ -73,6 +73,7 @@ tests/
 ├── test_api_proposals_reports.py          # REST API: proposals/reports
 ├── test_api_public_auto_peer.py           # REST API: 公共 auto-peer
 ├── test_api_revisions.py                  # REST API: revisions
+├── test_cli_errors.py                     # CLI: 异常到退出码的映射
 ├── test_cli_node.py                       # CLI: node 命令
 ├── test_cli_node_agent.py                 # CLI: node agent 命令
 ├── test_cli_node_decisions.py             # CLI: node decision 命令
