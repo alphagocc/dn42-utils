@@ -125,7 +125,7 @@ desired state JSON schema 详见 `docs/architecture/sync_hub_spoke.md`。
 
 #### `/api/admin/db/*`
 
-只读。表名取自白名单，未命中 404；私钥与 token hash 一律脱敏。端点形状、白名单与脱敏规则详见 [`db_browse.md`](db_browse.md)。**不提供通用行编辑端点**——权威写入必须经由 service 层，否则会绕过"变更通知与业务写入同事务发射"的不变量。
+只读。表名取自白名单，未命中 404；私钥与 token hash 全部脱敏。端点形状、白名单与脱敏规则详见 [`db_browse.md`](db_browse.md)。**不提供通用行编辑端点**——权威写入必须经由 service 层，否则会绕过"变更通知与业务写入同事务发射"的不变量。
 
 ### 公共路由（无 bearer / peer-session bearer）
 

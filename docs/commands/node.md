@@ -89,7 +89,7 @@ hub 以非 root 的 `dn42ctl` 用户运行，而 `node.toml` 是 `0600 root:root
 
 ### `dn42ctl node mesh backfill [--dry-run]`
 
-一次性回填 `ibgp_peers.remote_node_id`：按 `managed_nodes.own_ipv6 == ibgp_peers.peer_ip` 唯一匹配。匹配不唯一或匹配不到的行会被跳过并列出。
+一次性写入 `ibgp_peers.remote_node_id`：按 `managed_nodes.own_ipv6 == ibgp_peers.peer_ip` 唯一匹配。匹配不唯一或匹配不到的行会被跳过并列出。
 
 > 这个动作**不放进数据库迁移**：迁移时所有 `own_ipv6` 都还是 NULL，匹配不到任何行。
 
@@ -205,9 +205,9 @@ token   = "<token>"
 - `--no-reload`：写盘后不执行 `networkctl reload` / `birdc configure`。
 - 写盘使用 tmp+rename，失败不留半成品。
 
-**desired state 带非空 `node` 块时**，apply 还会重写 `config.toml`、重渲 `bird.conf`、重写 `dn42-dummy.*`；没有该块时行为与本特性引入前完全一致。本地 `config.toml` 缺失或损坏则跳过这三步并告警；`dummy_backend = "nm"` 时跳过 `dn42-dummy.*` 并告警（该接口由 NetworkManager 管理，需在该节点上跑 `dn42ctl genconf`）。
+**desired state 带非空 `node` 块时**，apply 还会重写 `config.toml`、重渲 `bird.conf`、重写 `dn42-dummy.*`；没有该块时行为与本特性引入前完全一致。本地 `config.toml` 缺失或损坏则跳过这三步并告警；`dummy_backend = "nm"` 时跳过 `dn42-dummy.*` 并告警（该接口由 NetworkManager 管理，需在该节点上执行 `dn42ctl genconf`）。
 
-**reload**：按实际写入/删除的路径决定——碰了 `networkd_dir` 就 `networkctl reload`，碰了 bird 相关文件就 `birdc configure`，什么都没变则一条都不跑。失败只记 warning，不中断 apply。也可用 `node.toml` 的 `[apply] reload = "never"` 永久关闭。完整规则见 [`../architecture/node_addressing.md`](../architecture/node_addressing.md) §8。
+**reload**：按实际写入/删除的路径决定——碰了 `networkd_dir` 就 `networkctl reload`，碰了 bird 相关文件就 `birdc configure`，什么都没变则一条都不执行。失败只记 warning，不中断 apply。也可用 `node.toml` 的 `[apply] reload = "never"` 永久关闭。完整规则见 [`../architecture/node_addressing.md`](../architecture/node_addressing.md) §8。
 
 ### `dn42ctl node push`
 
@@ -260,6 +260,6 @@ token   = "<token>"
 
 ## 与 `dn42ctl serve` 的关系
 
-`dn42ctl serve` 不在本组命令下，但它的启动序列与 self 节点强相关：跑迁移、读取或创建 `/var/lib/dn42ctl/self_node_id`、UPSERT `managed_nodes` 中 `is_self=1` 的行、在 `node.toml` 与库中 hash 不一致时生成 self token，最后监听 `[::1]:4242` 并起 `sync_events` watcher。
+`dn42ctl serve` 不在本组命令下，但它的启动序列与 self 节点强相关：执行迁移、读取或创建 `/var/lib/dn42ctl/self_node_id`、UPSERT `managed_nodes` 中 `is_self=1` 的行、在 `node.toml` 与库中 hash 不一致时生成 self token，最后监听 `[::1]:4242` 并起 `sync_events` watcher。
 
 `--no-self-register` 关闭其中的自动注册步骤。`--sync-poll-interval`（默认 1.0 秒）调整 watcher 轮询间隔，决定配置变更推送到节点的最大延迟。完整语义见 `docs/architecture/sync_hub_spoke.md`。

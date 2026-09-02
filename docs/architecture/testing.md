@@ -117,7 +117,7 @@ CI 环境不安装 wireguard-tools 等系统包。
 
 ### Hub 侧：`TestClient.websocket_connect`
 
-`with TestClient(app) as client:` 会在后台 portal 线程里跑 lifespan，于是**真实的** watcher 轮询**真实的** sqlite 文件，而测试线程直接改这个文件。这比 mock 出来的异步框架更接近端到端，且零管道成本。
+`with TestClient(app) as client:` 会在后台 portal 线程里执行 lifespan，于是**真实的** watcher 轮询**真实的** sqlite 文件，而测试线程直接改这个文件。这比 mock 出来的异步框架更接近端到端，且零管道成本。
 
 ```python
 with TestClient(app) as client:
@@ -127,7 +127,7 @@ with TestClient(app) as client:
         assert ws.receive_json()["type"] == "hello_ack"
 ```
 
-- **现有测试不受影响**：它们用裸 `TestClient(app)`（未作为 context manager 使用），lifespan 不会跑，watcher 也就不会起。只有新的 WS 测试用 `with`。
+- **现有测试不受影响**：它们用裸 `TestClient(app)`（未作为 context manager 使用），lifespan 不会执行，watcher 也就不会起。只有新的 WS 测试用 `with`。
 
 ### Spoke 侧：注入缝 + 裸 `asyncio.run()`
 

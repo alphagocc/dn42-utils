@@ -8,7 +8,7 @@ from collections.abc import Callable
 # ALTER TABLE ADD COLUMN **只能**使用可调用分支:SQLite 没有 ADD COLUMN IF NOT EXISTS,
 # 而 executescript 会在执行前隐式 COMMIT —— 脚本中途失败会留下"前几列已提交、版本号
 # 没写入、rollback() 也对它们无效"的状态,重新运行会有 duplicate column,导致库永久卡死。
-# 可调用分支跑在连接的隐式事务里,与 schema_migrations 插入真正原子。
+# 可调用分支在连接的隐式事务内执行,与 schema_migrations 插入真正原子。
 MigrationStep = str | Callable[[sqlite3.Connection], None]
 
 

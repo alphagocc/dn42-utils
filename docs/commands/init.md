@@ -10,7 +10,7 @@
   - `OWNAS`、`OWNIPv6`、`OWNNETv6`、`OWNNETSETv6`、`ROUTERID`
 - `ROUTERID`：
   - 默认值应为随机生成的 `169.254.X.Y`（`X/Y` 为 1-254）
-  - 写入本地配置文件以保持稳定（后续重跑 init 不应变化）
+  - 写入本地配置文件以保持稳定（后续重新执行 init 不应变化）
 - `OWNIPv6`：
   - 允许输入 4 位 hex（作为最后一段），自动扩展为 `fddf:8aef:1053::xxxx`
   - 也接受完整 IPv6

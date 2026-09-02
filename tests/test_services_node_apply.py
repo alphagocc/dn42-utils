@@ -297,7 +297,7 @@ class TestLocationResolution:
         assert result.warnings == []
 
     def test_missing_config_toml_falls_back_quietly(self, tmp_path: Path) -> None:
-        """纯 spoke 只跑过 node init,没有 config.toml。落到内置默认值是正常行为,
+        """纯 spoke 只执行过 node init,没有 config.toml。使用内置默认值是正常行为,
         每 900 秒的 reconcile 不该为此各报一次。"""
         cfg = _cfg(tmp_path)
         _seed_cache(cfg.cache_db_path, _make_payload(tmp_path, bgp=[_bgp_peer()]))
@@ -355,7 +355,7 @@ class TestFileModes:
     def test_networkd_files_are_readable_by_the_networkd_user(self, tmp_path: Path) -> None:
         """systemd-networkd 以 systemd-network 用户运行,读不到 root 独占的文件。
 
-        它读不到时不会报错退出,而是逐个文件记一行 Permission denied 继续跑,接口
+        它读不到时不会报错退出,而是逐个文件记一行 Permission denied 继续运行,接口
         因此建起来却拿不到地址,BGP 与 Babel 全部失去承载。
         """
         cfg = _cfg(tmp_path)
@@ -720,7 +720,7 @@ class TestNodeBlockApplied:
 
     def test_missing_config_toml_warns_and_skips(self, tmp_path: Path) -> None:
         """纯 spoke 可能从没有过 config.toml。bird.conf 还需要 own_asn 等 AS 级字段,
-        缺了就渲染不出来,只能跳过并告警,绝不伪造。"""
+        缺了就渲染不出来,只能跳过并告警,不伪造。"""
         cfg = _cfg(tmp_path)
         local_config = tmp_path / "etc" / "nope.toml"
         payload = _make_payload(tmp_path)
@@ -833,7 +833,7 @@ class TestReload:
         assert seen == [["networkctl", "reload"], ["birdc", "configure"]]
 
     def test_second_apply_with_no_changes_runs_nothing(self, tmp_path: Path) -> None:
-        """agent 每 900 秒 reconcile 一次,无变更就 reload 会让每节点每天空跑 96 次。"""
+        """agent 每 900 秒 reconcile 一次,无变更时仍 reload 会让每节点每天空转 96 次。"""
         cfg = _cfg(tmp_path)
         payload = _make_payload(tmp_path, bgp=[_bgp_peer()])
         _seed_cache(cfg.cache_db_path, payload)

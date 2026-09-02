@@ -44,7 +44,7 @@ def validate_pubkey(value: str) -> str:
     """WireGuard X25519 公钥:标准 base64,解码后恰好 32 字节。
 
     按解码长度校验。字符数放不出这个约束——42~46 个 base64 字符能塞进
-    31 到 33 字节,而 `wg` 对非 32 字节的 key 一律报 "Key is not the correct length
+    31 到 33 字节,而 `wg` 对非 32 字节的 key 都会报 "Key is not the correct length
     or format"。
     """
     value = value.strip()

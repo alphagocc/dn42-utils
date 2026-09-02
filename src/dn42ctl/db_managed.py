@@ -225,8 +225,8 @@ class ManagedNodeStore:
 
     def get_self(self) -> ManagedNode | None:
         try:
-            # ORDER BY 是防御性的:upsert_self 保证至多一行,但没有排序的 LIMIT 1 会在
-            # 不变量万一被破坏时静默返回任意一行,而这一列决定所有 admin 写入的分区。
+            # ORDER BY 是防御性的:upsert_self 保证至多一行,但没有排序的 LIMIT 1 在
+            # 不变量被破坏时会静默返回任意一行,而返回的行决定所有 admin 写入的分区。
             row = self._conn.execute(
                 "SELECT * FROM managed_nodes WHERE is_self=1 ORDER BY updated_at DESC, node_id DESC LIMIT 1",
             ).fetchone()

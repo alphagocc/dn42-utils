@@ -124,7 +124,7 @@ def load_config(path: Path) -> AppConfig:
         bird_babel_conf_path=_require_str(paths, "bird_babel_conf"),
         bird_roa_v6_conf_path=_require_str(paths, "bird_roa_v6_conf"),
         # 该键晚于其余路径引入,旧配置里没有,缺失时按 peers 目录的上一级推导,让升级后
-        # 无需重跑 init。锚点不能用 bird_conf: 发行版默认把主配置放在 /etc/bird.conf,
+        # 无需重新执行 init。锚点不能用 bird_conf: 发行版默认把主配置放在 /etc/bird.conf,
         # 按它的同级目录会推出 /etc/extra.conf。也不固定成 /etc/bird,那样把配置指向
         # 可写目录的开发与测试环境就不自洽了。peers 目录同时满足这两点。
         bird_extra_conf_path=_optional_str(paths, "bird_extra_conf") or str(Path(bird_peers_dir).parent / "extra.conf"),

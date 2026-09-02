@@ -26,21 +26,13 @@ systemd/
 - **self 节点绕过 nginx**：`node.toml` 中 `server = "http://[::1]:4242"`，直连 uvicorn。
 - **node-agent 自带重连退避**：不依赖 systemd 重试，因此 `StartLimitIntervalSec=0` 关掉 systemd 的熔断，让 `Restart=always` 永远生效。
 
-## 常驻代理的安全特征
+## 常驻代理的安全代价
 
-当前架构使用全天候运行的 root 权限常驻代理（`node-agent.service`）处理节点同步。该设计具备以下安全特征与风险控制策略。
+`node-agent.service` 是全天候运行的 root 进程。相比原先每 10 分钟约 1 秒的 oneshot，纵深防御有实质性降低。
 
-**生命周期与数据驻留**
-常驻进程维持持久连接，节点的 API 访问凭证与全部 WireGuard 私钥在服务运行期间持续驻留于内存。
+API token 与该节点全部 WireGuard 私钥在服务运行期间始终驻留内存。配置推送延迟在 1 秒以内，hub 一旦被攻破，攻击者能近乎实时地在所有节点触发 root 级别的配置写入。`Restart=always` 保证崩溃后自动恢复，`RestartSec=5s` 防止死循环对 `/etc` 的高频覆写。
 
-**推送机制与影响范围**
-配置同步采用中心节点主动推送模式，同步延迟在 1 秒以内。该机制要求极高的中心侧安全保障：若中心节点沦陷，攻击者能够近乎实时地在各关联节点触发 root 级别的配置修改。
-
-**异常状态控制**
-服务崩溃后的恢复依赖 systemd 的 `Restart=always` 策略。为防止异常死循环引发对系统配置目录（`/etc`）的高频覆写，通过 `RestartSec=5s` 参数实施速率限制。
-
-**配套缓解措施**
-针对常驻高权限进程的风险，系统对 agent 服务配置了严格的系统级沙盒隔离。同时，中心节点始终保持唯一真实数据源的地位，节点无权修改权威数据表，确保单向信任边界。在需要隔离常驻进程的排查场景下，可以停止该服务，系统保留的 HTTP 路由依然支持通过手动命令完成状态拉取与配置应用。
+缓解手段：agent unit 配置了严格的 systemd sandbox（详见下方 unit 说明）；hub 是唯一权威数据源，节点无权修改权威表；需要隔离常驻进程时可以停止 agent，保留的 HTTP 路由仍然支持手动 `node pull` / `node apply`。
 
 在启用 SELinux 的系统上还有第二层限制：`selinux/` 提供的策略模块把两个服务分别放进 `dn42ctl_server_t` 与 `dn42ctl_agent_t`，按文件类型而非目录约束 agent 的写入范围。详见 [`selinux.md`](selinux.md)。
 
@@ -59,7 +51,7 @@ systemd/
 
 - 必须以 root 运行（需写 `/etc/bird` 等，调用 `wg` / `ip` / `nmcli`），sandbox 比 server 宽松。
 - `Type=exec` + `Restart=always` + `RestartSec=5s`；`[Unit] StartLimitIntervalSec=0` 关掉 systemd 熔断。agent 自身带有指数退避，不应被 systemd 判定为"反复失败"而停掉。
-- sandbox 在原 `node-once.service` 基础上收紧：`UMask=0077`、`MemoryDenyWriteExecute=true`、`ProtectProc=invisible`、`RestrictNamespaces=true`、`RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6`。
+- sandbox 相比原 `node-once.service` 更严格：`UMask=0077`、`MemoryDenyWriteExecute=true`、`ProtectProc=invisible`、`RestrictNamespaces=true`、`RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6`。
 - **刻意不清空 `CapabilityBoundingSet`**：不同于 server，这个进程要对 `/etc/systemd/network/*.netdev` 调 `chown`。若要收窄到 `CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER`，请先在目标环境实测验证。
 - **中心主机上**额外设置一个 drop-in（不能放进共享 unit，因为 spoke 上没有 server）：
 
@@ -74,7 +66,7 @@ systemd/
 
 ### 开机配置同步保证
 
-原 timer 的 `OnBootSec=2min` 随之删除。作为补偿，agent 在尝试第一次连接之前会先用本地缓存（`/var/lib/dn42ctl/node-cache.sqlite3`）跑一次 `apply()`，因此即使 spoke 重启时 hub 不可达，`/etc/bird` 仍会被渲染。该设计的完整论证见 `docs/architecture/sync_ws_protocol.md`。
+原 timer 的 `OnBootSec=2min` 随之删除。作为补偿，agent 在尝试第一次连接之前会先用本地缓存（`/var/lib/dn42ctl/node-cache.sqlite3`）执行一次 `apply()`，因此即使 spoke 重启时 hub 不可达，`/etc/bird` 仍会被渲染。该设计的完整论证见 `docs/architecture/sync_ws_protocol.md`。
 
 ## nginx 反代示例
 
@@ -163,7 +155,7 @@ sudo systemctl enable --now dn42ctl-node-agent.service
 journalctl -fu dn42ctl-node-agent
 ```
 
-> 中心主机上跑 CLI 写命令时建议用 `sudo -u dn42ctl dn42ctl ...`，与 server 进程保持同一个文件 owner，避免 SQLite 文件权限漂移。
+> 在中心主机上执行 CLI 写命令时建议用 `sudo -u dn42ctl dn42ctl ...`，与 server 进程保持同一个文件 owner，避免 SQLite 文件权限漂移。
 
 ## 从 node-once.timer 升级
 
@@ -180,7 +172,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now dn42ctl-node-agent.service
 
 # 中心主机额外:
-sudo systemctl restart dn42ctl-server            # 跑 migration + 起 watcher
+sudo systemctl restart dn42ctl-server            # 执行 migration + 启动 watcher
 # nginx 加上 WS location 后
 sudo nginx -t && sudo systemctl reload nginx
 ```
@@ -207,7 +199,7 @@ dn42ctl node token rotate <node-id>          # 明文只在这里返回一次
 
 ## self node 自动注册
 
-`dn42ctl serve` 启动时自动完成 self 节点注册：跑迁移、生成或读取 `/var/lib/dn42ctl/self_node_id`、UPSERT `managed_nodes` 中 `is_self=1` 的行（同时清零其它行）、在 `/etc/dn42ctl/node.toml` 与库中 hash 不一致时签发 self token，最后监听 `[::1]:4242` 并起 `sync_events` watcher。各步骤的详细语义见 `docs/architecture/sync_hub_spoke.md`。
+`dn42ctl serve` 启动时自动完成 self 节点注册：执行迁移、生成或读取 `/var/lib/dn42ctl/self_node_id`、UPSERT `managed_nodes` 中 `is_self=1` 的行（同时清零其他行）、在 `/etc/dn42ctl/node.toml` 与库中 hash 不一致时签发 self token，最后监听 `[::1]:4242` 并起 `sync_events` watcher。各步骤的详细语义见 `docs/architecture/sync_hub_spoke.md`。
 
 第一次 `enable --now` 后 self 节点完全就绪，后续 restart 幂等，只要 `node.toml` 与库中 hash 仍然对得上就不会重新生成 token。`--no-self-register` 关闭其中的注册步骤，适用于测试或不希望中心机自管的部署。
 

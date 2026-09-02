@@ -14,7 +14,7 @@ unit 中的 `ReadWritePaths=` 已经把可写范围限制在五个目录加上�
 selinux/
 ├── dn42ctl.te      # 域、类型与规则
 ├── dn42ctl.fc      # 文件上下文
-├── dn42ctl.if      # 对外接口,供其它模块引用
+├── dn42ctl.if      # 对外接口,供其他模块引用
 └── Makefile        # 构建、安装、宽容模式切换
 ```
 
@@ -86,14 +86,14 @@ ps -eZ | grep dn42ctl        # 应显示 dn42ctl_server_t 与 dn42ctl_agent_t
 
 ## 首次上线
 
-任何新策略模块都应当先在宽容模式下跑满一个完整的业务周期，再切回强制。dn42ctl 的完整周期包括一次 `node apply` 写入全部渲染目标、一次 `networkctl reload` 与 `birdc configure`、一次 auto-peer 的提案提交。
+任何新策略模块都应当先在宽容模式下运行满一个完整的业务周期，再切回强制。dn42ctl 的完整周期包括一次 `node apply` 写入全部渲染目标、一次 `networkctl reload` 与 `birdc configure`、一次 auto-peer 的提案提交。
 
 ```bash
 cd selinux
 sudo make install
 sudo make permissive            # 只对这两个域宽容,系统其余部分保持 Enforcing
 
-# 跑完整业务周期,随后查看被记录下来的拒绝
+# 执行完整业务周期,随后查看被记录下来的拒绝
 sudo ausearch -m AVC -ts recent | grep -E 'dn42ctl_(server|agent)_t'
 ```
 

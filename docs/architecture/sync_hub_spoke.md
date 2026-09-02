@@ -73,9 +73,9 @@ WS 通道在**握手时**验一次 token，之后每一帧读缓存的 principal
 
 `dn42ctl serve` 启动序列（幂等，可重复执行）：
 
-1. 跑迁移（至 v14）。
+1. 执行迁移（至 v14）。
 2. 读 `/var/lib/dn42ctl/self_node_id`，不存在则生成 UUIDv4 写入（`0600`，owner=dn42ctl）。
-3. `managed_nodes` UPSERT：先把其它行的 `is_self` 清零，再写入 `(node_id=<self>, name='self', is_self=1, enabled=1, write_policy=<默认 JSON>)`。清零这一步不可省：`self_node_id` 文件丢失后会生成新 UUID，只写不清就会留下两行 `is_self=1`，而 `get_self()` 无从判断该返回哪一行。旧行降级为普通受管节点，它的 peer 一条不动，可用 `dn42ctl node adopt-self` 搬迁。
+3. `managed_nodes` UPSERT：先把其他行的 `is_self` 清零，再写入 `(node_id=<self>, name='self', is_self=1, enabled=1, write_policy=<默认 JSON>)`。清零这一步不可省：`self_node_id` 文件丢失后会生成新 UUID，只写不清就会留下两行 `is_self=1`，而 `get_self()` 无从判断该返回哪一行。旧行降级为普通受管节点，它的 peer 一条不动，可用 `dn42ctl node adopt-self` 搬迁。
    - **`name` 只在这一行第一次创建时写入。** 该行已存在时 UPSERT 只刷新 `is_self`、`enabled` 与 `updated_at`。每次启动都会执行这一步，连名字一起写回默认值会把运维的改名撤销掉，而这个名字正是公共 auto-peer 页面上展示的内容，详见 [`auto_peer.md`](auto_peer.md)。
 4. 检查 `/etc/dn42ctl/node.toml` 与 `managed_nodes.api_token_hash` 是否一致：
    - 文件不存在 / `node_id` 不匹配 / `token` 缺失 / **token 与库中 hash 不符（含 hash 为 NULL）** → 生成 `secrets.token_urlsafe(32)`，hash 入库，明文写 `node.toml`（`0600`，owner=root，因为 node-agent.service 需要读）：
@@ -107,7 +107,7 @@ self token 轮换：`dn42ctl node token rotate <self-id>` 同时更新 hash 与 
 ## 节点本地状态
 
 - `/etc/dn42ctl/node.toml`（`0600`）：server URL / node_id / token / `[apply] reload` / `[agent]` 调优参数。
-- `/var/lib/dn42ctl/node-cache.sqlite3`：缓存最近 desired state 与 revision。**仅缓存**，丢失不影响权威状态。agent 启动时会先用这份缓存跑一次 `apply()`，然后才尝试连接，以此保证 hub 不可达时 `/etc/bird` 仍会被渲染。该设计的完整论证见 `docs/architecture/sync_ws_protocol.md`。
+- `/var/lib/dn42ctl/node-cache.sqlite3`：缓存最近 desired state 与 revision。**仅缓存**，丢失不影响权威状态。agent 启动时会先用这份缓存执行一次 `apply()`，然后才尝试连接，以此保证 hub 不可达时 `/etc/bird` 仍会被渲染。该设计的完整论证见 `docs/architecture/sync_ws_protocol.md`。
 
 ## desired state JSON Schema
 

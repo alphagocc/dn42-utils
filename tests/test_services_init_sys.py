@@ -82,7 +82,7 @@ class TestGenconf:
         assert str(result.bird_extra_conf_path) in result.bird_conf_path.read_text()
 
     def test_extra_conf_content_is_never_overwritten(self, tmp_path: Path) -> None:
-        """extra.conf 的内容属于用户,重跑 genconf 覆盖它等于删掉用户的配置。"""
+        """extra.conf 的内容属于用户,重新执行 genconf 覆盖它等于删掉用户的配置。"""
         init_result, db_path = _init_node_helper(tmp_path)
         extra_path = Path(init_result.config.bird_extra_conf_path)
         extra_path.write_text("protocol static custom { ipv6; }\n")

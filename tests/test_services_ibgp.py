@@ -248,7 +248,7 @@ class TestRemoteNodeLink:
     @pytest.mark.usefixtures("_mock_wg")
     def test_modify_without_link_preserves_it(self, sample_config, db_path: Path) -> None:
         """proposal 接受与上报导入都经由 modify,它们不知道这个关联的存在,
-        绝不能让它们静默把链接抹掉。"""
+        不能让它们静默把链接抹掉。"""
         create_ibgp_peer(
             config=sample_config,
             db_path=db_path,

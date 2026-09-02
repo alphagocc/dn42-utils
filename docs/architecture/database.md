@@ -4,15 +4,15 @@
 
 - 所有状态写入 SQLite，便于多端/多节点集中管理。
 - 以 `node_id`（UUIDv4）区分节点，所有业务表均带 `node_id` 字段分区。
-- 保持结构可扩展（未来可迁移到 Cloudflare D1 或其它存储）。
+- 保持结构可扩展（未来可迁移到 Cloudflare D1 或其他存储）。
 
 ## 迁移机制
 
 - 使用 `schema_migrations(version)` 记录迁移版本。
 - 启动/初始化时应自动执行迁移，保证旧库可直接升级。
 - 迁移是 `(version, step)` 列表，逐版本执行 + commit。`step` 可以是 **SQL 字符串**（使用 `executescript` 执行，SQL 必须**幂等**：`IF NOT EXISTS` / 条件 UPDATE），也可以是 **`Callable[[sqlite3.Connection], None]`**。
-- **`ALTER TABLE ... ADD COLUMN` 必须使用 callable 分支。** SQLite 没有 `ADD COLUMN IF NOT EXISTS`，而 `executescript` 在执行前**隐式 COMMIT**、语句不在调用方事务内：脚本中途失败会留下"前几列已提交、版本号没写入、`rollback()` 也对它们无效"的状态，重新运行会有 duplicate column，导致**库永久卡死**。callable 分支跑在连接的隐式事务里，与 `schema_migrations` 插入真正原子。用 `migrations.ensure_column()`（先查 `PRAGMA table_info` 再决定是否 ALTER）。
-- **版本号不连续是有意的。** v1 是合并后的建表脚本，v2–v7 已在 2026-05-31 的清理中并入 v1；v8 是 `nm` → `networkd` 的数据回填（编号跳到 8 是为了避开生产库里已应用的旧 v2）。**当前最大版本是 v13**（`is_self` 唯一索引），新迁移从 v14 开始。
+- **`ALTER TABLE ... ADD COLUMN` 必须使用 callable 分支。** SQLite 没有 `ADD COLUMN IF NOT EXISTS`，而 `executescript` 在执行前**隐式 COMMIT**、语句不在调用方事务内：脚本中途失败会留下"前几列已提交、版本号没写入、`rollback()` 也对它们无效"的状态，重新运行会有 duplicate column，导致**库永久卡死**。callable 分支在连接的隐式事务内执行，与 `schema_migrations` 插入真正原子。用 `migrations.ensure_column()`（先查 `PRAGMA table_info` 再决定是否 ALTER）。
+- **版本号不连续是有意的。** v1 是合并后的建表脚本，v2–v7 已在 2026-05-31 的清理中并入 v1；v8 是 `nm` → `networkd` 的数据订正（编号跳到 8 是为了避开生产库里已应用的旧 v2）。**当前最大版本是 v13**（`is_self` 唯一索引），新迁移从 v14 开始。
 
 ## DB 与配置文件的写入顺序
 
@@ -27,7 +27,7 @@
 
 **改成 DB 优先之后，文件删除必须是尽力而为、不中止。** 先删行再让文件删除抛异常的话，
 DB 里已经没有这条 peer，而 `bird.conf` 的 `include "<peers_dir>/*";` 仍在加载那个文件
-——会话还活着；再跑一次 `del` 只会得到"该 peer 不存在"，工具救不回来。所以删不掉的
+——会话还活着；再执行一次 `del` 只会得到"该 peer 不存在"，工具救不回来。所以删不掉的
 文件进 `DeleteResult.failed_files` 报给用户，命令本身照常成功。
 
 > 只有 spoke 侧的 `node apply` 会主动清扫陈旧文件（`_collect_stale`）。hub 上的
@@ -64,7 +64,7 @@ DB 层的写方法长成 `try: execute(...) → 检查 rowcount → emit → com
 每个连接在打开后设置：
 
 - `PRAGMA foreign_keys = ON`
-- `PRAGMA busy_timeout = 5000`：hub 上 server 进程与 CLI 进程会并发写同一个库文件（管理员跑 `dn42ctl bgp peer add` 的同时 server 的 `sync_events` watcher 在读）。没有 busy_timeout 时，撞锁会立刻抛 `database is locked`，失去等待重试的机会。
+- `PRAGMA busy_timeout = 5000`：hub 上 server 进程与 CLI 进程会并发写同一个库文件（管理员执行 `dn42ctl bgp peer add` 的同时 server 的 `sync_events` watcher 在读）。没有 busy_timeout 时，撞锁会立刻抛 `database is locked`，失去等待重试的机会。
 
 > **不启用 WAL。** WAL 会在库文件旁生成 `-wal` / `-shm`，owner 是创建它们的进程；hub 上 `sudo dn42ctl ...`（root）创建之后，以 `dn42ctl` 用户运行的 server 会被锁在外面。现有的写入都很短，`busy_timeout` 已经够用。
 
@@ -149,12 +149,12 @@ CREATE TABLE managed_nodes (
 
 - `auto_peer`：该节点是否出现在公共 auto-peer 页面上。默认 0，新增与升级出来的节点都要运维显式开放；公开列表与提交校验都取 `auto_peer=1 AND enabled=1`，语义见 [`auto_peer.md`](auto_peer.md)。
 - `endpoint_host` / `own_ipv6` / `router_id`：节点地址，**`NULL` 表示该字段不由中心管理**（不下发，节点本地值原样保留）。语义、传播规则与下发机制见 [`node_addressing.md`](node_addressing.md)。`endpoint_host` 只存主机、不含端口——端口是对端每条隧道的 `listen_port`，存不进节点级字段。
-- `api_token_hash`：`sha256$<hex>`；`NULL` 表示尚未签发 node token。v11 把存量的旧格式 hash 一律置 NULL，强制全部重签，操作步骤见 [`deployment.md`](deployment.md)。
+- `api_token_hash`：`sha256$<hex>`；`NULL` 表示尚未签发 node token。v11 把存量的旧格式 hash 全部置 NULL，强制全部重签，操作步骤见 [`deployment.md`](deployment.md)。
 - `write_policy`：JSON 字符串，按 4 类动作分别配置：
   - `peer_add` ∈ {`review`, `auto_accept`}：节点 push 新增 peer 时的处理。
   - `peer_modify` / `peer_delete` ∈ {`review`}：修改 / 删除**始终** review，schema 不接受 `auto_accept`（防止节点被入侵后篡改/抹除权威记录）。
   - `report` ∈ {`auto`, `review`}：节点上报状态进 `node_reports` 是否需要管理员审核。注意 report 永远不直接改业务表，`auto` 仅免去入队审核步骤。
-- `is_self = 1`：标记为中心主机自身（self 节点）。**全表至多一行，由 schema 强制**——v13 的 partial unique index `idx_managed_nodes_single_self ON managed_nodes(is_self) WHERE is_self = 1` 把这条不变量落到数据库层；`upsert_self` 先把其它行清零再写入，`get_self()` 带确定性排序兜底，v12 迁移清理存量的多 self 行（保留 `updated_at` 最新的一行，其余降级为普通节点）。只靠应用路径不够：直接写 SQL、未来新增的写入点、以及迁移之后又被手工改坏的库，都会绕过它，而这一列决定每一次 admin 写入落到哪个分区。
+- `is_self = 1`：标记为中心主机自身（self 节点）。**全表至多一行，由 schema 强制**——v13 的 partial unique index `idx_managed_nodes_single_self ON managed_nodes(is_self) WHERE is_self = 1` 把这条不变量落到数据库层；`upsert_self` 先把其他行清零再写入，`get_self()` 带确定性排序兜底，v12 迁移清理存量的多 self 行（保留 `updated_at` 最新的一行，其余降级为普通节点）。只靠应用路径不够：直接写 SQL、未来新增的写入点、以及迁移之后又被手工改坏的库，都会绕过它，而这一列决定每一次 admin 写入落到哪个分区。
   - 这一列不只是显示用：`api.py` 的 `_resolve_target_node` 用它决定每一次 admin 写入落到哪个分区（见 [`rest_api.md`](rest_api.md)），`node adopt-self` 用它确定搬迁目标。出现两行时 `get_self()` 会返回其中一行且没有任何排序保证，这两处会一起指向错误的分区。
   - 出现两行的现实路径是 `/var/lib/dn42ctl/self_node_id` 丢失后重新生成（容器没挂持久卷、磁盘恢复、误删）：`upsert_self` 写入新 id 却不动旧行。旧行降级保留，是因为旧分区里的 peer 全都还在，删掉等于丢配置；降级后它作为普通受管节点出现在 `node list` 里，可以用 `node adopt-self` 把 peer 搬过来。
 - `last_seen_at`：最近一次该节点的 pull / push / report 时间，由 server 在请求处理时更新。WS 长连接下由节点每 60 秒发起的 `ping` 触发（每连接节流到最多 60 秒一次，避免心跳放大写入）。

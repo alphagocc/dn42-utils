@@ -115,7 +115,7 @@ def _apply_peer_modify(*, config: AppConfig, db_path: Path, target_node_id: str,
             render_files=False,
         )
     else:
-        # modify 一律按"有隧道"校验:modify_ibgp_peer 不接受 has_wg,它按库里的行判断,
+        # modify 始终按"有隧道"校验:modify_ibgp_peer 不接受 has_wg,它按库里的行判断,
         # 且拒绝 has_wg=0 的行。信 payload 的 has_wg 等于让调用方自选要不要被校验。
         ibgp = parse_ibgp_peer(peer, require_wg_fields=True)
         modify_ibgp_peer(

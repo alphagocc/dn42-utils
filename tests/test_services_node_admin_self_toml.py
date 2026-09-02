@@ -131,10 +131,10 @@ class TestRemoveSelf:
 
 
 class TestSelfTomlFailureIsReported:
-    """node.toml 读写失败在标准部署下是常态:hub 跑在非 root 用户下,文件是 root:0600。
+    """node.toml 读写失败在标准部署下是常态:hub 以非 root 用户运行,文件是 root:0600。
 
     此时 DB 里的 hash 已经换掉,回滚会把只出现一次的明文丢掉,所以只能报告不能中止;
-    但也绝不能沉默——沉默等于把 hub 自己的 agent 静默锁在门外。见 docs/commands/node.md。
+    但也不能沉默——沉默等于把 hub 自己的 agent 静默锁在门外。见 docs/commands/node.md。
     """
 
     def test_rotate_reports_unreadable_toml(self, db_path: Path, tmp_path: Path) -> None:
@@ -192,7 +192,7 @@ class TestSelfTomlFailureIsReported:
 
 
 class TestRotatePreservesAllFields:
-    """重签 token 时不能顺手把 node.toml 的其它字段重置回默认值。
+    """重签 token 时必须保留 node.toml 的其他字段，不能将其重置为默认值。
 
     以前 _rewrite_self_node_toml 逐字段重建 NodeConfig，凡是忘了列举的字段都会被
     静默丢掉——agent 与 reload_policy 就是这么被重置的。现在用 dataclasses.replace。

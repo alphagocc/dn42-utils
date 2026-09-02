@@ -25,7 +25,7 @@ dn42ctl 对所有用户输入（CLI 参数、API 请求体、配置文件字段�
 
 两条容易写错的规则：
 
-**`has_wg` 只在 create 时可信。** `modify_ibgp_peer` 根本不接受 `has_wg` 参数——它按**数据库现有行**判断有没有隧道，并且直接拒绝 `has_wg=0` 的行。所以 modify payload 里的 `has_wg` 完全不影响写入结果，只会影响"要不要校验 WireGuard 字段"。让它自称 `false` 就能跳过公钥与 LLA 校验，随后被写成空串，落到一条数据库里 `has_wg=1` 的行上——渲染出的 netdev 带一个空 `PublicKey=`，systemd-networkd 直接拒绝拉起该接口。因此 **modify 一律按"有隧道"校验**，payload 的 `has_wg` 只用于 create。
+**`has_wg` 只在 create 时可信。** `modify_ibgp_peer` 根本不接受 `has_wg` 参数——它按**数据库现有行**判断有没有隧道，并且直接拒绝 `has_wg=0` 的行。所以 modify payload 里的 `has_wg` 完全不影响写入结果，只会影响"要不要校验 WireGuard 字段"。让它自称 `false` 就能跳过公钥与 LLA 校验，随后被写成空串，落到一条数据库里 `has_wg=1` 的行上——渲染出的 netdev 带一个空 `PublicKey=`，systemd-networkd 直接拒绝拉起该接口。因此 **modify 始终按"有隧道"校验**，payload 的 `has_wg` 只用于 create。
 
 **类型检查必须排在 `or` 默认值之前。** `peer.get("net_backend") or "networkd"` 这种写法会把 `false` / `0` / `[]` 一并当成"没填"，静默落到默认值上。先判类型、再取默认，才能把"填错了"和"没填"区分开。
 
@@ -61,8 +61,8 @@ dn42ctl 对所有用户输入（CLI 参数、API 请求体、配置文件字段�
 ## 两处刻意加严的校验
 
 **WireGuard 公钥按长度校验，不按字符数。** 正则曾经写成 `[A-Za-z0-9+/]{42,44}={0,2}`，
-把 42 到 46 个字符一律放行，于是 31 字节和 33 字节的 key 都能通过——真实的 `wg`
-一律报 `Key is not the correct length or format`。字符数与字节数不是一回事，改成
+把 42 到 46 个字符全部放行，于是 31 字节和 33 字节的 key 都能通过，而真实的 `wg`
+都会报 `Key is not the correct length or format`。字符数与字节数不是一回事，改成
 解码后判长度才是这个字段真正的约束。（错误文案里写的"40~44 字符"与那条正则的下限
 42 也对不上，一并去掉。）
 

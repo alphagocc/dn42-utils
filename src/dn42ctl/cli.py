@@ -1225,7 +1225,7 @@ def cmd_serve(
             if result.rotated_token:
                 note.append("签发新 self token")
             if result.seeded_addresses:
-                note.append(f"从 config.toml 回填 {', '.join(result.seeded_addresses)}")
+                note.append(f"从 config.toml 写入 {', '.join(result.seeded_addresses)}")
             if note:
                 typer.echo(f"self node 自动注册: {result.node_id} ({'; '.join(note)})")
                 typer.echo(f"  node.toml -> {result.node_toml_path}")
@@ -1547,7 +1547,7 @@ def cmd_node_mesh_backfill(
     ctx: typer.Context,
     dry_run: bool = typer.Option(False, "--dry-run", help="只打印将建立的关联,不写库"),
 ) -> None:
-    """按 own_ipv6 == peer_ip 唯一匹配回填 ibgp_peers.remote_node_id。"""
+    """按 own_ipv6 == peer_ip 唯一匹配写入 ibgp_peers.remote_node_id。"""
     appctx: AppContext = ctx.obj
     from dn42ctl.services.node_address import backfill_remote_node_ids
 

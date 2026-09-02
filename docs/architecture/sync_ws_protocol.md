@@ -8,15 +8,7 @@
 - systemd unit / nginx 反代：`docs/architecture/deployment.md`
 - CLI 参数：`docs/commands/node.md`
 
-## 为什么改
-
-轮询模型有三个固有问题：
-
-- **配置同步最长延迟可达 10 分钟。** 管理员在 hub 上 `bgp peer add` 之后要等下一个 timer 周期。
-- **稳态下绝大多数请求是空转。** 配置没变时每次 pull 仍要跑一次 `build_desired_state`（含一次 `config_revisions` 写入）+ 一次全表扫描鉴权。
-- **中心无法主动下发。** rollback、token 轮换、节点禁用都只能等节点自己回来问。
-
-WebSocket 长连接将配置同步延迟降低至 1 秒以内，并消除了系统处于稳定状态时的无效轮询。
+WebSocket 长连接将配置同步延迟降低至 1 秒以内，消除了稳态下的无效轮询，并允许中心主动下发 rollback、token 轮换、节点禁用等变更。代价是每个节点需要维护一个常驻连接，hub 侧增加连接管理和心跳的复杂度。
 
 ## 传输通道划分
 
@@ -61,7 +53,7 @@ WS 握手请求携带 `Authorization: Bearer <node token>`，与 HTTP 路由完�
 
 两个实现上必须避开的问题：
 
-- **不要在 WS 路由上用 `Depends(_resolve_principal)`。** 它靠 duck-typing 能跑通（`HTTPBearer.__call__` 在此收到的是 `WebSocket` 类型），但失败时抛 `HTTPException`，Starlette 在 WebSocket 连接上渲染不出来。应当手工读 `websocket.headers.get("authorization")`。
+- **不要在 WS 路由上用 `Depends(_resolve_principal)`。** 它靠 duck-typing 能正常运行（`HTTPBearer.__call__` 在此收到的是 `WebSocket` 类型），但失败时抛 `HTTPException`，Starlette 在 WebSocket 连接上渲染不出来。应当手工读 `websocket.headers.get("authorization")`。
 - **先 `accept()` 再 `close()`。** 按 ASGI 规范，在 `accept()` 之前 `close()` 会让握手直接回 HTTP 403，客户端只能看到一个 `InvalidStatus`，无从得知失败原因。正确顺序是 `accept()` → 鉴权 → 失败时先发 `error` 帧、再 `close(code)`。握手前窗口要加硬超时（`4408`），防止未鉴权连接长期占用。
 
 **token 校验每连接只做一次。** `ManagedNodeStore.authenticate` 是对所有 enabled 节点线性扫描 + 逐行比对。握手时验一次，把结果 `Principal` 缓存到连接对象上，之后每一帧的鉴权纯粹读缓存，零 DB。
@@ -124,7 +116,7 @@ WS 握手请求携带 `Authorization: Bearer <node token>`，与 HTTP 路由完�
 ## 连接生命周期
 
 ```text
-DISCONNECTED ──(启动时先用本地 cache 跑一次 apply)──► HANDSHAKING ──► AUTHENTICATING
+DISCONNECTED ──(启动时先用本地 cache 执行一次 apply)──► HANDSHAKING ──► AUTHENTICATING
      ▲                                                                     │ 鉴权仅此一次 
      │                                                                     ▼
   BACKOFF ◄─── 传输错误 / close ─── STEADY ◄─ INITIAL_SYNC ◄─ HELLO (15s 超时)
@@ -136,7 +128,7 @@ DISCONNECTED ──(启动时先用本地 cache 跑一次 apply)──► HANDSH
 - **HANDSHAKING**：TCP / TLS / HTTP Upgrade。任何失败 → 正常退避。
 - **AUTHENTICATING**：hub `accept()` 后读 header，验一次 token，校验 path 中的 `node_id`。
 - **HELLO**：node 发 `hello{cached_revision}`，hub 回 `hello_ack`。15 秒不发 hello → close `4408`。
-- **INITIAL_SYNC**：`hello_ack.in_sync == false` 时 hub 立即推 `desired_push`；为 `true` 时不推。无论哪种情况，agent 都会用本地缓存跑一次 `apply()`（幂等）。
+- **INITIAL_SYNC**：`hello_ack.in_sync == false` 时 hub 立即推 `desired_push`；为 `true` 时不推。无论哪种情况，agent 都会用本地缓存执行一次 `apply()`（幂等）。
 - **STEADY**：三个并发任务：reader 分发入站消息、heartbeat 每 60s 发 `ping`、reconcile 每 900s 发 `desired_request{reason:"reconcile"}`。
 - **BACKOFF**：见下方退避策略。
 
@@ -262,7 +254,7 @@ hub 侧复用 uvicorn 的协议级 ping（每 20 秒一次），无需另起应�
 
 ### 阻塞调用
 
-现有 service 层全部是同步阻塞的（`build_desired_state`、`submit_proposal`、`submit_report`、`authenticate` 等），而 WS 端点必须是 `async def`。所有这些调用一律放到线程池执行：在事件循环里直接运行时，一次 sqlite 查询就会卡住整个 hub 的所有连接。
+现有 service 层全部是同步阻塞的（`build_desired_state`、`submit_proposal`、`submit_report`、`authenticate` 等），而 WS 端点必须是 `async def`。所有这些调用都放到线程池执行：在事件循环里直接运行时，一次 sqlite 查询就会卡住整个 hub 的所有连接。
 
 每个调用在 worker 线程里自开自关 sqlite 连接（沿用现有 `Database.open` / `close` 模式），不跨线程共享连接。
 
@@ -278,5 +270,5 @@ hub 侧复用 uvicorn 的协议级 ping（每 20 秒一次），无需另起应�
 
 ## 已知限制与后续工作
 
-- **单进程假设。** 连接注册表在进程内存里。当前 `dn42ctl serve` 是 `uvicorn.run(app_object)`，单进程单 worker，本来也用不了 `--workers`。即便多 worker，构造上也是对的（每个 worker 各跑一个 watcher、只推自己持有的连接），但未经测试，请勿依赖。
+- **单进程假设。** 连接注册表在进程内存里。当前 `dn42ctl serve` 是 `uvicorn.run(app_object)`，单进程单 worker，本来也用不了 `--workers`。即便多 worker，构造上也是对的（每个 worker 各运行一个 watcher、只推自己持有的连接），但未经测试，请勿依赖。
 - **spoke 侧常驻 root 进程。** 相比原先每 10 分钟约 1 秒的 oneshot，这是纵深防御的实质性降低。量化对比与缓解措施见 `docs/architecture/deployment.md`。

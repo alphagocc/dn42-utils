@@ -8,7 +8,7 @@
 
 中心不再随期望状态下发 `bird_conf_path`、`peers_dir`、`babel_conf_path`、`bird_extra_conf_path`、`networkd_dir`、`nm_dir` 六个写入位置。文件布局是每台机器自己的属性，中心不掌握它，也不应当有能力指定一个 root 常驻进程的写入目标。
 
-替代方案是读本机 `config.toml` 的 `[paths]` 段，与 CLI 的 `genconf` 同源；该文件缺失时落到 `src/dn42ctl/paths.py` 的内置默认值。详见 [`architecture/paths.md`](architecture/paths.md)。
+替代方案是读本机 `config.toml` 的 `[paths]` 段，与 CLI 的 `genconf` 同源；该文件缺失时使用 `src/dn42ctl/paths.py` 的内置默认值。详见 [`architecture/paths.md`](architecture/paths.md)。
 
 - 使用默认布局的部署**无需任何操作**：被删除的下发值与内置默认值逐字节相同。
 - 在中心侧改过 `services/desired_state.py` 的 `DEFAULT_PATHS` 的部署，升级前需要把相同的值写进各节点 `config.toml` 的 `[paths]`，否则文件会迁回默认位置。
@@ -27,7 +27,7 @@
 
 ### 节点侧轮询同步（`dn42ctl-node-once.timer`）
 
-每 10 分钟跑一次 `dn42ctl node once` 的 systemd timer 已删除，改为常驻 `dn42ctl node agent` + WebSocket 长连接（`dn42ctl-node-agent.service`）。
+每 10 分钟执行一次 `dn42ctl node once` 的 systemd timer 已删除，改为常驻 `dn42ctl node agent` + WebSocket 长连接（`dn42ctl-node-agent.service`）。
 
 - CLI 命令 `dn42ctl node once` / `pull` / `push` / `report` / `status` **保留**，用于人工排障。
 - 对应的 HTTP 路由也**保留**。

@@ -67,7 +67,7 @@ class TestPlanPropagationEndpoint:
         assert [(c.field, c.new) for c in changes] == [("endpoint", "new.example.com:51821")]
 
     def test_keeps_nonstandard_port(self) -> None:
-        """NAT 端口映射下端口与对端 listen_port 本就合法地不一致,绝不能顺手'修正'。"""
+        """NAT 端口映射下端口与对端 listen_port 本就合法地不一致,传播地址时必须保留原端口。"""
         changes, _ = plan_propagation(
             rows=[_row(endpoint="old.example.com:12345")],
             own_ipv6=None,

@@ -237,7 +237,7 @@ def backfill_remote_node_ids(*, db_path: Path, dry_run: bool = False) -> tuple[l
                 db.connection.commit()
             except sqlite3.Error as exc:
                 db.connection.rollback()
-                raise Dn42CtlError("回填 remote_node_id 失败") from exc
+                raise Dn42CtlError("写入 remote_node_id 失败") from exc
     finally:
         db.close()
     return linked, skipped

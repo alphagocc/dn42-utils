@@ -44,7 +44,7 @@ dn42ctl 默认写入系统目录，因此大部分命令需要 root（例如 `su
 
 ## 写入位置的解析
 
-文件布局是每台机器自己的属性。`dn42ctl node apply` 与 CLI 的 `genconf` 读取同一处，即本机 `config.toml` 的 `[paths]` 段，因此两条渲染出口不会分叉。该文件缺失或无法解析时（只跑过 `node init` 的纯 spoke）落到 `src/dn42ctl/paths.py` 的内置默认值。
+文件布局是每台机器自己的属性。`dn42ctl node apply` 与 CLI 的 `genconf` 读取同一处，即本机 `config.toml` 的 `[paths]` 段，因此两条渲染出口不会分叉。该文件缺失或无法解析时（只执行过 `node init` 的纯 spoke）落到 `src/dn42ctl/paths.py` 的内置默认值。
 
 `config.toml` 自身的位置由全局参数 `--config-path` 决定，默认 `/etc/dn42ctl/config.toml`，环境变量 `DN42CTL_CONFIG` 同样生效。常驻 agent 沿用同一参数。
 

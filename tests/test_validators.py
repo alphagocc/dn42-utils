@@ -86,7 +86,7 @@ class TestValidatePubkey:
         ],
     )
     def test_rejects_wrong_decoded_length(self, key: str, decoded_bytes: int) -> None:
-        """字符数落在 42~44 但解码后不是 32 字节 —— 真实的 wg 一律拒绝这些 key。"""
+        """字符数落在 42~44 但解码后不是 32 字节 —— 真实的 wg 都会拒绝这些 key。"""
         import base64
 
         assert len(base64.b64decode(key, validate=True)) == decoded_bytes

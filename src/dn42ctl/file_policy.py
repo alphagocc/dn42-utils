@@ -28,7 +28,7 @@ class FilePolicy:
 #: `.netdev` 含 WireGuard 私钥,可读范围止于属组。
 NETDEV = FilePolicy(0o640, "systemd-network")
 
-#: `.network` 只有链路本地地址,没有秘密;networkd 必须读得到。
+#: `.network` 只有链路本地地址,不含敏感信息;networkd 必须读得到。
 NETWORK = FilePolicy(0o644)
 
 #: bird 以 `-u bird -g bird` 降权运行,`birdc configure` 的重读发生在降权之后。

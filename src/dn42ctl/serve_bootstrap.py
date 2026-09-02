@@ -79,10 +79,9 @@ def run_self_registration(
 ) -> SelfRegistrationResult:
     """Idempotent self-registration sequence. Safe to call on every `serve` start.
 
-    传入 `app_config` 时，还会用本机 config.toml 的 `own_ipv6` / `router_id` 回填 self
-    节点的地址列——**仅当该列为 NULL**，永不覆盖。NULL 门控保证不会震荡：首次升级后
-    hub 采纳本机正在工作的配置，此后 DB 是权威（agent 按 DB 写 config.toml，而这里只
-    在 DB 为空时读 config.toml）。
+    传入 `app_config` 时，还会用本机 config.toml 的 `own_ipv6` / `router_id` 写入 self
+    节点的地址列（仅当该列为 NULL，永不覆盖）。首次升级后 hub 采纳本机正在工作的配置，
+    此后 DB 是权威（agent 按 DB 写 config.toml，而这里只在 DB 为空时读 config.toml）。
     """
     self_node_id, created = _read_or_create_self_node_id(self_node_id_path)
 

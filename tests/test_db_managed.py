@@ -205,7 +205,7 @@ class TestTokens:
 
 class TestMigrationV12:
     def test_keeps_only_the_most_recent_self(self, tmp_path: Path) -> None:
-        """1.2 -> 1.3 的中间态(v12 刚跑完、v13 的索引还没建)。
+        """1.2 -> 1.3 的中间态(v12 刚执行完、v13 的索引还没建)。
         库里可能已经有两行 is_self=1,迁移必须合并为一行且不删数据。
 
         按真实升级顺序构造:重复行先存在,v12 合并,v13 的唯一索引最后建。

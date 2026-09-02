@@ -19,7 +19,7 @@ FAKE_WG_PUBKEY = "dGVzdHB1YmxpY2tleWZvcnVuaXR0ZXN0cy0zMmJ5dGU="
 
 @pytest.fixture(autouse=True)
 def _no_real_reload(monkeypatch: pytest.MonkeyPatch) -> None:
-    """测试里绝不真的执行 networkctl / birdc。
+    """测试里不真的执行 networkctl / birdc。
 
     `node apply` 写盘后会按变更路径 reload，那在测试机上是真实的 subprocess 调用：
     慢，而且是对测试宿主机的副作用。这里把 `run_reloads` 的默认 runner 换成记录用的
