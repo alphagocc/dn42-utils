@@ -28,19 +28,19 @@ def admin_client(sample_config: AppConfig, db_path: Path) -> Iterator[TestClient
         yield TestClient(app)
 
 
+class TestEmptyPeerLists:
+    """Regression: the admin BGP, iBGP and WG list routes must be registered."""
+
+    @pytest.mark.parametrize(
+        "route", ["/api/admin/bgp/peers", "/api/admin/ibgp/peers", "/api/admin/wg/tunnels"], ids=["bgp", "ibgp", "wg"]
+    )
+    def test_list_empty(self, admin_client: TestClient, route: str) -> None:
+        resp = admin_client.get(route, headers=ADMIN_H)
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+
 class TestBgpPeerRoutes:
-    """Regression: GET /api/admin/bgp/peers must be registered and return 200."""
-
-    def test_list_empty(self, admin_client: TestClient) -> None:
-        resp = admin_client.get("/api/admin/bgp/peers", headers=ADMIN_H)
-        assert resp.status_code == 200
-        assert resp.json() == []
-
-    def test_list_with_live_false(self, admin_client: TestClient) -> None:
-        resp = admin_client.get("/api/admin/bgp/peers?live=false", headers=ADMIN_H)
-        assert resp.status_code == 200
-        assert resp.json() == []
-
     def test_list_requires_auth(self, admin_client: TestClient) -> None:
         resp = admin_client.get("/api/admin/bgp/peers")
         assert resp.status_code == 401
@@ -110,29 +110,6 @@ class TestBgpPeerRoutes:
         }
         resp = admin_client.post("/api/admin/bgp/peers", json=body, headers=ADMIN_H)
         assert resp.status_code == 422
-
-
-class TestIbgpPeerRoutes:
-    """Regression: GET /api/admin/ibgp/peers must be registered and return 200."""
-
-    def test_list_empty(self, admin_client: TestClient) -> None:
-        resp = admin_client.get("/api/admin/ibgp/peers", headers=ADMIN_H)
-        assert resp.status_code == 200
-        assert resp.json() == []
-
-    def test_list_with_live_false(self, admin_client: TestClient) -> None:
-        resp = admin_client.get("/api/admin/ibgp/peers?live=false", headers=ADMIN_H)
-        assert resp.status_code == 200
-        assert resp.json() == []
-
-
-class TestWgTunnelRoutes:
-    """Regression: GET /api/admin/wg/tunnels must be registered and return 200."""
-
-    def test_list_empty(self, admin_client: TestClient) -> None:
-        resp = admin_client.get("/api/admin/wg/tunnels", headers=ADMIN_H)
-        assert resp.status_code == 200
-        assert resp.json() == []
 
 
 class TestGenconfRoute:

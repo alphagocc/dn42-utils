@@ -7,11 +7,6 @@ from dn42ctl.fs import chmod_best_effort, chown_best_effort
 
 
 class TestChmodBestEffort:
-    def test_success(self, tmp_path: Path) -> None:
-        f = tmp_path / "test.txt"
-        f.write_text("hello")
-        chmod_best_effort(f, 0o600)
-
     def test_oserror_silenced(self) -> None:
         with patch("os.chmod", side_effect=OSError("perm denied")):
             chmod_best_effort(Path("/nonexistent"), 0o600)

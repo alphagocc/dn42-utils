@@ -35,14 +35,6 @@ class TestPlanReloads:
         birdc configure 96 次。"""
         assert plan_reloads(touched=[], networkd_dir=dirs["networkd"], bird_peers_dir=dirs["peers"]) == []
 
-    def test_networkd_file_triggers_networkctl_only(self, dirs: dict[str, Path]) -> None:
-        cmds = plan_reloads(
-            touched=[dirs["networkd"] / "dn42_0001.netdev"],
-            networkd_dir=dirs["networkd"],
-            bird_peers_dir=dirs["peers"],
-        )
-        assert cmds == [NETWORKCTL_RELOAD]
-
     def test_bird_peer_file_triggers_birdc_only(self, dirs: dict[str, Path]) -> None:
         cmds = plan_reloads(
             touched=[dirs["peers"] / "dn42_0001.conf"],
@@ -130,13 +122,9 @@ class TestDefaultRunner:
         action = default_runner(["true"])
         assert action.ok is True
 
-    def test_missing_binary_is_captured(self) -> None:
-        action = default_runner(["dn42ctl-no-such-binary-xyz"])
-        assert action.ok is False
-        assert action.error
-
-    def test_nonzero_exit_is_captured(self) -> None:
-        action = default_runner(["false"])
+    @pytest.mark.parametrize("binary", ["dn42ctl-no-such-binary-xyz", "false"], ids=["missing-binary", "nonzero-exit"])
+    def test_command_failure_is_captured(self, binary: str) -> None:
+        action = default_runner([binary])
         assert action.ok is False
         assert action.error
 

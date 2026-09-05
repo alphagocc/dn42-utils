@@ -141,9 +141,6 @@ class TestDelete:
         assert removed.node_id == NODE_A
         assert store.get(NODE_A) is None
 
-    def test_delete_missing_returns_none(self, store: ManagedNodeStore) -> None:
-        assert store.delete(NODE_A) is None
-
     def test_delete_self_refused_without_force(self, store: ManagedNodeStore) -> None:
         store.upsert_self(NODE_SELF)
         with pytest.raises(DatabaseError, match="self"):

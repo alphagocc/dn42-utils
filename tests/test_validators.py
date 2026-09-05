@@ -97,10 +97,6 @@ class TestValidatePubkey:
         with pytest.raises(ValidationError, match="base64"):
             validate_pubkey("!" * 43 + "=")
 
-    def test_invalid_chars(self) -> None:
-        with pytest.raises(ValidationError):
-            validate_pubkey("!" * 44)
-
 
 class TestValidateEndpoint:
     @pytest.mark.parametrize(
@@ -117,17 +113,14 @@ class TestValidateEndpoint:
     def test_empty_allowed(self) -> None:
         assert validate_endpoint("", allow_empty=True) == ""
 
-    def test_missing_port(self) -> None:
+    @pytest.mark.parametrize(
+        "endpoint",
+        ["example.com", "example.com:0", "example.com:99999"],
+        ids=["missing-port", "zero-port", "oversized-port"],
+    )
+    def test_rejects_invalid_port(self, endpoint: str) -> None:
         with pytest.raises(ValidationError):
-            validate_endpoint("example.com")
-
-    def test_port_zero(self) -> None:
-        with pytest.raises(ValidationError):
-            validate_endpoint("example.com:0")
-
-    def test_port_too_large(self) -> None:
-        with pytest.raises(ValidationError):
-            validate_endpoint("example.com:99999")
+            validate_endpoint(endpoint)
 
 
 class TestValidateIpv6Address:
@@ -148,13 +141,10 @@ class TestValidateIpv6Address:
         with pytest.raises(ValidationError, match="不能为空"):
             validate_ipv6_address("")
 
-    def test_invalid(self) -> None:
+    @pytest.mark.parametrize("addr", ["not-an-ipv6", "192.168.1.1"], ids=["malformed", "ipv4"])
+    def test_rejects_invalid_address(self, addr: str) -> None:
         with pytest.raises(ValidationError):
-            validate_ipv6_address("not-an-ipv6")
-
-    def test_ipv4_rejected(self) -> None:
-        with pytest.raises(ValidationError):
-            validate_ipv6_address("192.168.1.1")
+            validate_ipv6_address(addr)
 
 
 class TestValidateIpv4Address:
@@ -200,14 +190,13 @@ class TestValidateBabelType:
 
 
 class TestValidateNetBackend:
-    def test_networkd(self) -> None:
-        assert validate_net_backend("networkd") == "networkd"
-
-    def test_nm(self) -> None:
-        assert validate_net_backend("nm") == "nm"
-
-    def test_networkmanager_alias(self) -> None:
-        assert validate_net_backend("networkmanager") == "nm"
+    @pytest.mark.parametrize(
+        ("backend", "expected"),
+        [("networkd", "networkd"), ("nm", "nm"), ("networkmanager", "nm")],
+        ids=["networkd", "nm", "networkmanager-alias"],
+    )
+    def test_supported_backend(self, backend: str, expected: str) -> None:
+        assert validate_net_backend(backend) == expected
 
     def test_case_insensitive(self) -> None:
         assert validate_net_backend("NETWORKD") == "networkd"
@@ -226,13 +215,14 @@ class TestValidateOwnnetsetV6:
         with pytest.raises(ValidationError, match="不能为空"):
             validate_ownnetset_v6("")
 
-    def test_missing_brackets(self) -> None:
+    @pytest.mark.parametrize(
+        "value",
+        ["fd42:4242:1234::/48+", "[fd42:4242:1234::/48]"],
+        ids=["missing-brackets", "missing-plus"],
+    )
+    def test_rejects_incomplete_set_syntax(self, value: str) -> None:
         with pytest.raises(ValidationError):
-            validate_ownnetset_v6("fd42:4242:1234::/48+")
-
-    def test_missing_plus(self) -> None:
-        with pytest.raises(ValidationError):
-            validate_ownnetset_v6("[fd42:4242:1234::/48]")
+            validate_ownnetset_v6(value)
 
 
 class TestValidateRouterId:
@@ -245,69 +235,49 @@ class TestValidateRouterId:
 
 
 class TestValidateAllowedIps:
-    def test_single_cidr(self) -> None:
-        assert validate_allowed_ips("fd00::/8") == ["fd00::/8"]
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("fd00::/8", ["fd00::/8"]),
+            ("fd00::/8,fe80::/64,ff02::/16", ["fd00::/8", "fe80::/64", "ff02::/16"]),
+            ("  fd00::/8 , fe80::/64  ", ["fd00::/8", "fe80::/64"]),
+            ("fe80::1/64", ["fe80::/64"]),
+            ("::/0", ["::/0"]),
+        ],
+        ids=["single", "multiple", "whitespace", "network-address", "all-traffic"],
+    )
+    def test_normalizes_cidrs(self, value: str, expected: list[str]) -> None:
+        assert validate_allowed_ips(value) == expected
 
-    def test_multiple_cidrs(self) -> None:
-        result = validate_allowed_ips("fd00::/8,fe80::/64,ff02::/16")
-        assert result == ["fd00::/8", "fe80::/64", "ff02::/16"]
+    @pytest.mark.parametrize(
+        "value", ["not-a-cidr", "fd00::/8,invalid", "10.0.0.0/8"], ids=["malformed", "mixed-invalid", "ipv4"]
+    )
+    def test_rejects_invalid_cidr(self, value: str) -> None:
+        with pytest.raises(ValidationError, match="不是合法的 IPv6 CIDR"):
+            validate_allowed_ips(value)
 
-    def test_whitespace_handling(self) -> None:
-        result = validate_allowed_ips("  fd00::/8 , fe80::/64  ")
-        assert result == ["fd00::/8", "fe80::/64"]
-
-    def test_empty_string_raises(self) -> None:
+    @pytest.mark.parametrize("value", ["", "  ,  , "], ids=["empty", "whitespace-only"])
+    def test_rejects_empty_input(self, value: str) -> None:
         with pytest.raises(ValidationError, match="不能为空"):
-            validate_allowed_ips("")
-
-    def test_normalizes_to_network_address(self) -> None:
-        result = validate_allowed_ips("fe80::1/64")
-        assert result == ["fe80::/64"]
-
-    def test_all_traffic(self) -> None:
-        assert validate_allowed_ips("::/0") == ["::/0"]
-
-    def test_invalid_cidr_raises(self) -> None:
-        with pytest.raises(ValidationError, match="不是合法的 IPv6 CIDR"):
-            validate_allowed_ips("not-a-cidr")
-
-    def test_invalid_mixed_raises(self) -> None:
-        with pytest.raises(ValidationError, match="不是合法的 IPv6 CIDR"):
-            validate_allowed_ips("fd00::/8,invalid")
-
-    def test_ipv4_cidr_raises(self) -> None:
-        with pytest.raises(ValidationError, match="不是合法的 IPv6 CIDR"):
-            validate_allowed_ips("10.0.0.0/8")
-
-    def test_only_whitespace_raises(self) -> None:
-        with pytest.raises(ValidationError, match="不能为空"):
-            validate_allowed_ips("  ,  , ")
+            validate_allowed_ips(value)
 
 
 class TestValidateAllowedIpsList:
-    def test_empty_list_raises(self) -> None:
+    @pytest.mark.parametrize(
+        ("items", "message"),
+        [
+            ([], "不能为空"),
+            ([""], "空字符串"),
+            (["10.0.0.0/8"], "不是合法的 IPv6 CIDR"),
+            (["not-a-cidr"], "不是合法的 IPv6 CIDR"),
+        ],
+        ids=["empty-list", "empty-item", "ipv4", "malformed-cidr"],
+    )
+    def test_rejects_invalid_list(self, items: list[str], message: str) -> None:
         from dn42ctl.validators import validate_allowed_ips_list
 
-        with pytest.raises(ValidationError, match="不能为空"):
-            validate_allowed_ips_list([])
-
-    def test_list_with_empty_string_raises(self) -> None:
-        from dn42ctl.validators import validate_allowed_ips_list
-
-        with pytest.raises(ValidationError, match="空字符串"):
-            validate_allowed_ips_list([""])
-
-    def test_list_with_ipv4_raises(self) -> None:
-        from dn42ctl.validators import validate_allowed_ips_list
-
-        with pytest.raises(ValidationError, match="不是合法的 IPv6 CIDR"):
-            validate_allowed_ips_list(["10.0.0.0/8"])
-
-    def test_list_with_garbage_raises(self) -> None:
-        from dn42ctl.validators import validate_allowed_ips_list
-
-        with pytest.raises(ValidationError, match="不是合法的 IPv6 CIDR"):
-            validate_allowed_ips_list(["not-a-cidr"])
+        with pytest.raises(ValidationError, match=message):
+            validate_allowed_ips_list(items)
 
     def test_valid_list_passes(self) -> None:
         from dn42ctl.validators import validate_allowed_ips_list

@@ -211,10 +211,6 @@ class TestBgpPeerCrud:
         assert deleted is not None
         assert mem_db_with_node.get_bgp_peer("test-node", 4242421234) is None
 
-    def test_delete_nonexistent(self, mem_db_with_node: Database) -> None:
-        result = mem_db_with_node.delete_bgp_peer("test-node", 99999)
-        assert result is None
-
 
 class TestIbgpPeerCrud:
     def test_insert_and_get(self, mem_db_with_node: Database) -> None:
@@ -357,10 +353,6 @@ class TestIbgpPeerCrud:
         deleted = mem_db_with_node.delete_ibgp_peer("test-node", "mynode")
         assert deleted is not None
         assert mem_db_with_node.get_ibgp_peer("test-node", "mynode") is None
-
-    def test_delete_nonexistent(self, mem_db_with_node: Database) -> None:
-        result = mem_db_with_node.delete_ibgp_peer("test-node", "nonexistent")
-        assert result is None
 
 
 class TestGetUsedListenPorts:

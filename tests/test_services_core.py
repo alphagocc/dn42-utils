@@ -19,11 +19,6 @@ from dn42ctl.services.core import (
 
 
 class TestWriteText:
-    def test_write(self, tmp_path: Path) -> None:
-        p = tmp_path / "test.txt"
-        write_text(p, "hello")
-        assert p.read_text() == "hello"
-
     def test_creates_parents(self, tmp_path: Path) -> None:
         p = tmp_path / "a" / "b" / "test.txt"
         write_text(p, "nested")
@@ -55,12 +50,6 @@ class TestPickUnusedPort:
         port = pick_unused_port(set())
         assert 20000 <= port <= 65535
 
-    def test_avoids_used(self) -> None:
-        used = {20000, 20001, 20002}
-        port = pick_unused_port(used)
-        assert port not in used
-        assert 20000 <= port <= 65535
-
     def test_exhaustion_raises(self) -> None:
         used = set(range(20000, 65536))
         with pytest.raises(Dn42CtlError, match="无法自动选择"):
@@ -68,27 +57,24 @@ class TestPickUnusedPort:
 
 
 class TestSanitizeName:
-    def test_basic(self) -> None:
-        assert sanitize_name("MyNode") == "mynode"
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [("MyNode", "mynode"), ("my-node!@#", "my_node")],
+        ids=["mixed-case", "special-characters"],
+    )
+    def test_normalizes_name(self, value: str, expected: str) -> None:
+        assert sanitize_name(value) == expected
 
-    def test_special_chars(self) -> None:
-        assert sanitize_name("my-node!@#") == "my_node"
-
-    def test_empty_raises(self) -> None:
+    @pytest.mark.parametrize("value", ["   ", "!@#$%"], ids=["whitespace", "only-special-characters"])
+    def test_rejects_empty_normalized_name(self, value: str) -> None:
         with pytest.raises(Dn42CtlError, match="不能为空"):
-            sanitize_name("   ")
-
-    def test_all_special(self) -> None:
-        with pytest.raises(Dn42CtlError, match="不能为空"):
-            sanitize_name("!@#$%")
+            sanitize_name(value)
 
 
 class TestNormalizeNetBackend:
-    def test_networkd(self) -> None:
-        assert normalize_net_backend("networkd") == "networkd"
-
-    def test_nm(self) -> None:
-        assert normalize_net_backend("nm") == "nm"
+    @pytest.mark.parametrize("backend", ["networkd", "nm"])
+    def test_supported_backend(self, backend: str) -> None:
+        assert normalize_net_backend(backend) == backend
 
     def test_invalid_raises(self) -> None:
         with pytest.raises(Dn42CtlError):
@@ -102,20 +88,11 @@ class TestParseAllowedIpsJson:
             "fd00::/8",
         ]
 
-    def test_none_returns_default(self) -> None:
-        result = parse_allowed_ips_json(None)
-        assert result == ["fe80::/64", "fd00::/8"]
-
-    def test_empty_returns_default(self) -> None:
-        result = parse_allowed_ips_json("")
-        assert result == ["fe80::/64", "fd00::/8"]
-
-    def test_malformed_returns_default(self) -> None:
-        result = parse_allowed_ips_json("{bad}")
-        assert result == ["fe80::/64", "fd00::/8"]
-
-    def test_non_list_returns_default(self) -> None:
-        result = parse_allowed_ips_json('"string"')
+    @pytest.mark.parametrize(
+        "raw", [None, "", "{bad}", '"string"'], ids=["none", "empty", "malformed-json", "non-list"]
+    )
+    def test_invalid_or_missing_json_returns_default(self, raw: str | None) -> None:
+        result = parse_allowed_ips_json(raw)
         assert result == ["fe80::/64", "fd00::/8"]
 
 

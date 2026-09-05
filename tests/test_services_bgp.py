@@ -18,7 +18,7 @@ def _mock_wg(mock_wg_keypair):
 
 class TestCreateBgpPeer:
     @pytest.mark.usefixtures("_mock_wg")
-    def test_create(self, sample_config, db_path: Path) -> None:
+    def test_create_returns_peer_and_writes_files(self, sample_config, db_path: Path) -> None:
         result = create_bgp_peer(
             config=sample_config,
             db_path=db_path,
@@ -32,6 +32,8 @@ class TestCreateBgpPeer:
         assert result.listen_port == 21234
         assert result.wg_public_key
         assert len(result.generated_files) >= 2
+        for f in result.generated_files:
+            assert f.exists(), f"Expected file to exist: {f}"
 
     @pytest.mark.usefixtures("_mock_wg")
     def test_explicit_listen_port(self, sample_config, db_path: Path) -> None:
@@ -68,20 +70,6 @@ class TestCreateBgpPeer:
                 peer_lla=VALID_PEER_LLA,
                 net_backend="networkd",
             )
-
-    @pytest.mark.usefixtures("_mock_wg")
-    def test_files_written(self, sample_config, db_path: Path) -> None:
-        result = create_bgp_peer(
-            config=sample_config,
-            db_path=db_path,
-            peer_asn=4242421234,
-            peer_public_key=VALID_PUBKEY,
-            endpoint=VALID_ENDPOINT,
-            peer_lla=VALID_PEER_LLA,
-            net_backend="networkd",
-        )
-        for f in result.generated_files:
-            assert f.exists(), f"Expected file to exist: {f}"
 
 
 class TestModifyBgpPeer:

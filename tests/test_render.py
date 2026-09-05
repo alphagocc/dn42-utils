@@ -55,19 +55,17 @@ class TestRenderBabelConf:
         assert "rxcost 256" in result
         assert "type wired" in result
 
-    def test_empty_interfaces(self) -> None:
+    def test_empty_interfaces_preserve_babel_and_dummy_protocols(self) -> None:
         result = render_babel_conf(interfaces=[])
         assert "protocol babel" in result
         assert "rxcost" not in result
-
-    def test_contains_direct_protocol(self) -> None:
-        result = render_babel_conf(interfaces=[])
         assert "protocol direct" in result
         assert 'interface "dn42-dummy"' in result
 
 
 class TestRenderBirdMainConf:
-    def test_basic(self) -> None:
+    def test_settings_and_extra_conf_include_order(self) -> None:
+        """extra.conf 位于末尾,才能引用前面的 define 与 BGP template。"""
         result = render_bird_main_conf(
             own_asn=4242421234,
             router_id="172.23.0.1",
@@ -87,20 +85,6 @@ class TestRenderBirdMainConf:
         assert "/etc/bird/peers/*" in result
         assert "/etc/bird/roa_dn42_v6.conf" in result
         assert 'include "/etc/bird/extra.conf";' in result
-
-    def test_extra_conf_include_comes_last(self) -> None:
-        """extra.conf 位于末尾,才能引用前面的 define 与 BGP template。"""
-        result = render_bird_main_conf(
-            own_asn=4242421234,
-            router_id="172.23.0.1",
-            own_ipv6="fd42:4242:1234::1",
-            ownnet_v6="fd42:4242:1234::/48",
-            ownnetset_v6="[fd42:4242:1234::/48+]",
-            bird_babel_conf_path=Path("/etc/bird/babel.conf"),
-            bird_peers_dir=Path("/etc/bird/peers"),
-            bird_roa_v6_conf_path=Path("/etc/bird/roa_dn42_v6.conf"),
-            bird_extra_conf_path=Path("/etc/bird/extra.conf"),
-        )
         assert result.index("/etc/bird/extra.conf") > result.index("template bgp dnpeers")
         assert result.index("/etc/bird/extra.conf") > result.index("/etc/bird/peers/*")
 

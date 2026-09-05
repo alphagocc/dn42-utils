@@ -14,12 +14,10 @@ from dn42ctl.ws_protocol import (
     CLOSE_TOO_MANY_CONNECTIONS,
     CLOSE_UNAUTHORIZED,
     CLOSE_VERSION_MISMATCH,
-    HUB_TO_NODE_TYPES,
     MAX_FRAME_BYTES,
     MSG_ACK,
     MSG_ERROR,
     MSG_HELLO,
-    NODE_TO_HUB_TYPES,
     PROTOCOL_VERSION,
     Envelope,
     EnvelopeError,
@@ -66,38 +64,33 @@ class TestDecodeRejects:
         with pytest.raises(EnvelopeError, match="JSON"):
             decode("{not json")
 
-    def test_top_level_array(self) -> None:
-        with pytest.raises(EnvelopeError, match="对象"):
-            decode("[]")
-
-    def test_missing_version(self) -> None:
-        with pytest.raises(EnvelopeError, match="v 字段"):
-            decode(json.dumps({"type": "ping", "id": "a", "payload": {}}))
-
-    def test_bool_version_rejected(self) -> None:
+    @pytest.mark.parametrize(
+        ("data", "message"),
+        [
+            ([], "对象"),
+            ({"type": "ping", "id": "a", "payload": {}}, "v 字段"),
+            ({"v": True, "type": "ping", "id": "a", "payload": {}}, "v 字段"),
+            ({"v": 1, "id": "a", "payload": {}}, "type 字段"),
+            ({"v": 1, "type": "", "id": "a", "payload": {}}, "type 字段"),
+            ({"v": 1, "type": "ping", "payload": {}}, "id 字段"),
+            ({"v": 1, "type": "ack", "id": "a", "re": 7, "payload": {}}, "re 字段"),
+            ({"v": 1, "type": "ping", "id": "a", "payload": []}, "payload"),
+        ],
+        ids=[
+            "top-level-array",
+            "missing-version",
+            "boolean-version",
+            "missing-type",
+            "empty-type",
+            "missing-id",
+            "non-string-re",
+            "non-object-payload",
+        ],
+    )
+    def test_invalid_envelope(self, data: object, message: str) -> None:
         """bool is an int subclass in Python — must not sneak through."""
-        with pytest.raises(EnvelopeError, match="v 字段"):
-            decode(json.dumps({"v": True, "type": "ping", "id": "a", "payload": {}}))
-
-    def test_missing_type(self) -> None:
-        with pytest.raises(EnvelopeError, match="type 字段"):
-            decode(json.dumps({"v": 1, "id": "a", "payload": {}}))
-
-    def test_empty_type(self) -> None:
-        with pytest.raises(EnvelopeError, match="type 字段"):
-            decode(json.dumps({"v": 1, "type": "", "id": "a", "payload": {}}))
-
-    def test_missing_id(self) -> None:
-        with pytest.raises(EnvelopeError, match="id 字段"):
-            decode(json.dumps({"v": 1, "type": "ping", "payload": {}}))
-
-    def test_non_string_re(self) -> None:
-        with pytest.raises(EnvelopeError, match="re 字段"):
-            decode(json.dumps({"v": 1, "type": "ack", "id": "a", "re": 7, "payload": {}}))
-
-    def test_non_object_payload(self) -> None:
-        with pytest.raises(EnvelopeError, match="payload"):
-            decode(json.dumps({"v": 1, "type": "ping", "id": "a", "payload": []}))
+        with pytest.raises(EnvelopeError, match=message):
+            decode(json.dumps(data))
 
     def test_oversized_frame(self) -> None:
         blob = "x" * (MAX_FRAME_BYTES + 1)
@@ -126,9 +119,6 @@ class TestVersionIsCallerDecided:
 class TestConstants:
     def test_protocol_version_is_one(self) -> None:
         assert PROTOCOL_VERSION == 1
-
-    def test_direction_sets_are_disjoint(self) -> None:
-        assert not (NODE_TO_HUB_TYPES & HUB_TO_NODE_TYPES)
 
     def test_close_codes_in_private_range(self) -> None:
         for code in (

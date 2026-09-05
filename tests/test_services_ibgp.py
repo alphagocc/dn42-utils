@@ -19,7 +19,7 @@ def _mock_wg(mock_wg_keypair):
 
 class TestCreateIbgpPeer:
     @pytest.mark.usefixtures("_mock_wg")
-    def test_create_with_wg(self, sample_config, db_path: Path) -> None:
+    def test_create_with_wg_returns_peer_and_writes_files(self, sample_config, db_path: Path) -> None:
         result = create_ibgp_peer(
             config=sample_config,
             db_path=db_path,
@@ -38,6 +38,8 @@ class TestCreateIbgpPeer:
 
         babel_files = [f for f in result.generated_files if "babel" in str(f)]
         assert len(babel_files) == 1
+        for f in result.generated_files:
+            assert f.exists(), f"Expected file to exist: {f}"
 
     @pytest.mark.usefixtures("_mock_wg")
     def test_create_no_wg(self, sample_config, db_path: Path) -> None:
@@ -83,22 +85,6 @@ class TestCreateIbgpPeer:
                 name="mynode",
                 peer_ip=VALID_PEER_IP,
             )
-
-    @pytest.mark.usefixtures("_mock_wg")
-    def test_files_written(self, sample_config, db_path: Path) -> None:
-        result = create_ibgp_peer(
-            config=sample_config,
-            db_path=db_path,
-            name="mynode",
-            peer_ip=VALID_PEER_IP,
-            peer_public_key=VALID_PUBKEY,
-            endpoint=VALID_ENDPOINT,
-            peer_lla=VALID_PEER_LLA,
-            net_backend="networkd",
-            babel_rxcost=120,
-        )
-        for f in result.generated_files:
-            assert f.exists(), f"Expected file to exist: {f}"
 
 
 class TestModifyIbgpPeer:

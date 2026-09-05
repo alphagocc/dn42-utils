@@ -10,9 +10,10 @@ from dn42ctl.config import AppConfig, ConfigError, load_config, save_config
 
 
 class TestSaveAndLoadRoundtrip:
-    def test_roundtrip(self, tmp_path: Path, sample_config: AppConfig) -> None:
-        cfg_path = tmp_path / "config.toml"
+    def test_roundtrip_creates_parent_dirs(self, tmp_path: Path, sample_config: AppConfig) -> None:
+        cfg_path = tmp_path / "sub" / "dir" / "config.toml"
         save_config(cfg_path, sample_config)
+        assert cfg_path.exists()
         loaded = load_config(cfg_path)
         assert loaded.node_id == sample_config.node_id
         assert loaded.own_asn == sample_config.own_asn
@@ -25,11 +26,6 @@ class TestSaveAndLoadRoundtrip:
         assert loaded.bird_extra_conf_path == sample_config.bird_extra_conf_path
         assert loaded.networkd_dir == sample_config.networkd_dir
         assert loaded.dummy_backend == sample_config.dummy_backend
-
-    def test_creates_parent_dirs(self, tmp_path: Path, sample_config: AppConfig) -> None:
-        cfg_path = tmp_path / "sub" / "dir" / "config.toml"
-        save_config(cfg_path, sample_config)
-        assert cfg_path.exists()
 
 
 class TestLoadConfig:

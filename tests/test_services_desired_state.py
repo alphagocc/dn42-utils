@@ -80,7 +80,7 @@ class TestBuildDesiredState:
         # config.toml、内置默认值三级解析,见 services/node_apply._resolve_paths。
         assert "paths" not in ds.to_dict()
 
-    def test_with_peers(self, db_path: Path) -> None:
+    def test_peer_fields_and_json_serialization(self, db_path: Path) -> None:
         _seed_node_with_peers(db_path)
         ds = build_desired_state(db_path=db_path, node_id=NODE_A)
         assert len(ds.bgp_peers) == 1
@@ -91,13 +91,10 @@ class TestBuildDesiredState:
         assert ds.ibgp_peers[0]["name"] == "alpha"
         assert ds.ibgp_peers[0]["babel_rxcost"] == 96
         assert ds.ibgp_peers[0]["has_wg"] is True
-
-    def test_revision_deterministic(self, db_path: Path) -> None:
-        _seed_node_with_peers(db_path)
-        ds1 = build_desired_state(db_path=db_path, node_id=NODE_A)
-        ds2 = build_desired_state(db_path=db_path, node_id=NODE_A)
-        # Hash suffix is content-based so it must match even when generated_at differs.
-        assert ds1.revision.split("-")[-1] == ds2.revision.split("-")[-1]
+        payload = json.dumps(ds.to_dict())
+        parsed = json.loads(payload)
+        assert parsed["node_id"] == NODE_A
+        assert parsed["bgp_peers"][0]["ifname"] == "dn42_1234"
 
     def test_isolation_between_nodes(self, db_path: Path) -> None:
         _seed_node_with_peers(db_path, NODE_A)
@@ -108,15 +105,6 @@ class TestBuildDesiredState:
         ds_b = build_desired_state(db_path=db_path, node_id=NODE_B)
         assert len(ds_a.bgp_peers) == 1
         assert ds_b.bgp_peers == []
-
-    def test_to_dict_serializable(self, db_path: Path) -> None:
-        _seed_node_with_peers(db_path)
-        ds = build_desired_state(db_path=db_path, node_id=NODE_A)
-        # Must round-trip through JSON.
-        payload = json.dumps(ds.to_dict())
-        parsed = json.loads(payload)
-        assert parsed["node_id"] == NODE_A
-        assert parsed["bgp_peers"][0]["ifname"] == "dn42_1234"
 
 
 def _revision_count(db_path: Path, node_id: str = NODE_A) -> int:
@@ -133,19 +121,14 @@ class TestRevisionChurn:
     the rollback history within hours.
     """
 
-    def test_unchanged_content_records_once(self, db_path: Path) -> None:
-        _seed_node_with_peers(db_path)
-        for _ in range(5):
-            build_desired_state(db_path=db_path, node_id=NODE_A)
-        assert _revision_count(db_path) == 1
-
-    def test_unchanged_content_returns_stable_revision(self, db_path: Path) -> None:
+    def test_unchanged_content_reuses_the_recorded_revision(self, db_path: Path) -> None:
         _seed_node_with_peers(db_path)
         first = build_desired_state(db_path=db_path, node_id=NODE_A)
-        second = build_desired_state(db_path=db_path, node_id=NODE_A)
-        # Not just the digest half — the whole string, including generated_at.
-        assert first.revision == second.revision
-        assert first.generated_at == second.generated_at
+        for _ in range(4):
+            current = build_desired_state(db_path=db_path, node_id=NODE_A)
+            assert current.revision == first.revision
+            assert current.generated_at == first.generated_at
+        assert _revision_count(db_path) == 1
 
     def test_changed_content_records_again(self, db_path: Path) -> None:
         _seed_node_with_peers(db_path)
@@ -181,17 +164,15 @@ class TestDigestOfRevision:
 
 
 class TestComputeDesiredFingerprint:
-    def test_stable_across_calls(self, db_path: Path) -> None:
-        _seed_node_with_peers(db_path)
-        a = compute_desired_fingerprint(db_path=db_path, node_id=NODE_A)
-        b = compute_desired_fingerprint(db_path=db_path, node_id=NODE_A)
-        assert a.content_hash == b.content_hash
-
-    def test_writes_nothing(self, db_path: Path) -> None:
+    def test_repeated_unpinned_fingerprint_does_not_record_revisions(self, db_path: Path) -> None:
         """This runs on every watcher tick per connected node — it must not write."""
         _seed_node_with_peers(db_path)
-        for _ in range(5):
-            compute_desired_fingerprint(db_path=db_path, node_id=NODE_A)
+        first = compute_desired_fingerprint(db_path=db_path, node_id=NODE_A)
+        assert first.pinned_revision is None
+        for _ in range(4):
+            current = compute_desired_fingerprint(db_path=db_path, node_id=NODE_A)
+            assert current.content_hash == first.content_hash
+            assert current.pinned_revision is None
         assert _revision_count(db_path) == 0
 
     def test_changes_with_content(self, db_path: Path) -> None:
@@ -231,10 +212,6 @@ class TestComputeDesiredFingerprint:
         # Live content lost a peer, but the fingerprint must still reflect the pin.
         assert fp.content_hash == digest_of_revision(pinned.revision)
 
-    def test_unpinned_reports_none(self, db_path: Path) -> None:
-        _seed_node_with_peers(db_path)
-        assert compute_desired_fingerprint(db_path=db_path, node_id=NODE_A).pinned_revision is None
-
     def test_isolation_between_nodes(self, db_path: Path) -> None:
         _seed_node_with_peers(db_path, NODE_A)
         db = Database.open(db_path)
@@ -246,11 +223,6 @@ class TestComputeDesiredFingerprint:
 
 
 class TestComputeContentDigest:
-    def test_ignores_generated_at(self) -> None:
-        """Two builds of identical content must agree regardless of when they ran."""
-        args = {"node_id": NODE_A, "bgp_peers": [], "ibgp_peers": []}
-        assert compute_content_digest(**args) == compute_content_digest(**args)
-
     def test_key_order_insensitive(self) -> None:
         a = compute_content_digest(node_id=NODE_A, bgp_peers=[{"x": 1, "y": 2}], ibgp_peers=[])
         b = compute_content_digest(node_id=NODE_A, bgp_peers=[{"y": 2, "x": 1}], ibgp_peers=[])

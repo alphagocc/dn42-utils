@@ -42,23 +42,19 @@ class TestRunCmdBestEffort:
             assert result.ok is False
             assert result.error == "timeout"
 
-    def test_file_not_found(self) -> None:
-        with patch(
-            "subprocess.check_output",
-            side_effect=FileNotFoundError("not found"),
-        ):
+    @pytest.mark.parametrize(
+        ("error", "message"),
+        [
+            (FileNotFoundError("not found"), "not found"),
+            (subprocess.CalledProcessError(1, "cmd", output="err"), "exit=1"),
+        ],
+        ids=["missing-binary", "nonzero-exit"],
+    )
+    def test_command_errors(self, error: Exception, message: str) -> None:
+        with patch("subprocess.check_output", side_effect=error):
             result = _run_cmd_best_effort(["cmd"])
             assert result.ok is False
-            assert "not found" in (result.error or "")
-
-    def test_called_process_error(self) -> None:
-        with patch(
-            "subprocess.check_output",
-            side_effect=subprocess.CalledProcessError(1, "cmd", output="err"),
-        ):
-            result = _run_cmd_best_effort(["cmd"])
-            assert result.ok is False
-            assert "exit=1" in (result.error or "")
+            assert message in (result.error or "")
 
 
 class TestShowBgpPeers:

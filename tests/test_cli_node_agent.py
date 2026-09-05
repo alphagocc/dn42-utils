@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
-import dn42ctl.cli as cli_mod
 from dn42ctl.cli import app
 from dn42ctl.node_config import AgentOptions, NodeConfig, save_node_config
 from dn42ctl.services.core import Dn42CtlError
@@ -101,29 +99,30 @@ class TestRunAgentWiring:
 
 
 class TestExitCodes:
-    def test_keyboard_interrupt_exits_0(
-        self, runner: CliRunner, base_args: list[str], node_toml: Path, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize(
+        ("error", "exit_code", "message"),
+        [(KeyboardInterrupt(), 0, "已停止"), (Dn42CtlError("写文件失败"), 1, "写文件失败")],
+        ids=["keyboard-interrupt", "runtime-error"],
+    )
+    def test_agent_exit_status_and_message(
+        self,
+        runner: CliRunner,
+        base_args: list[str],
+        node_toml: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        error: BaseException,
+        exit_code: int,
+        message: str,
     ) -> None:
         """`systemctl stop` is a clean stop, not a failure."""
 
         async def fake_run_agent(**_kwargs):
-            raise KeyboardInterrupt
+            raise error
 
         monkeypatch.setattr("dn42ctl.node_ws_agent.run_agent", fake_run_agent)
         result = _invoke(runner, base_args, node_toml)
-        assert result.exit_code == 0
-        assert "已停止" in result.output
-
-    def test_runtime_error_exits_1(
-        self, runner: CliRunner, base_args: list[str], node_toml: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        async def fake_run_agent(**_kwargs):
-            raise Dn42CtlError("写文件失败")
-
-        monkeypatch.setattr("dn42ctl.node_ws_agent.run_agent", fake_run_agent)
-        result = _invoke(runner, base_args, node_toml)
-        assert result.exit_code == 1
-        assert "写文件失败" in result.output
+        assert result.exit_code == exit_code
+        assert message in result.output
 
     def test_config_error_during_reconnect_exits_2(
         self, runner: CliRunner, base_args: list[str], node_toml: Path, monkeypatch: pytest.MonkeyPatch
@@ -140,18 +139,9 @@ class TestExitCodes:
 
 
 class TestHelp:
-    def test_agent_is_registered(self, runner: CliRunner) -> None:
+    def test_agent_and_manual_sync_commands_are_listed(self, runner: CliRunner) -> None:
+        """One-shot commands stay for manual troubleshooting."""
         result = runner.invoke(app, ["node", "--help"])
         assert result.exit_code == 0
         assert "agent" in result.output
-
-    def test_once_is_still_available(self, runner: CliRunner) -> None:
-        """One-shot commands stay for manual troubleshooting."""
-        result = runner.invoke(app, ["node", "--help"])
         assert "once" in result.output
-
-
-def test_asyncio_and_cli_module_are_importable() -> None:
-    """Guard the deferred imports inside the command body."""
-    assert asyncio is not None
-    assert hasattr(cli_mod, "cmd_node_agent")

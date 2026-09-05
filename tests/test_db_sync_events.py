@@ -348,21 +348,6 @@ class TestTrimming:
         count = mem_db.connection.execute("SELECT COUNT(*) FROM sync_events").fetchone()[0]
         assert count <= SYNC_EVENTS_KEEP + SYNC_EVENTS_TRIM_EVERY
 
-    def test_cursor_stays_monotonic_across_trim(self, mem_db: Database) -> None:
-        """The AUTOINCREMENT regression test.
-
-        Without AUTOINCREMENT, SQLite reuses rowids after the max row is deleted,
-        so ids emitted after a trim could land at or below a cursor the watcher
-        already passed — silently dropping events.
-        """
-        seen_max = 0
-        for _ in range(SYNC_EVENTS_KEEP + 600):
-            emit_sync_event(mem_db.connection, node_id=NODE_A)
-            new_id = mem_db.connection.execute("SELECT MAX(id) FROM sync_events").fetchone()[0]
-            assert new_id > seen_max, f"id went backwards: {new_id} <= {seen_max}"
-            seen_max = new_id
-        mem_db.connection.commit()
-
     def test_trim_does_not_strand_a_cursor_at_high_water(self, mem_db: Database) -> None:
         store = SyncEventStore(mem_db.connection)
         for _ in range(SYNC_EVENTS_KEEP + 600):

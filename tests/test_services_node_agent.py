@@ -42,17 +42,17 @@ def mock_server():
 
 
 class TestPull:
-    def test_pull_writes_cache(self, tmp_path: Path, mock_server) -> None:
+    def test_pull_persists_revision_and_payload(self, tmp_path: Path, mock_server) -> None:
         cfg = _node_cfg(tmp_path)
-        mock_server.get(f"/api/v1/nodes/{NODE_ID}/desired").mock(
-            return_value=httpx.Response(200, json=_desired_payload())
-        )
+        payload = _desired_payload()
+        mock_server.get(f"/api/v1/nodes/{NODE_ID}/desired").mock(return_value=httpx.Response(200, json=payload))
         result = pull(node_config=cfg)
         assert result.revision.endswith("-abcd1234")
         cached = read_cache(node_config=cfg)
         assert cached is not None
         assert cached.revision == result.revision
         assert cached.payload["node_id"] == NODE_ID
+        assert json.loads(json.dumps(cached.payload)) == payload
 
     def test_pull_replaces_old_cache(self, tmp_path: Path, mock_server) -> None:
         cfg = _node_cfg(tmp_path)
@@ -79,13 +79,3 @@ class TestPull:
     def test_read_cache_missing(self, tmp_path: Path) -> None:
         cfg = _node_cfg(tmp_path)
         assert read_cache(node_config=cfg) is None
-
-    def test_cache_format(self, tmp_path: Path, mock_server) -> None:
-        cfg = _node_cfg(tmp_path)
-        payload = _desired_payload()
-        mock_server.get(f"/api/v1/nodes/{NODE_ID}/desired").mock(return_value=httpx.Response(200, json=payload))
-        pull(node_config=cfg)
-        cached = read_cache(node_config=cfg)
-        assert cached is not None
-        # Round-trip through json must equal original.
-        assert json.loads(json.dumps(cached.payload)) == payload
