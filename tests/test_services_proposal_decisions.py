@@ -149,28 +149,98 @@ class TestAcceptFailureKeepsPending:
         assert any(x.id == p2.id for x in p2_after)
 
 
-class TestAcceptDelete:
-    def test_deletes(self, sample_config: AppConfig, db_path: Path) -> None:
+class TestPeerProposalLifecycle:
+    @pytest.mark.parametrize("kind", ["bgp", "ibgp"])
+    def test_modify_and_delete_target_the_proposing_node(
+        self, sample_config: AppConfig, db_path: Path, kind: str
+    ) -> None:
         _register(db_path)
+        payload = _bgp_add_payload() if kind == "bgp" else _ibgp_add_payload()
+        if kind == "ibgp":
+            payload["peer"].update(
+                {
+                    "has_wg": True,
+                    "peer_public_key": VALID_PUBKEY,
+                    "endpoint": VALID_ENDPOINT,
+                    "peer_lla": VALID_PEER_LLA,
+                }
+            )
         add = submit_proposal(
             db_path=db_path,
             node_id=NODE_A,
             source="push",
             kind="peer_add",
-            payload=_bgp_add_payload(),
+            payload=payload,
         )
         accept_proposal(config=sample_config, db_path=db_path, proposal_id=add.id)
+        payload["peer"].update({"endpoint": "new.example:51900", "peer_lla": "fe80::99", "listen_port": 31003})
+        if kind == "ibgp":
+            payload["peer"].update({"peer_ip": "2001:db8:2::99", "babel_rxcost": 256, "babel_type": "wired"})
+        modify = submit_proposal(db_path=db_path, node_id=NODE_A, source="push", kind="peer_modify", payload=payload)
+        accepted = accept_proposal(config=sample_config, db_path=db_path, proposal_id=modify.id)
+        assert accepted.status == "accepted"
+        db = Database.open(db_path)
+        try:
+            if kind == "bgp":
+                peer = db.get_bgp_peer(NODE_A, 4242421234)
+                assert db.get_bgp_peer(sample_config.node_id, 4242421234) is None
+            else:
+                peer = db.get_ibgp_peer(NODE_A, "alpha")
+                assert db.get_ibgp_peer(sample_config.node_id, "alpha") is None
+                assert peer is not None
+                assert peer["peer_ip"] == "2001:db8:2::99"
+                assert peer["babel_rxcost"] == 256
+                assert peer["babel_type"] == "wired"
+            assert peer is not None
+            assert peer["endpoint"] == "new.example:51900"
+            assert peer["peer_lla"] == "fe80::99"
+            assert peer["listen_port"] == 31003
+        finally:
+            db.close()
         delete = submit_proposal(
             db_path=db_path,
             node_id=NODE_A,
             source="push",
             kind="peer_delete",
-            payload={"peer_kind": "bgp", "key": {"peer_asn": 4242421234}},
+            payload={"peer_kind": kind, "key": {"peer_asn": 4242421234} if kind == "bgp" else {"name": "alpha"}},
         )
         accept_proposal(config=sample_config, db_path=db_path, proposal_id=delete.id)
         db = Database.open(db_path)
         try:
-            assert db.get_bgp_peer(NODE_A, 4242421234) is None
+            assert db.list_bgp_peers(NODE_A) == []
+            assert db.list_ibgp_peers(NODE_A) == []
+        finally:
+            db.close()
+        assert list(Path(sample_config.networkd_dir).iterdir()) == []
+        assert list(Path(sample_config.bird_peers_dir).iterdir()) == []
+
+    def test_modify_cannot_bypass_tunnel_validation_with_has_wg_false(
+        self, sample_config: AppConfig, db_path: Path
+    ) -> None:
+        _register(db_path)
+        payload = _ibgp_add_payload()
+        payload["peer"].update(
+            {
+                "has_wg": True,
+                "peer_public_key": VALID_PUBKEY,
+                "endpoint": VALID_ENDPOINT,
+                "peer_lla": VALID_PEER_LLA,
+            }
+        )
+        add = submit_proposal(db_path=db_path, node_id=NODE_A, source="push", kind="peer_add", payload=payload)
+        accept_proposal(config=sample_config, db_path=db_path, proposal_id=add.id)
+        modify = submit_proposal(
+            db_path=db_path, node_id=NODE_A, source="push", kind="peer_modify", payload=_ibgp_add_payload()
+        )
+        with pytest.raises(Dn42CtlError, match="缺少必填字段"):
+            accept_proposal(config=sample_config, db_path=db_path, proposal_id=modify.id)
+        assert [p.id for p in list_proposals(db_path=db_path, node_id=NODE_A, status="pending")] == [modify.id]
+        db = Database.open(db_path)
+        try:
+            peer = db.get_ibgp_peer(NODE_A, "alpha")
+            assert peer is not None
+            assert peer["peer_public_key"] == VALID_PUBKEY
+            assert peer["peer_lla"] == VALID_PEER_LLA
         finally:
             db.close()
 
