@@ -11,6 +11,7 @@ export const API_PATHS = {
   ibgpPeer: (name: string) => `${ADMIN}/ibgp/peers/${encodeURIComponent(name)}`,
   wgTunnels: `${ADMIN}/wg/tunnels`,
   genconf: `${ADMIN}/genconf`,
+  birdExtraConf: `${ADMIN}/bird/extra-conf`,
   nodes: `${ADMIN}/nodes`,
   node: (nodeId: string) => `${ADMIN}/nodes/${nodeId}`,
   nodePolicy: (nodeId: string) => `${ADMIN}/nodes/${nodeId}/policy`,
@@ -45,6 +46,12 @@ export function getToken(): string {
   return sessionStorage.getItem("dn42ctl_admin_token") || "";
 }
 
+export class ApiError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+  }
+}
+
 export async function api<T = unknown>(
   path: string,
   opts: RequestInit = {},
@@ -67,7 +74,7 @@ export async function api<T = unknown>(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(body.detail || JSON.stringify(body));
+    throw new ApiError(res.status, body.detail || JSON.stringify(body));
   }
 
   return res.json();

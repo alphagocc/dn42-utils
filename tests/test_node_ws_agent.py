@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import random
 from pathlib import Path
@@ -20,6 +21,7 @@ from typing import Any
 import pytest
 
 import dn42ctl.node_ws_agent as agent_mod
+from dn42ctl.config import AppConfig, save_config
 from dn42ctl.node_config import AgentOptions, NodeConfig, save_node_config
 from dn42ctl.node_ws_agent import _next_delay, run_agent
 from dn42ctl.services.core import Dn42CtlError
@@ -27,8 +29,12 @@ from dn42ctl.ws_protocol import (
     CLOSE_REVOKED,
     CLOSE_SHUTTING_DOWN,
     CLOSE_UNAUTHORIZED,
+    MSG_ACK,
+    MSG_BIRD_EXTRA_READ,
+    MSG_BIRD_EXTRA_WRITE,
     MSG_DESIRED_PUSH,
     MSG_DESIRED_REQUEST,
+    MSG_ERROR,
     MSG_HELLO,
     MSG_HELLO_ACK,
     MSG_PING,
@@ -220,6 +226,78 @@ class TestHandshake:
         )
         assert calls[0]["url"] == f"wss://hub.example/api/v1/nodes/{NODE_A}/ws"
         assert calls[0]["additional_headers"] == {"Authorization": "Bearer tok"}
+
+
+def test_editor_uses_nodes_file_with_conflict_detection(
+    node_toml: Path, sample_config: AppConfig, tmp_path: Path
+) -> None:
+    config_path = tmp_path / "config.toml"
+    save_config(config_path, sample_config)
+    extra = Path(sample_config.bird_extra_conf_path)
+    extra.parent.mkdir(parents=True, exist_ok=True)
+    old_text, new_text = "# 本地段落\n", "ipv6 table mesh;\n"
+    extra.write_text(old_text, encoding="utf-8")
+    rev = hashlib.sha256(old_text.encode()).hexdigest()
+    requests = [
+        Envelope(type=MSG_BIRD_EXTRA_READ),
+        Envelope(type=MSG_BIRD_EXTRA_WRITE, payload={"content": new_text, "revision": rev}),
+        Envelope(type=MSG_BIRD_EXTRA_WRITE, payload={"content": "", "revision": rev}),
+        Envelope(type=MSG_BIRD_EXTRA_READ, payload={"path": str(tmp_path / "different")}),
+        Envelope(type=MSG_BIRD_EXTRA_READ),
+    ]
+    ws = _FakeWS([encode(r) for r in requests])
+    sleep, _ = _sleeper(0)
+    _run(
+        run_agent(
+            node_config_path=node_toml,
+            config_path=config_path,
+            connect_factory=_connect_factory([ws]),
+            sleep=sleep,
+            rng=_rng(0),
+            emit=lambda _m: None,
+        )
+    )
+    replies = [m for m in ws.sent if m["type"] in (MSG_ACK, MSG_ERROR)]
+    assert [m["re"] for m in replies] == [r.id for r in requests]
+    assert replies[0]["payload"] == {"content": old_text, "revision": rev}
+    updated = {"content": new_text, "revision": hashlib.sha256(new_text.encode()).hexdigest()}
+    assert replies[1]["payload"] == updated
+    assert replies[2]["payload"]["status_code"] == 409
+    assert replies[3]["payload"]["status_code"] == 422
+    assert replies[4]["payload"] == updated
+    assert extra.read_text(encoding="utf-8") == new_text
+
+
+@pytest.mark.parametrize("config_text", [None, "broken = ["], ids=["missing", "malformed"])
+def test_editor_default_path_for_node_only_install(
+    node_toml: Path, tmp_path: Path, config_text: str | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    default_extra = tmp_path / "default" / "extra.conf"
+    monkeypatch.setattr(agent_mod, "DEFAULT_BIRD_EXTRA_CONF_PATH", default_extra)
+    config_path = tmp_path / "config.toml"
+    if config_text is not None:
+        config_path.write_text(config_text)
+    request = Envelope(type=MSG_BIRD_EXTRA_WRITE, payload={"content": "ipv6 table custom;\n", "revision": "missing"})
+    ws = _FakeWS([encode(request)])
+    sleep, _ = _sleeper(0)
+    _run(
+        run_agent(
+            node_config_path=node_toml,
+            config_path=config_path,
+            connect_factory=_connect_factory([ws]),
+            sleep=sleep,
+            rng=_rng(0),
+            emit=lambda _m: None,
+        )
+    )
+    reply = next(m for m in ws.sent if m["re"] == request.id)
+    if config_text is None:
+        assert reply["type"] == MSG_ACK
+        assert default_extra.read_text() == "ipv6 table custom;\n"
+    else:
+        assert reply["type"] == MSG_ERROR
+        assert reply["payload"]["status_code"] == 500
+        assert not default_extra.exists()
 
 
 class TestDesiredPush:

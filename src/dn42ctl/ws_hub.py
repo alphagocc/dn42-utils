@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import hashlib
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -35,6 +36,7 @@ from anyio.to_thread import run_sync as _run_in_thread
 from dn42ctl.constants import SYNC_EVENT_ACCESS_REVOKED, SYNC_EVENT_DESIRED
 from dn42ctl.db import Database
 from dn42ctl.db_managed import ManagedNodeStore, SyncEventStore
+from dn42ctl.services.bird_extra import BirdExtraError, encode_bird_extra
 from dn42ctl.services.core import Dn42CtlError
 from dn42ctl.services.desired_state import (
     build_desired_state,
@@ -61,8 +63,12 @@ from dn42ctl.ws_protocol import (
     ERR_UNAUTHORIZED,
     ERR_UNKNOWN_TYPE,
     ERR_VERSION_MISMATCH,
+    MSG_ACK,
+    MSG_BIRD_EXTRA_READ,
+    MSG_BIRD_EXTRA_WRITE,
     MSG_DESIRED_PUSH,
     MSG_DESIRED_REQUEST,
+    MSG_ERROR,
     MSG_HELLO,
     MSG_HELLO_ACK,
     MSG_PING,
@@ -95,6 +101,7 @@ MAX_CONNECTIONS_PER_NODE = 4
 LAST_SEEN_THROTTLE_SECONDS = 60.0
 
 HELLO_TIMEOUT_SECONDS = 15.0
+BIRD_EXTRA_TIMEOUT_SECONDS = 10.0
 DEFAULT_SYNC_POLL_INTERVAL = 1.0
 _WATCHER_BATCH = 500
 
@@ -105,6 +112,36 @@ async def _to_thread(fn: Callable[..., Any], **kwargs: Any) -> Any:
     anyio's `run_sync` is positional-only, hence the partial.
     """
     return await _run_in_thread(functools.partial(fn, **kwargs))
+
+
+@dataclass
+class _BirdExtraReply:
+    ready: anyio.Event = field(default_factory=anyio.Event)
+    envelope: Envelope | None = None
+
+    def document(self) -> dict[str, str]:
+        response = self.envelope
+        if response is None:
+            raise BirdExtraError(503, "节点连接中断，请重新读取 extra.conf")
+        if response.type == MSG_ERROR:
+            status = response.payload.get("status_code")
+            if not isinstance(status, int) or status not in (400, 409, 413, 422, 500):
+                status = 502
+            message = response.payload.get("message")
+            raise BirdExtraError(status, message if isinstance(message, str) else "节点处理 extra.conf 失败")
+        result_content = response.payload.get("content")
+        result_revision = response.payload.get("revision")
+        if not isinstance(result_content, str) or not isinstance(result_revision, str):
+            raise BirdExtraError(502, "节点返回的 extra.conf 答复格式有误")
+        try:
+            data = encode_bird_extra(result_content)
+        except BirdExtraError as exc:
+            raise BirdExtraError(502, f"节点返回的 extra.conf 内容有误: {exc}") from exc
+        if result_revision == "missing" and not data:
+            return {"content": "", "revision": "missing"}
+        if result_revision != hashlib.sha256(data).hexdigest():
+            raise BirdExtraError(502, "节点返回的 extra.conf 内容与版本不符")
+        return {"content": result_content, "revision": result_revision}
 
 
 @dataclass
@@ -128,9 +165,18 @@ class NodeConnection:
     # 刚写入过,于是开机一分钟内的首次心跳被静默丢弃。
     last_seen_touched_at: float | None = None
     agent_version: str = ""
+    token_hash: str | None = field(default=None, repr=False)
+    pending_bird_extra: dict[str, _BirdExtraReply] = field(default_factory=dict, repr=False)
 
-    async def send(self, envelope: Envelope) -> None:
+    def stop_bird_extra_requests(self) -> None:
+        self.token_hash = None
+        for reply in self.pending_bird_extra.values():
+            reply.ready.set()
+
+    async def send(self, envelope: Envelope, *, token_hash: str | None = None) -> None:
         async with self.send_lock:
+            if token_hash is not None and self.token_hash != token_hash:
+                raise BirdExtraError(503, "节点连接已失效")
             await self.websocket.send_text(encode(envelope))
 
 
@@ -150,6 +196,7 @@ class ConnectionRegistry:
             await self._close_one(old, CLOSE_TOO_MANY_CONNECTIONS, ERR_TOO_MANY_CONNECTIONS, "连接数超限")
 
     async def unregister(self, conn: NodeConnection) -> None:
+        conn.stop_bird_extra_requests()
         async with self._lock:
             conns = self._by_node.get(conn.node_id)
             if conns is None:
@@ -170,6 +217,35 @@ class ConnectionRegistry:
         async with self._lock:
             return bool(self._by_node.get(node_id))
 
+    async def request_bird_extra(
+        self, node_id: str, *, token_hash: str | None, content: str | None = None, revision: str | None = None
+    ) -> dict[str, str]:
+        connections = await self.connections_for(node_id)
+        # The revocation watcher can still be one poll behind the admin's DB read.
+        conn = next((c for c in reversed(connections) if token_hash and c.token_hash == token_hash), None)
+        if conn is None:
+            raise BirdExtraError(503, "节点 agent 未连接")
+
+        if content is None:
+            request = Envelope(type=MSG_BIRD_EXTRA_READ)
+        else:
+            request = Envelope(type=MSG_BIRD_EXTRA_WRITE, payload={"content": content, "revision": revision})
+        reply = _BirdExtraReply()
+        conn.pending_bird_extra[request.id] = reply
+        try:
+            with anyio.fail_after(BIRD_EXTRA_TIMEOUT_SECONDS):
+                try:
+                    await conn.send(request, token_hash=token_hash)
+                except Exception as exc:  # noqa: BLE001 — ASGI transport exceptions depend on the server
+                    raise BirdExtraError(503, "节点连接中断，请重新读取 extra.conf") from exc
+                await reply.ready.wait()
+        except TimeoutError as exc:
+            raise BirdExtraError(504, "等待节点答复超时，请重新读取 extra.conf") from exc
+        finally:
+            conn.pending_bird_extra.pop(request.id, None)
+
+        return reply.document()
+
     async def notify(self, node_id: str) -> None:
         """Nudge every connection of `node_id` to re-check its desired state.
 
@@ -188,11 +264,13 @@ class ConnectionRegistry:
 
     async def close_all(self, code: int = CLOSE_SHUTTING_DOWN) -> None:
         for conn in await self.all_connections():
+            conn.stop_bird_extra_requests()
             with contextlib.suppress(Exception):  # noqa: BLE001 — shutdown is best-effort
                 await conn.send(Envelope(type=MSG_SHUTDOWN, payload={"reason": "server shutting down"}))
                 await conn.websocket.close(code=code)
 
     async def _close_one(self, conn: NodeConnection, code: int, err_code: str, message: str) -> None:
+        conn.stop_bird_extra_requests()
         # The peer may already be gone; closing a dead socket must not propagate.
         with contextlib.suppress(Exception):  # noqa: BLE001
             await conn.send(make_error(err_code, message))
@@ -207,6 +285,7 @@ class _AuthResult:
     close_code: int = CLOSE_UNAUTHORIZED
     err_code: str = ERR_UNAUTHORIZED
     message: str = ""
+    token_hash: str | None = field(default=None, repr=False)
 
 
 def _extract_bearer(header_value: str | None) -> str | None:
@@ -236,7 +315,7 @@ def _authenticate_sync(*, db_path: Path, token: str, node_id: str) -> _AuthResul
             err_code=ERR_FORBIDDEN,
             message="node_id 与 token 不匹配",
         )
-    return _AuthResult(ok=True, node_id=node.node_id)
+    return _AuthResult(ok=True, node_id=node.node_id, token_hash=node.api_token_hash)
 
 
 async def serve_node_connection(
@@ -289,6 +368,7 @@ async def serve_node_connection(
     await registry.register(conn)
     try:
         in_sync = await _send_hello_ack(conn, db_path=db_path, cached_revision=cached_revision, re=hello.id)
+        conn.token_hash = auth.token_hash
         if not in_sync:
             await _maybe_push_desired(conn, db_path=db_path, force=True)
         async with anyio.create_task_group() as tg:
@@ -296,7 +376,8 @@ async def serve_node_connection(
             await _reader_loop(conn, db_path=db_path, config=config)
             tg.cancel_scope.cancel()
     finally:
-        await registry.unregister(conn)
+        with anyio.CancelScope(shield=True):
+            await registry.unregister(conn)
         with contextlib.suppress(Exception):  # noqa: BLE001
             tx.close()
             rx.close()
@@ -443,6 +524,13 @@ async def _dispatch(conn: NodeConnection, raw: str, *, db_path: Path, config: Ap
         return
     if env.v != PROTOCOL_VERSION:
         await conn.send(make_error(ERR_VERSION_MISMATCH, f"协议版本不匹配: v={env.v}", re=env.id))
+        return
+
+    if env.type in (MSG_ACK, MSG_ERROR):
+        reply = conn.pending_bird_extra.get(env.re) if env.re is not None else None
+        if reply is not None and not reply.ready.is_set():
+            reply.envelope = env
+            reply.ready.set()
         return
 
     if env.type == MSG_PING:

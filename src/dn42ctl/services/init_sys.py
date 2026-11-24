@@ -7,8 +7,9 @@ import urllib.request
 from pathlib import Path
 
 from dn42ctl.config import AppConfig, save_config
-from dn42ctl.file_policy import BIRD, ensure_policy
-from dn42ctl.render import render_bird_extra_conf_placeholder, render_bird_ibgp_peer_conf, render_bird_main_conf
+from dn42ctl.file_policy import BIRD
+from dn42ctl.render import render_bird_ibgp_peer_conf, render_bird_main_conf
+from dn42ctl.services.bird_extra import ensure_bird_extra
 from dn42ctl.services.core import (
     Dn42CtlError,
     GenConfResult,
@@ -120,12 +121,7 @@ def genconf(
 
         ensure_dir(bird_peers_dir)
 
-        # 内容属于用户,只在缺失时补一份注释占位文件,已存在时连覆盖确认都不问。
-        # 权限仍归工具:bird 打不开被 include 的文件就拒绝加载整份配置。
-        if not bird_extra_conf_path.exists():
-            write_text(bird_extra_conf_path, render_bird_extra_conf_placeholder(), policy=BIRD)
-        else:
-            ensure_policy(bird_extra_conf_path, BIRD)
+        ensure_bird_extra(bird_extra_conf_path)
 
         if bird_babel_conf_path.exists() and not overwrite_babel_conf:
             raise Dn42CtlError(f"babel.conf 已存在且未允许覆盖: {bird_babel_conf_path}")

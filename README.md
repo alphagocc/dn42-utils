@@ -38,7 +38,7 @@ sudo uv run dn42ctl init --genconf # 同时生成 Bird/Babel/ROA 配置
 sudo uv run dn42ctl genconf
 ```
 
-要给本节点追加 BIRD 配置，编辑主配置末尾已经包含的 `/etc/bird/extra.conf`。使用默认路径时，保存后执行 `sudo bird -p -c /etc/bird.conf && sudo birdc configure`，语法检查成功后即重载。自定义路径和完整示例见[自定义 BIRD 配置](docs/architecture/bird_extra_conf.md)。
+要追加 BIRD 配置，可编辑节点上的 `/etc/bird/extra.conf`，或在 Web 管理后台选择节点并打开 **BIRD extra.conf**。两种方式编辑同一份文件。使用默认路径时，在目标节点执行 `sudo bird -p -c /etc/bird.conf && sudo birdc configure` 检查并加载已保存的配置。自定义路径和示例见[自定义 BIRD 配置](docs/architecture/bird_extra_conf.md)。
 
 ### 创建 BGP peer
 

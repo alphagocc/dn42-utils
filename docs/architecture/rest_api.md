@@ -54,10 +54,14 @@ token hash 比对采用恒定时间。self 节点的 token 由 `dn42ctl serve` �
 | `PUT` | `/api/admin/ibgp/peers/{name}` | `ibgp peer modify` | 修改 iBGP peer |
 | `DELETE` | `/api/admin/ibgp/peers/{name}` | `ibgp peer del` | 删除 iBGP peer |
 | `GET` | `/api/admin/wg/tunnels` | `show wg` | 列出所有 WireGuard 隧道（支持 `?live=false`） |
+| `GET` | `/api/admin/bird/extra-conf` | | 读取所选在线节点的 `extra.conf`，返回 `{content, revision}` |
+| `PUT` | `/api/admin/bird/extra-conf` | | 发送 `{content, expected_revision}`，成功后返回保存的内容和新版本 |
 | `POST` | `/api/admin/genconf` | `genconf` | 重新生成 Bird/Babel/ROA 配置 |
 | `GET` | `/api/show/all` | `show all` | 聚合视图：node_id + wg/bgp/ibgp 列表 |
 
 peer 的 `mtu` 设置和清除语义见 [WireGuard 隧道 MTU](peer_mtu.md)。
+
+`extra-conf` 的 `?node_id=` 默认指向 self 节点。保存时使用最近读取的 `revision`，文件不存在时该值为 `missing`。版本冲突返回 409，agent 离线返回 503，等待节点答复超时返回 504。文件位置由节点决定。使用示例见 [BIRD 自定义配置](bird_extra_conf.md)。
 
 #### 节点作用域（`?node_id=`）
 

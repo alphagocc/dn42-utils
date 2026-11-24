@@ -18,20 +18,27 @@ import asyncio
 import contextlib
 import random
 from collections.abc import Awaitable, Callable
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from dn42ctl import __version__
+from dn42ctl.config import ConfigError, ConfigNotFoundError, load_config
 from dn42ctl.node_client import build_auth_headers, build_ws_url
 from dn42ctl.node_config import AgentOptions, NodeConfig, NodeConfigError, load_node_config
-from dn42ctl.paths import DEFAULT_CONFIG_PATH
+from dn42ctl.paths import DEFAULT_BIRD_EXTRA_CONF_PATH, DEFAULT_CONFIG_PATH
+from dn42ctl.services.bird_extra import BirdExtraError, read_bird_extra, write_bird_extra
 from dn42ctl.services.core import Dn42CtlError
 from dn42ctl.services.node_agent import read_cache, store_desired
 from dn42ctl.services.node_apply import apply, apply_summary
 from dn42ctl.ws_protocol import (
     AUTH_FATAL_CLOSE_CODES,
+    ERR_SERVICE_ERROR,
+    ERR_VERSION_MISMATCH,
     MAX_FRAME_BYTES,
     MSG_ACK,
+    MSG_BIRD_EXTRA_READ,
+    MSG_BIRD_EXTRA_WRITE,
     MSG_DESIRED_PUSH,
     MSG_DESIRED_REQUEST,
     MSG_ERROR,
@@ -41,10 +48,13 @@ from dn42ctl.ws_protocol import (
     MSG_PONG,
     MSG_REPORT_SUBMIT,
     MSG_SHUTDOWN,
+    PROTOCOL_VERSION,
     Envelope,
     EnvelopeError,
     decode,
     encode,
+    make_ack,
+    make_error,
 )
 
 Emit = Callable[[str], None]
@@ -135,9 +145,10 @@ class _Session:
         except EnvelopeError as exc:
             self._emit(f"警告: 收到非法信封: {exc}")
             return
-
         if env.type == MSG_DESIRED_PUSH:
             await self._handle_desired_push(env)
+        elif env.type in (MSG_BIRD_EXTRA_READ, MSG_BIRD_EXTRA_WRITE):
+            await self._send(await asyncio.to_thread(self._bird_extra_reply, env))
         elif env.type == MSG_HELLO_ACK:
             self._emit(
                 f"已连接 server={self._cfg.server} revision={env.payload.get('revision')} "
@@ -151,6 +162,32 @@ class _Session:
             pass
         else:
             self._emit(f"警告: 未知消息类型 {env.type}")
+
+    def _bird_extra_reply(self, env: Envelope) -> Envelope:
+        if env.v != PROTOCOL_VERSION:
+            return make_error(ERR_VERSION_MISMATCH, f"协议版本不匹配: v={env.v}", re=env.id)
+        try:
+            try:
+                path = Path(load_config(self._config_path).bird_extra_conf_path)
+            except ConfigNotFoundError:
+                path = DEFAULT_BIRD_EXTRA_CONF_PATH
+            if env.type == MSG_BIRD_EXTRA_READ and not env.payload:
+                document = read_bird_extra(path)
+            elif env.type == MSG_BIRD_EXTRA_WRITE and env.payload.keys() == {"content", "revision"}:
+                content, revision = env.payload["content"], env.payload["revision"]
+                if not isinstance(content, str) or not isinstance(revision, str):
+                    raise BirdExtraError(422, "extra.conf 的 content 和 revision 必须为字符串")
+                document = write_bird_extra(path, content=content, expected_revision=revision)
+            else:
+                raise BirdExtraError(422, "extra.conf 请求字段有误")
+        except (BirdExtraError, ConfigError) as exc:
+            status = exc.status_code if isinstance(exc, BirdExtraError) else 500
+            return Envelope(
+                type=MSG_ERROR,
+                re=env.id,
+                payload={"code": ERR_SERVICE_ERROR, "status_code": status, "message": str(exc)},
+            )
+        return make_ack(asdict(document), re=env.id)
 
     async def _handle_desired_push(self, env: Envelope) -> None:
         desired = env.payload.get("desired")

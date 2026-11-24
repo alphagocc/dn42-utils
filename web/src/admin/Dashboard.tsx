@@ -13,9 +13,10 @@ import { Reports } from "./tabs/Reports";
 import { Revisions } from "./tabs/Revisions";
 import { Database } from "./tabs/Database";
 import { Genconf } from "./tabs/Genconf";
+import { BirdExtraConf, type ExtraConfDraft } from "./tabs/BirdExtraConf";
 
 const TAB_NAMES = [
-  "overview", "bgp", "ibgp", "wg", "nodes",
+  "overview", "bgp", "ibgp", "wg", "birdExtraConf", "nodes",
   "proposals", "reports", "revisions", "database", "genconf",
 ] as const;
 
@@ -26,6 +27,7 @@ const TAB_LABELS: Record<TabName, string> = {
   bgp: "BGP",
   ibgp: "iBGP",
   wg: "WG",
+  birdExtraConf: "BIRD extra.conf",
   nodes: "Nodes",
   proposals: "Proposals",
   reports: "Reports",
@@ -36,7 +38,7 @@ const TAB_LABELS: Record<TabName, string> = {
 
 /** Tabs whose data is per-node. The rest are hub-global views. */
 const NODE_SCOPED_TABS = new Set<TabName>([
-  "overview", "bgp", "ibgp", "wg", "proposals", "reports", "revisions",
+  "overview", "bgp", "ibgp", "wg", "birdExtraConf", "proposals", "reports", "revisions",
 ]);
 
 const HEADER_BUTTON =
@@ -86,7 +88,19 @@ function DashboardInner({ onLogout }: Props) {
   const [activeTab, setActiveTab] = useState<TabName>("overview");
   const [refreshKey, setRefreshKey] = useState(0);
   const [navOpen, setNavOpen] = useState(false);
+  const [extraConfDrafts] = useState(() => new Map<string, ExtraConfDraft>());
   const { nodes, nodeId, setNodeId, reload } = useNodeScope();
+
+  useEffect(() => {
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
+      if (extraConfDrafts.size) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", warnBeforeLeaving);
+    return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
+  }, [extraConfDrafts]);
 
   const refresh = useCallback(() => {
     reload();
@@ -112,6 +126,7 @@ function DashboardInner({ onLogout }: Props) {
     bgp: <Bgp key={refreshKey} />,
     ibgp: <Ibgp key={refreshKey} />,
     wg: <Wg key={refreshKey} />,
+    birdExtraConf: <BirdExtraConf key={`${nodeId}/${refreshKey}`} nodeId={nodeId} drafts={extraConfDrafts} />,
     nodes: <Nodes key={refreshKey} />,
     proposals: <Proposals key={refreshKey} />,
     reports: <Reports key={refreshKey} />,
@@ -142,7 +157,9 @@ function DashboardInner({ onLogout }: Props) {
               Refresh
             </button>
             <ThemeToggle />
-            <button onClick={onLogout} className={HEADER_BUTTON}>
+            <button onClick={() => {
+              if (!extraConfDrafts.size || window.confirm("Discard unsaved edits to extra.conf and sign out?")) onLogout();
+            }} className={HEADER_BUTTON}>
               Sign out
             </button>
           </div>

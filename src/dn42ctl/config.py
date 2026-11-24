@@ -46,6 +46,10 @@ class ConfigError(RuntimeError):
     pass
 
 
+class ConfigNotFoundError(ConfigError):
+    pass
+
+
 def _require_str(data: dict[str, Any], key: str) -> str:
     value = data.get(key)
     if not isinstance(value, str) or not value:
@@ -75,7 +79,7 @@ def load_config(path: Path) -> AppConfig:
         with path.open("rb") as f:
             raw = tomllib.load(f)
     except FileNotFoundError as exc:
-        raise ConfigError(f"Config not found: {path}") from exc
+        raise ConfigNotFoundError(f"Config not found: {path}") from exc
     except Exception as exc:  # noqa: BLE001
         raise ConfigError(f"配置文件读取失败: {path}") from exc
 

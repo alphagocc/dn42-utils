@@ -2,7 +2,15 @@
 
 `bird.conf` 由模板整体渲染，每次 `genconf` 都会重写，因此用户手工加进去的内容会在下一次生成时消失。DN42 的实际运维中总有一些配置无法用数据库中的 peer 记录表达：静态路由、额外的 `protocol`、面向特定邻居的 filter、临时的调试用 `protocol pipe`。`extra.conf` 是为这类内容保留的插入位置。
 
-职责划分只有一句：dn42ctl 负责保证 `bird.conf` 里的 `include` 存在、文件本身存在；文件内容完全属于用户，工具永不读取、永不解析、永不改写。
+文件内容由运维维护。配置生成负责写入 `include` 并创建缺失的文件，已有内容会保留。
+
+## 从 Web 管理后台编辑
+
+同步升级 Web、hub 和节点 agent 后，登录管理后台，选择目标节点，打开 **BIRD extra.conf**。页面读取节点上已有的 UTF-8 文本。点击 **Save file** 后，agent 将内容保存到节点本机配置指定的位置。清空编辑框并保存会留下空文件。文件大小上限为 1 MiB。
+
+保存时会比对节点文件的当前版本。版本与读取时不同，页面会保留草稿并显示节点上的最新内容，便于核对后再保存。节点离线时可等它重连后重试。保存超时或断线时，请重新读取文件核实结果。
+
+保存只更新文件。要使 BIRD 加载变更，在目标节点检查主配置，成功后重载，命令见下节。
 
 ## 追加并加载一段配置
 
@@ -71,9 +79,11 @@ include "/etc/bird/extra.conf";
 
 ## 与多节点同步的关系
 
-写入位置属于节点本地信息，中心不下发。`extra.conf` 的位置由本机 `config.toml` 的 `[paths].bird_extra_conf` 决定，与 `genconf` 读的是同一处，解析规则见 [`paths.md`](paths.md)。文件内容同样始终是节点本地的，既不上报也不推送。
+文件位于节点本机 `config.toml` 的 `[paths].bird_extra_conf`。仅执行过 `node init` 且没有该配置文件的节点使用默认位置。解析规则见[本机路径](paths.md)。
 
-`node apply` 在收到非空 `node` 块时会重新渲染 `bird.conf`（语义见 [`node_addressing.md`](node_addressing.md)），其中的 `include` 使用解析后的位置，与 `peers_dir`、`babel_conf_path` 的处理方式一致。占位文件同样由 apply 负责创建，但**仅在文件缺失时才进入写入列表**：占位内容一旦进入常规的 diff 与原子写管线，agent 每 900 秒一次的 reconcile 就会把用户写的配置抹掉。
+Web 读写通过目标节点的在线 agent 完成，hub 自身节点也使用这个通道。中心转发管理员的单次请求，文件内容不进入 SQLite 的期望状态、报告和历史快照。回滚 peer 配置时会保留当前的 `extra.conf`。
+
+`node apply` 重新渲染 `bird.conf` 时会确保被包含的文件存在。如果 Web 编辑器或命令行已经创建了文件，生成器会保留其内容。节点地址的处理见[节点地址配置](node_addressing.md)。
 
 ## 未纳入范围
 

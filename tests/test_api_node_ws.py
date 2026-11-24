@@ -9,9 +9,11 @@ nodes are registered ahead of time, then the agent connects.
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 import secrets
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -33,6 +35,8 @@ from dn42ctl.ws_protocol import (
     ERR_SERVICE_ERROR,
     ERR_UNKNOWN_TYPE,
     MSG_ACK,
+    MSG_BIRD_EXTRA_READ,
+    MSG_BIRD_EXTRA_WRITE,
     MSG_DESIRED_PUSH,
     MSG_ERROR,
     MSG_HELLO,
@@ -416,3 +420,73 @@ class TestAdminToken:
             ws.receive_json()
             ws.receive_json()
         assert exc.value.code == CLOSE_UNAUTHORIZED
+
+
+class TestBirdExtraRequests:
+    def test_replies_are_bound_to_request_and_connection(self, client: TestClient, tokens: dict[str, str]) -> None:
+        route = f"/api/admin/bird/extra-conf?node_id={NODE_A}"
+        with (
+            ThreadPoolExecutor(max_workers=3) as workers,
+            _connected(client, NODE_A, tokens[NODE_A]) as a,
+            _connected(client, NODE_B, tokens[NODE_B]) as b,
+        ):
+            for ws in (a, b):
+                _handshake(ws)
+                assert ws.receive_json()["type"] == MSG_DESIRED_PUSH
+            read = workers.submit(client.get, route, headers=ADMIN_H)
+            read_frame = workers.submit(a.receive_json).result(timeout=5)
+            assert read_frame["type"] == MSG_BIRD_EXTRA_READ
+            assert read_frame["payload"] == {}
+            write = workers.submit(
+                client.put, route, headers=ADMIN_H, json={"content": "", "expected_revision": "missing"}
+            )
+            write_frame = workers.submit(a.receive_json).result(timeout=5)
+            assert write_frame["type"] == MSG_BIRD_EXTRA_WRITE
+            assert write_frame["payload"] == {"content": "", "revision": "missing"}
+            content = "ipv6 table old;\n"
+            document = {"content": content, "revision": hashlib.sha256(content.encode()).hexdigest()}
+            reply = Envelope(type=MSG_ACK, re=read_frame["id"], payload=document)
+            b.send_text(encode(reply))
+            b.send_text(encode(Envelope(type="ping")))
+            assert b.receive_json()["type"] == MSG_PONG
+            assert not read.done()
+            a.send_text(encode(Envelope(type=MSG_ERROR, re=write_frame["id"], payload={"status_code": 409})))
+            assert write.result(timeout=5).status_code == 409
+            a.send_text(encode(reply))
+            response = read.result(timeout=5)
+            assert response.status_code == 200, response.text
+            assert response.json() == document
+
+    def test_pending_request_fails_on_disconnect(self, client: TestClient, tokens: dict[str, str]) -> None:
+        route = f"/api/admin/bird/extra-conf?node_id={NODE_A}"
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            with _connected(client, NODE_A, tokens[NODE_A]) as ws:
+                _handshake(ws)
+                ws.receive_json()
+                pending = workers.submit(client.get, route, headers=ADMIN_H)
+                assert workers.submit(ws.receive_json).result(timeout=5)["type"] == MSG_BIRD_EXTRA_READ
+            assert pending.result(timeout=5).status_code == 503
+
+    def test_timeout_and_rotated_token(
+        self, sample_config: AppConfig, db_path: Path, tokens: dict[str, str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        configure(config=sample_config, db_path=db_path, token=ADMIN_TOKEN, sync_poll_interval=3600)
+        route = f"/api/admin/bird/extra-conf?node_id={NODE_A}"
+        with TestClient(app) as client, _connected(client, NODE_A, tokens[NODE_A]) as ws:
+            _handshake(ws)
+            ws.receive_json()
+            monkeypatch.setattr(ws_hub, "BIRD_EXTRA_TIMEOUT_SECONDS", 0.1)
+            assert client.get(route, headers=ADMIN_H).status_code == 504
+            expired = ws.receive_json()
+            assert expired["type"] == MSG_BIRD_EXTRA_READ
+            ws.send_text(encode(Envelope(type=MSG_ACK, re=expired["id"])))
+            ws.send_text(encode(Envelope(type="ping")))
+            assert ws.receive_json()["type"] == MSG_PONG
+            db = Database.open(db_path)
+            try:
+                ManagedNodeStore(db.connection).rotate_token(NODE_A, "rotated")
+            finally:
+                db.close()
+            assert client.get(route, headers=ADMIN_H).status_code == 503
+            ws.send_text(encode(Envelope(type="ping")))
+            assert ws.receive_json()["type"] == MSG_PONG

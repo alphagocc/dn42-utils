@@ -14,7 +14,7 @@ WebSocket 长连接将配置同步延迟降低至 1 秒以内，消除了稳态�
 
 | 通道 | 使用者 | 承载 |
 |------|--------|------|
-| **WebSocket** `/api/v1/nodes/{node_id}/ws` | 常驻 `dn42ctl node agent` | desired 下发、proposal / report 上报、心跳 |
+| **WebSocket** `/api/v1/nodes/{node_id}/ws` | 常驻 `dn42ctl node agent` | desired 下发、proposal / report 上报、心跳、管理员读取或保存 extra.conf |
 | **HTTP** `/api/v1/nodes/{node_id}/{desired,proposals,reports,status}` | 一次性 CLI 命令（`node pull` / `apply` / `once` / `push` / `report` / `status`） | 人工排障 |
 
 两条通道共用同一套 Bearer token 鉴权与同一套 service 层，语义完全等价。一次性 CLI 命令是独立进程，用不了常驻 agent 持有的那条连接，所以 HTTP 路由**保留**。
@@ -69,12 +69,15 @@ WS 握手请求携带 `Authorization: Bearer <node token>`，与 HTTP 路由完�
 | `proposal_submit` | `{source, kind, payload}` | `ack{proposal_id, status}` 或 `error` |
 | `report_submit` | `{kind, payload}` | `ack{report_id, received_at}` 或 `error` |
 | `ping` | `{}` | `pong` |
+| `ack` / `error` | 读取或保存 extra.conf 的结果。成功为 `{content, revision}`，失败为 `{code, message, status_code}` | `re` 关联同一连接上的请求 |
 
 ### hub → node
 
 | type | payload |
 |------|---------|
 | `hello_ack` | `{node_id, server_version, revision, in_sync: bool}` |
+| `bird_extra_read` | `{}` |
+| `bird_extra_write` | `{content, revision}`，revision 来自最近一次读取 |
 | `desired_push` | `{revision, generated_at, desired: {…完整 desired state…}}` |
 | `ack` | 随请求而定，`re` 指向请求 |
 | `error` | `{code, message}`，回应请求时带 `re` |

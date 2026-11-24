@@ -55,6 +55,7 @@ from dn42ctl.render import (
     render_networkd_netdev,
     render_networkd_network,
 )
+from dn42ctl.services.bird_extra import ensure_bird_extra
 from dn42ctl.services.core import Dn42CtlError
 from dn42ctl.services.dummy import DUMMY_IFNAME
 from dn42ctl.services.reload import (
@@ -310,12 +311,6 @@ def _render_node_config_files(
         )
     )
 
-    # bird.conf now includes extra.conf, so the file has to exist. Its content belongs to
-    # the operator: putting the placeholder in the list unconditionally would let every
-    # 900-second reconcile diff it against whatever they wrote and overwrite it.
-    if not paths.bird_extra_conf_path.exists():
-        files.append((paths.bird_extra_conf_path, render_bird_extra_conf_placeholder(), BIRD))
-
     if merged.dummy_backend != NET_BACKEND_NETWORKD:
         # When dn42-dummy is managed by NetworkManager, writing networkd's
         # .netdev/.network would produce a configuration that conflicts with NM. apply
@@ -452,9 +447,13 @@ def apply(
         warnings.extend(node_warnings)
 
     expected_paths: set[Path] = {path for path, _content, _policy in files}
-    stale = _collect_stale(expected_paths, paths)
+    extra_path = paths.bird_extra_conf_path
+    needs_extra = paths.bird_conf_path in expected_paths
+    stale = _collect_stale(expected_paths | {extra_path}, paths)
 
     diffs = [_diff(path, content) for path, content, _policy in files]
+    if dry_run and needs_extra and not extra_path.exists():
+        diffs.append(ApplyDiff(path=extra_path, action="create", diff=render_bird_extra_conf_placeholder()))
     for s in stale:
         diffs.append(ApplyDiff(path=s, action="delete", diff=""))
 
@@ -466,9 +465,13 @@ def apply(
         for path, content, policy in files:
             _atomic_write(path, content, policy=policy)
             written.append(path)
-        # extra.conf 的内容归运维,所以它只在缺失时进入写入列表,权限却归工具:bird 读不到
-        # 被 include 的文件就拒绝加载整份配置。已存在的那份因此单独校正一次权限。
-        ensure_policy(paths.bird_extra_conf_path, BIRD)
+        if needs_extra:
+            if ensure_bird_extra(extra_path):
+                diffs.append(ApplyDiff(path=extra_path, action="create", diff=render_bird_extra_conf_placeholder()))
+                written.append(extra_path)
+                changed_actions.add(extra_path)
+        else:
+            ensure_policy(extra_path, BIRD)
         for s in stale:
             try:
                 s.unlink()

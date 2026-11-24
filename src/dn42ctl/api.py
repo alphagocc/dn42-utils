@@ -8,14 +8,15 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import anyio
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, WebSocket
+from anyio.to_thread import run_sync
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Response, WebSocket
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, field_validator
 
 from dn42ctl.config import AppConfig
 from dn42ctl.constants import MAX_PEER_MTU, MIN_PEER_MTU, UNSET
 from dn42ctl.db import Database
-from dn42ctl.db_managed import ManagedNodeStore
+from dn42ctl.db_managed import ManagedNode, ManagedNodeStore
 from dn42ctl.services import (
     Dn42CtlError,
     accept_proposal,
@@ -54,6 +55,7 @@ from dn42ctl.services.auto_peer import (
     open_session,
     submit_peer,
 )
+from dn42ctl.services.bird_extra import BirdExtraError, encode_bird_extra
 from dn42ctl.services.db_browse import (
     DEFAULT_LIMIT,
     MAX_LIMIT,
@@ -1004,6 +1006,51 @@ def api_list_wg_tunnels(live: bool = Query(False), node_id: str | None = Query(N
     except Dn42CtlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return [asdict(t) for t in tunnels]
+
+
+class BirdExtraUpdate(BaseModel, extra="forbid"):
+    content: str
+    expected_revision: Annotated[str, Field(pattern=r"^(missing|[0-9a-f]{64})$")]
+
+
+def _bird_extra_target(node_id: str | None) -> ManagedNode:
+    db = Database.open(_get_db_path())
+    try:
+        store = ManagedNodeStore(db.connection)
+        node = store.get(node_id) if node_id is not None else store.get_self() or store.get(_get_config().node_id)
+    finally:
+        db.close()
+    if node is None:
+        raise HTTPException(status_code=404, detail="找不到受管节点")
+    if not node.enabled:
+        raise HTTPException(status_code=403, detail="节点已停用")
+    return node
+
+
+async def _request_bird_extra(
+    node_id: str | None, response: Response, edit: BirdExtraUpdate | None = None
+) -> dict[str, str]:
+    node = await run_sync(_bird_extra_target, node_id)
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        if edit is None:
+            return await _registry.request_bird_extra(node.node_id, token_hash=node.api_token_hash)
+        encode_bird_extra(edit.content)
+        return await _registry.request_bird_extra(
+            node.node_id, token_hash=node.api_token_hash, content=edit.content, revision=edit.expected_revision
+        )
+    except BirdExtraError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@_admin_nodes_router.get("/bird/extra-conf")
+async def api_read_bird_extra(response: Response, node_id: str | None = None) -> dict[str, str]:
+    return await _request_bird_extra(node_id, response)
+
+
+@_admin_nodes_router.put("/bird/extra-conf")
+async def api_write_bird_extra(body: BirdExtraUpdate, response: Response, node_id: str | None = None) -> dict[str, str]:
+    return await _request_bird_extra(node_id, response, body)
 
 
 # --- Admin: genconf ---

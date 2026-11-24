@@ -50,6 +50,7 @@ web/
     │       ├── Reports.tsx      # import
     │       ├── Revisions.tsx    # pin/unpin
     │       ├── Database.tsx     # 只读表浏览
+    │       ├── BirdExtraConf.tsx # 编辑所选节点的 BIRD 自定义配置
     │       └── Genconf.tsx      # 触发按钮
     └── peer/
         ├── main.tsx
@@ -137,6 +138,7 @@ HTML `<head>` 内尽早执行的内联脚本（防 FOUC）：
 | Revisions | `GET /api/admin/nodes/{id}/revisions` | Pin (rollback) / Unpin |
 | Database | `GET /api/admin/db/tables[/{table}]` | 只读分页浏览，私钥/token hash 显示为 `***` |
 | Genconf | `POST /api/admin/genconf` | 触发按钮 + 显示返回的 warnings/paths |
+| BIRD extra.conf | `GET / PUT /api/admin/bird/extra-conf` | 读写在线节点的文件，按节点保留编辑草稿 |
 
 Tab 切换使用 React `useState`，刷新按钮递增 `refreshKey` 强制组件重新挂载重新请求。
 

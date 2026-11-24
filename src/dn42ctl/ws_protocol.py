@@ -37,13 +37,30 @@ MSG_PING = "ping"
 # --- message types: hub -> node ---
 MSG_HELLO_ACK = "hello_ack"
 MSG_DESIRED_PUSH = "desired_push"
-MSG_ACK = "ack"
-MSG_ERROR = "error"
 MSG_PONG = "pong"
 MSG_SHUTDOWN = "shutdown"
+MSG_BIRD_EXTRA_READ = "bird_extra_read"
+MSG_BIRD_EXTRA_WRITE = "bird_extra_write"
 
-NODE_TO_HUB_TYPES = frozenset({MSG_HELLO, MSG_DESIRED_REQUEST, MSG_PROPOSAL_SUBMIT, MSG_REPORT_SUBMIT, MSG_PING})
-HUB_TO_NODE_TYPES = frozenset({MSG_HELLO_ACK, MSG_DESIRED_PUSH, MSG_ACK, MSG_ERROR, MSG_PONG, MSG_SHUTDOWN})
+# Correlated replies in either direction.
+MSG_ACK = "ack"
+MSG_ERROR = "error"
+
+NODE_TO_HUB_TYPES = frozenset(
+    {MSG_HELLO, MSG_DESIRED_REQUEST, MSG_PROPOSAL_SUBMIT, MSG_REPORT_SUBMIT, MSG_PING, MSG_ACK, MSG_ERROR}
+)
+HUB_TO_NODE_TYPES = frozenset(
+    {
+        MSG_HELLO_ACK,
+        MSG_DESIRED_PUSH,
+        MSG_ACK,
+        MSG_ERROR,
+        MSG_PONG,
+        MSG_SHUTDOWN,
+        MSG_BIRD_EXTRA_READ,
+        MSG_BIRD_EXTRA_WRITE,
+    }
+)
 
 # --- error codes (stable ASCII for programs; `message` is Chinese for humans) ---
 ERR_UNAUTHORIZED = "unauthorized"
