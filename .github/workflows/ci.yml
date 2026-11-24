@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  UV_PYTHON: "3.13"
+
 jobs:
   lint-and-typecheck:
     runs-on: ubuntu-latest
@@ -18,11 +21,11 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Set up Python 3.11
-        run: uv python install 3.11
+      - name: Set up Python
+        run: uv python install "$UV_PYTHON"
 
       - name: Install dependencies
-        run: uv sync --group dev
+        run: uv sync --locked --group dev
 
       - name: Ruff lint
         run: uv run ruff check src/ tests/
@@ -31,7 +34,7 @@ jobs:
         run: uv run ruff format --check src/ tests/
 
       - name: Pyright type check
-        run: uv run pyright src/
+        run: uv run pyright --pythonversion "$UV_PYTHON" src/
 
       - name: Compile check
         run: uv run python -m compileall -q src/
@@ -44,8 +47,8 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Set up Python 3.11
-        run: uv python install 3.11
+      - name: Set up Python
+        run: uv python install "$UV_PYTHON"
 
       - name: Install wireguard-tools
         # bgp/ibgp peer 建立隧道时需要 `wg genkey` 生成密钥,API 用例会实际执行该命令。
@@ -53,7 +56,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y wireguard-tools
 
       - name: Install dependencies
-        run: uv sync --group dev
+        run: uv sync --locked --group dev
 
       - name: Run tests with coverage
         run: uv run pytest --cov=dn42ctl --cov-report=term-missing --cov-report=xml -v

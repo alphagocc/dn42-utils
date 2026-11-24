@@ -139,7 +139,8 @@ def cli_base_args(db_path: Path, tmp_path: Path) -> list[str]:
 def node_toml_path(tmp_path: Path) -> Path:
     p = tmp_path / "node.toml"
     p.write_text(
-        f'server = "{SERVER}"\nnode_id = "{NODE_A}"\ntoken = "spoke-token"\n',
+        f'server = "{SERVER}"\nnode_id = "{NODE_A}"\ntoken = "spoke-token"\n'
+        f'\n[cache]\ndb_path = "{tmp_path / "node-cache.sqlite3"}"\n',
         encoding="utf-8",
     )
     return p

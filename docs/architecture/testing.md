@@ -11,6 +11,8 @@
 
 开发依赖通过 `[dependency-groups] dev` 管理（PEP 735），使用 `uv sync --group dev` 安装。
 
+GitHub Actions 的静态检查与完整测试均使用 Python 3.13。要在本地使用相同环境，可执行 `uv python install 3.13` 和 `UV_PYTHON=3.13 uv sync --locked --group dev`。
+
 ## 运行测试
 
 ```bash
@@ -105,14 +107,14 @@ Patch `generate_wg_keypair()` 返回固定密钥对，避免依赖系统 `wg` �
 
 ## Mock 策略
 
-生产代码调用多个系统命令（`wg`、`ip`、`nmcli`、`birdc`、`systemctl`），测试中**全部 mock**：
+测试通过以下接口替换系统命令、下载和文件权限操作。
 
 - `subprocess.check_output`：用于 WireGuard、iproute2、Bird 等命令
 - `shutil.which`：用于命令探测（nmcli、systemctl、curl）
 - `urllib.request.urlopen`：用于 ROA 下载
 - `os.chmod` / `os.chown`：文件权限（尽力而为执行）
 
-CI 环境不安装 wireguard-tools 等系统包。
+CI 的测试任务会安装 `wireguard-tools`，部分 API 用例通过实际的 `wg genkey` 和 `wg pubkey` 生成密钥。
 
 ## WebSocket 测试策略
 

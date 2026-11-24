@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 import typer
+from click import unstyle
 from typer.testing import CliRunner
 
 from dn42ctl.cli_errors import EXIT_FAILURE, EXIT_USAGE, cli_errors, db_open_hint
@@ -122,8 +123,9 @@ class TestSignatureIsPreserved:
     def test_help_still_lists_the_option(self, runner: CliRunner) -> None:
         result = runner.invoke(_app(None), ["boom", "--help"])
         assert result.exit_code == 0, result.output
-        assert "--name" in result.output
-        assert "名称" in result.output
+        help_text = unstyle(result.output)
+        assert "--name" in help_text
+        assert "名称" in help_text
 
     def test_default_still_applies(self, runner: CliRunner) -> None:
         result = runner.invoke(_app(None), ["boom"])
