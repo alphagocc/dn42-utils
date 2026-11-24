@@ -50,6 +50,11 @@ def _migration_14(conn: sqlite3.Connection) -> None:
     ensure_column(conn, "managed_nodes", "auto_peer", "INTEGER NOT NULL DEFAULT 0")
 
 
+def _migration_15(conn: sqlite3.Connection) -> None:
+    for table in ("bgp_peers", "ibgp_peers"):
+        ensure_column(conn, table, "mtu", "INTEGER")
+
+
 MIGRATIONS: list[tuple[int, MigrationStep]] = [
     (
         1,
@@ -234,4 +239,5 @@ MIGRATIONS: list[tuple[int, MigrationStep]] = [
         """.strip(),
     ),
     (14, _migration_14),
+    (15, _migration_15),
 ]

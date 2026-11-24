@@ -87,10 +87,12 @@ class TestBuildDesiredState:
         assert ds.bgp_peers[0]["peer_asn"] == 4242421234
         assert ds.bgp_peers[0]["allowed_ips"] == ["fe80::/64", "fd00::/8"]
         assert ds.bgp_peers[0]["wg_private_key"] == FAKE_PRIV
+        assert "mtu" not in ds.bgp_peers[0]
         assert len(ds.ibgp_peers) == 1
         assert ds.ibgp_peers[0]["name"] == "alpha"
         assert ds.ibgp_peers[0]["babel_rxcost"] == 96
         assert ds.ibgp_peers[0]["has_wg"] is True
+        assert "mtu" not in ds.ibgp_peers[0]
         payload = json.dumps(ds.to_dict())
         parsed = json.loads(payload)
         assert parsed["node_id"] == NODE_A

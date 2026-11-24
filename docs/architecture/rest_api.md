@@ -57,6 +57,8 @@ token hash 比对采用恒定时间。self 节点的 token 由 `dn42ctl serve` �
 | `POST` | `/api/admin/genconf` | `genconf` | 重新生成 Bird/Babel/ROA 配置 |
 | `GET` | `/api/show/all` | `show all` | 聚合视图：node_id + wg/bgp/ibgp 列表 |
 
+peer 的 `mtu` 设置和清除语义见 [WireGuard 隧道 MTU](peer_mtu.md)。
+
 #### 节点作用域（`?node_id=`）
 
 上表中的 peer / wg / show 路由全部接受可选的 **`?node_id=<uuid>` query 参数**，用于指定操作哪个受管节点的行。POST / PUT 也统一用 query 参数（FastAPI 支持 query 与 body model 并存），一条规则胜过"写操作放 body、删除放 query"。

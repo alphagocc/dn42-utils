@@ -4,6 +4,28 @@
 
 职责划分只有一句：dn42ctl 负责保证 `bird.conf` 里的 `include` 存在、文件本身存在；文件内容完全属于用户，工具永不读取、永不解析、永不改写。
 
+## 追加并加载一段配置
+
+首次运行 `dn42ctl genconf` 会创建 `extra.conf`。在目标节点执行 `sudoedit /etc/bird/extra.conf`，例如追加一个使用独立 IPv6 路由表的静态协议。这里的 `OWNNETv6` 由主配置定义，示例路由只进入 BIRD 的 `example_v6` 表。
+
+```bird
+ipv6 table example_v6;
+
+protocol static example_static {
+    ipv6 { table example_v6; };
+    route OWNNETv6 reject;
+}
+```
+
+保存后检查整份配置，再让运行中的 BIRD 加载变更。
+
+```bash
+sudo bird -p -c /etc/bird.conf && sudo birdc configure
+sudo birdc show route table example_v6
+```
+
+以上命令使用默认路径。若已自定义路径，编辑本机 `config.toml` 的 `[paths].bird_extra_conf` 指定的文件，将 `-c` 后的路径替换为服务正在使用的主配置（`[paths].bird_conf`）。以后修改段落，只需保存、检查和重载。
+
 ## include 的位置
 
 `include` 位于 `bird.conf` 末尾，在 `babel.conf` 与 `peers/*` 之后：

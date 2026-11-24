@@ -2,9 +2,9 @@
 
 `config_proposals.payload_json` and `node_reports.payload_json` are arbitrary JSON
 written by whoever holds a node token; nothing between the wire and the DB imposes a
-schema. The service layer only checks `listen_port` / `net_backend` / `allowed_ips`,
-so every other field would otherwise land in the DB verbatim and be rendered into the
-spoke's `bird.conf` on its next pull — where `include "<peers_dir>/*";` turns one
+schema. Peer identifiers, addresses and keys must be checked before they land in
+the DB and are rendered into the spoke's configuration on its next pull.
+In `bird.conf`, `include "<peers_dir>/*";` turns one
 malformed peer into a total BIRD config failure for that node.
 
 Every parse error surfaces as `Dn42CtlError`, which callers already map to HTTP 400.
@@ -26,6 +26,7 @@ from dn42ctl.validators import (
     validate_endpoint,
     validate_ipv6_address,
     validate_listen_port,
+    validate_mtu,
     validate_net_backend,
     validate_pubkey,
     validate_rxcost,
@@ -42,6 +43,7 @@ class BgpPeerPayload:
     peer_lla: str
     net_backend: str
     listen_port: int | None
+    mtu: int | None
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,7 @@ class IbgpPeerPayload:
     babel_rxcost: int
     babel_type: str
     listen_port: int | None
+    mtu: int | None
 
 
 def _require(peer: dict[str, Any], field: str) -> Any:  # noqa: ANN401 — 值的类型由各字段的解析器决定
@@ -110,6 +113,11 @@ def _optional_listen_port(peer: dict[str, Any]) -> int | None:
     return _checked("listen_port", lambda v: validate_listen_port(v, allow_zero=True), _as_int(raw, "listen_port"))
 
 
+def _optional_mtu(peer: dict[str, Any]) -> int | None:
+    raw = peer.get("mtu")
+    return _checked("mtu", validate_mtu, raw) if raw is not None else None
+
+
 def _net_backend(peer: dict[str, Any]) -> str:
     return _checked("net_backend", validate_net_backend, _optional_str(peer, "net_backend", DEFAULT_NET_BACKEND))
 
@@ -132,6 +140,7 @@ def parse_bgp_peer(peer: dict[str, Any]) -> BgpPeerPayload:
         ),
         net_backend=_net_backend(peer),
         listen_port=_optional_listen_port(peer),
+        mtu=_optional_mtu(peer),
     )
 
 
@@ -181,6 +190,7 @@ def parse_ibgp_peer(peer: dict[str, Any], *, require_wg_fields: bool | None = No
         babel_rxcost=_checked("babel_rxcost", validate_rxcost, _as_int(_require(peer, "babel_rxcost"), "babel_rxcost")),
         babel_type=_checked("babel_type", validate_babel_type, _as_str(_require(peer, "babel_type"), "babel_type")),
         listen_port=_optional_listen_port(peer),
+        mtu=_optional_mtu(peer),
     )
 
 

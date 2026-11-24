@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 interface ModalProps {
@@ -22,7 +22,7 @@ export function Modal({ onClose, children }: ModalProps) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-lg rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-black p-6">
+      <div className="max-h-[95dvh] w-full max-w-lg overflow-y-auto rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-black p-6">
         {children}
       </div>
     </div>,
@@ -51,10 +51,16 @@ interface FormModalProps {
 }
 
 export function FormModal({ title, fields, onSubmit, onClose }: FormModalProps) {
+  const [error, setError] = useState("");
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(e.currentTarget));
-    await onSubmit(data as Record<string, string>);
+    try {
+      setError("");
+      await onSubmit(data as Record<string, string>);
+    } catch (e) {
+      setError((e as Error).message);
+    }
   };
 
   return (
@@ -100,6 +106,7 @@ export function FormModal({ title, fields, onSubmit, onClose }: FormModalProps) 
             )}
           </label>
         ))}
+        {error && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{error}</p>}
         <div className="flex gap-2 pt-2">
           <button
             type="submit"

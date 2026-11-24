@@ -76,9 +76,8 @@ def _load_node_block(db: Database, node_id: str) -> dict[str, Any]:
     return _node_block(ManagedNodeStore(db.connection).get(node_id))
 
 
-def _bgp_row_to_dict(row: Any) -> dict[str, Any]:
-    return {
-        "peer_asn": int(row["peer_asn"]),
+def _peer_fields(row: Any) -> dict[str, Any]:
+    peer = {
         "ifname": row["ifname"],
         "wg_private_key": row["wg_private_key"],
         "wg_public_key": row["wg_public_key"],
@@ -90,23 +89,22 @@ def _bgp_row_to_dict(row: Any) -> dict[str, Any]:
         "allowed_ips": parse_allowed_ips_json(row["allowed_ips_json"]),
         "net_backend": row["net_backend"],
     }
+    # Leave the digest of snapshots created before MTU support unchanged.
+    if row["mtu"] is not None:
+        peer["mtu"] = row["mtu"]
+    return peer
+
+
+def _bgp_row_to_dict(row: Any) -> dict[str, Any]:
+    return {"peer_asn": int(row["peer_asn"]), **_peer_fields(row)}
 
 
 def _ibgp_row_to_dict(row: Any) -> dict[str, Any]:
     return {
         "name": row["name"],
-        "ifname": row["ifname"],
-        "wg_private_key": row["wg_private_key"],
-        "wg_public_key": row["wg_public_key"],
-        "peer_public_key": row["peer_public_key"],
-        "endpoint": row["endpoint"],
-        "local_lla": row["local_lla"],
-        "peer_lla": row["peer_lla"],
+        **_peer_fields(row),
         "peer_ip": row["peer_ip"],
         "has_wg": bool(row["has_wg"]),
-        "listen_port": int(row["listen_port"]),
-        "allowed_ips": parse_allowed_ips_json(row["allowed_ips_json"]),
-        "net_backend": row["net_backend"],
         "babel_rxcost": int(row["babel_rxcost"]),
         "babel_type": row["babel_type"],
     }

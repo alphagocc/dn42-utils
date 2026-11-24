@@ -39,6 +39,7 @@ def _import_bgp(*, config: AppConfig, db_path: Path, target_node_id: str, peer: 
         peer_lla=parsed.peer_lla,
         net_backend=parsed.net_backend,
         listen_port=parsed.listen_port,
+        mtu=parsed.mtu,
         node_id=target_node_id,
         render_files=False,
     )
@@ -67,6 +68,7 @@ def _import_ibgp(*, config: AppConfig, db_path: Path, target_node_id: str, peer:
         babel_rxcost=parsed.babel_rxcost,
         babel_type=parsed.babel_type,
         listen_port=parsed.listen_port,
+        mtu=parsed.mtu,
         node_id=target_node_id,
         render_files=False,
     )

@@ -10,16 +10,16 @@ Payload schemas (set by node-side `push`):
 
     kind=peer_add
         {"peer_kind": "bgp",  "peer": {peer_asn, peer_public_key, endpoint?, peer_lla,
-                                       net_backend, listen_port?}}
+                                       net_backend, listen_port?, mtu?}}
         {"peer_kind": "ibgp", "peer": {name, peer_ip, has_wg, peer_public_key?, endpoint?,
                                        peer_lla?, net_backend?, babel_rxcost, babel_type,
-                                       listen_port?}}
+                                       listen_port?, mtu?}}
 
     kind=peer_modify (BGP): {"peer_kind": "bgp",  "peer": {peer_asn, peer_public_key, endpoint?,
-                                                            peer_lla, net_backend, listen_port?}}
+                                                            peer_lla, net_backend, listen_port?, mtu?}}
     kind=peer_modify (iBGP): {"peer_kind": "ibgp", "peer": {name, peer_ip, peer_public_key,
                                                              endpoint?, peer_lla?, net_backend,
-                                                             babel_rxcost, babel_type, listen_port?}}
+                                                             babel_rxcost, babel_type, listen_port?, mtu?}}
 
     kind=peer_delete:
         {"peer_kind": "bgp",  "key": {"peer_asn": ...}}
@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from dn42ctl.config import AppConfig
+from dn42ctl.constants import UNSET
 from dn42ctl.db import Database
 from dn42ctl.db_managed import (
     ConfigProposal,
@@ -74,6 +75,7 @@ def _apply_peer_add(*, config: AppConfig, db_path: Path, target_node_id: str, pa
             peer_lla=parsed.peer_lla,
             net_backend=parsed.net_backend,
             listen_port=parsed.listen_port,
+            mtu=parsed.mtu,
             node_id=target_node_id,
             render_files=False,
         )
@@ -92,6 +94,7 @@ def _apply_peer_add(*, config: AppConfig, db_path: Path, target_node_id: str, pa
             babel_rxcost=ibgp.babel_rxcost,
             babel_type=ibgp.babel_type,
             listen_port=ibgp.listen_port,
+            mtu=ibgp.mtu,
             node_id=target_node_id,
             render_files=False,
         )
@@ -111,6 +114,7 @@ def _apply_peer_modify(*, config: AppConfig, db_path: Path, target_node_id: str,
             peer_lla=parsed.peer_lla,
             net_backend=parsed.net_backend,
             listen_port=parsed.listen_port,
+            mtu=parsed.mtu if "mtu" in peer else UNSET,
             node_id=target_node_id,
             render_files=False,
         )
@@ -130,6 +134,7 @@ def _apply_peer_modify(*, config: AppConfig, db_path: Path, target_node_id: str,
             babel_rxcost=ibgp.babel_rxcost,
             babel_type=ibgp.babel_type,
             listen_port=ibgp.listen_port,
+            mtu=ibgp.mtu if "mtu" in peer else UNSET,
             node_id=target_node_id,
             render_files=False,
         )

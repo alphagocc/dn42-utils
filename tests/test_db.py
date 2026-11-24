@@ -90,11 +90,13 @@ class TestMigrations:
         db = Database(conn)
         db.migrate()
 
-        bgp_row = conn.execute("SELECT net_backend FROM bgp_peers WHERE peer_asn=4242421111").fetchone()
+        bgp_row = conn.execute("SELECT net_backend, mtu FROM bgp_peers WHERE peer_asn=4242421111").fetchone()
         assert bgp_row["net_backend"] == "networkd", f"BGP peer not converted: {bgp_row['net_backend']}"
+        assert bgp_row["mtu"] is None
 
-        ibgp_row = conn.execute("SELECT net_backend FROM ibgp_peers WHERE name='test'").fetchone()
+        ibgp_row = conn.execute("SELECT net_backend, mtu FROM ibgp_peers WHERE name='test'").fetchone()
         assert ibgp_row["net_backend"] == "networkd", f"iBGP peer not converted: {ibgp_row['net_backend']}"
+        assert ibgp_row["mtu"] is None
 
 
 class TestEnsureNode:

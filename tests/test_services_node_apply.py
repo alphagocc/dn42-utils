@@ -238,6 +238,45 @@ class TestIbgpPeer:
         assert "wg_alpha" not in babel
 
 
+def test_mtu_changes_reload_only_networkd_and_rollback_to_legacy_payload(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    bgp, ibgp = _bgp_peer(), _ibgp_peer()
+    payload = _make_payload(tmp_path, bgp=[bgp], ibgp=[ibgp])
+    _seed_cache(cfg.cache_db_path, payload)
+    _apply(cfg, tmp_path)
+    networkd = Path(_paths(tmp_path)["networkd_dir"])
+    bgp_path = networkd / "dn42_1234.network"
+    ibgp_path = networkd / "wg_alpha.network"
+    original = {path: path.read_text() for path in (bgp_path, ibgp_path)}
+
+    bgp["mtu"], ibgp["mtu"] = 1380, 1420
+    _seed_cache(cfg.cache_db_path, payload)
+    applied = _apply(cfg, tmp_path)
+    assert {diff.path for diff in applied.diffs if diff.action == "update"} == {bgp_path, ibgp_path}
+    assert [action.cmd for action in applied.reloads] == [["networkctl", "reload"]]
+    assert "[Link]\nMTUBytes=1380\n" in bgp_path.read_text()
+    assert "[Link]\nMTUBytes=1420\n" in ibgp_path.read_text()
+    assert _apply(cfg, tmp_path).reloads == []
+
+    del bgp["mtu"], ibgp["mtu"]
+    _seed_cache(cfg.cache_db_path, payload)
+    rolled_back = _apply(cfg, tmp_path)
+    assert [action.cmd for action in rolled_back.reloads] == [["networkctl", "reload"]]
+    assert {path: path.read_text() for path in original} == original
+
+
+@pytest.mark.parametrize("mtu", [1279, "1400\n[Route]", True])
+def test_invalid_cached_mtu_aborts_before_writing_peers(tmp_path: Path, mtu: object) -> None:
+    cfg = _cfg(tmp_path)
+    peer = _ibgp_peer()
+    peer["mtu"] = mtu
+    _seed_cache(cfg.cache_db_path, _make_payload(tmp_path, bgp=[_bgp_peer()], ibgp=[peer]))
+    with pytest.raises(Dn42CtlError, match="MTU"):
+        _apply(cfg, tmp_path)
+    assert not Path(_paths(tmp_path)["networkd_dir"]).exists()
+    assert not Path(_paths(tmp_path)["peers_dir"]).exists()
+
+
 class TestDryRun:
     def test_dry_run_does_not_write(self, tmp_path: Path) -> None:
         cfg = _cfg(tmp_path)

@@ -38,6 +38,8 @@ sudo uv run dn42ctl init --genconf # 同时生成 Bird/Babel/ROA 配置
 sudo uv run dn42ctl genconf
 ```
 
+要给本节点追加 BIRD 配置，编辑主配置末尾已经包含的 `/etc/bird/extra.conf`。使用默认路径时，保存后执行 `sudo bird -p -c /etc/bird.conf && sudo birdc configure`，语法检查成功后即重载。自定义路径和完整示例见[自定义 BIRD 配置](docs/architecture/bird_extra_conf.md)。
+
 ### 创建 BGP peer
 
 ```bash
@@ -49,6 +51,8 @@ sudo uv run dn42ctl bgp peer --asn 424242xxxx --pubkey <PEER_PUBKEY> --endpoint 
 ```bash
 sudo uv run dn42ctl ibgp peer --name <NAME> --pubkey <PEER_PUBKEY> --endpoint <HOST:PORT> --peer-lla <fe80::...>
 ```
+
+创建或修改 WireGuard peer 时可指定 `--mtu`。单机和中心管理示例见 [WireGuard 隧道 MTU](docs/architecture/peer_mtu.md)。
 
 ### 扫描并导入现有配置
 

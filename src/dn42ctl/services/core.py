@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import cast
 
 from dn42ctl.config import AppConfig
-from dn42ctl.constants import WG_PORT_RANGE
+from dn42ctl.constants import WG_PORT_RANGE, _Unset
 from dn42ctl.db import Database, DatabaseError
 from dn42ctl.file_policy import BIRD, NETDEV, NETWORK, FilePolicy, apply_policy
 from dn42ctl.render import (
@@ -17,6 +17,7 @@ from dn42ctl.render import (
     render_networkd_netdev,
     render_networkd_network,
 )
+from dn42ctl.validators import ValidationError, validate_mtu
 from dn42ctl.wg import WireGuardError, generate_wg_keypair
 
 DEFAULT_ALLOWED_IPS = ["fe80::/64", "fd00::/8"]
@@ -55,6 +56,7 @@ class _PeerViewBase:
     files: list[FileStatus]
     live_wg: CommandOutput | None
     live_bird: CommandOutput | None
+    mtu: int | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -90,6 +92,7 @@ class WgTunnelView:
     wg_public_key: str
     files: list[FileStatus]
     live_wg: CommandOutput | None
+    mtu: int | None = None
 
 
 @dataclass(frozen=True)
@@ -169,6 +172,20 @@ class PeerResult:
     wg_public_key: str
     local_lla: str
     generated_files: list[Path]
+    mtu: int | None = None
+
+
+def resolve_peer_mtu(mtu: int | None | _Unset, *, current: int | None = None, has_wg: bool = True) -> int | None:
+    if isinstance(mtu, _Unset):
+        return current
+    if mtu is None:
+        return None
+    if not has_wg:
+        raise Dn42CtlError("仅 WireGuard peer 可设置 MTU")
+    try:
+        return validate_mtu(mtu)
+    except ValidationError as exc:
+        raise Dn42CtlError(str(exc)) from exc
 
 
 def write_text(path: Path, content: str, *, policy: FilePolicy | None = None) -> None:
@@ -237,6 +254,7 @@ def write_net_backend_files(
     local_lla: str,
     peer_lla: str,
     generated: list[Path],
+    mtu: int | None = None,
 ) -> None:
     """Write networkd wireguard config files."""
     if not allowed_ips:
@@ -263,6 +281,7 @@ def write_net_backend_files(
             ifname=ifname,
             local_lla=local_lla,
             peer_lla=peer_lla,
+            mtu=mtu,
         ),
         policy=NETWORK,
     )

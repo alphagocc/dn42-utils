@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from dn42ctl.config import AppConfig
-from dn42ctl.constants import MAX_PORT
+from dn42ctl.constants import MAX_PORT, UNSET, _Unset
 from dn42ctl.db import BgpPeerRecord, DatabaseError
 from dn42ctl.services.core import (
     DEFAULT_ALLOWED_IPS,
@@ -16,6 +16,7 @@ from dn42ctl.services.core import (
     open_db_and_ensure_node,
     parse_allowed_ips_json,
     peer_files_for_backend,
+    resolve_peer_mtu,
     resolve_wg_keypair,
     write_bird_bgp_peer,
     write_net_backend_files,
@@ -34,6 +35,7 @@ def create_bgp_peer(
     peer_lla: str,
     net_backend: str,
     listen_port: int | None = None,
+    mtu: int | None = None,
     wg_private_key: str | None = None,
     wg_public_key: str | None = None,
     local_lla: str | None = None,
@@ -50,6 +52,7 @@ def create_bgp_peer(
       row is created.
     """
     backend = normalize_net_backend(net_backend)
+    mtu = resolve_peer_mtu(mtu)
 
     node_id = node_id or config.node_id
     db = open_db_and_ensure_node(db_path, node_id)
@@ -98,6 +101,7 @@ def create_bgp_peer(
                     local_lla=local_lla_addr,
                     peer_lla=peer_lla,
                     listen_port=listen_port,
+                    mtu=mtu,
                     allowed_ips=effective_allowed_ips,
                     net_backend=backend,
                 )
@@ -116,6 +120,7 @@ def create_bgp_peer(
                 ifname=ifname,
                 private_key=private_key,
                 listen_port=listen_port,
+                mtu=mtu,
                 peer_public_key=peer_public_key,
                 endpoint=endpoint,
                 allowed_ips=effective_allowed_ips,
@@ -127,6 +132,7 @@ def create_bgp_peer(
         return PeerResult(
             ifname=ifname,
             listen_port=listen_port,
+            mtu=mtu,
             wg_public_key=public_key,
             local_lla=local_lla_addr,
             generated_files=generated,
@@ -147,6 +153,7 @@ def modify_bgp_peer(
     peer_lla: str,
     net_backend: str,
     listen_port: int | None = None,
+    mtu: int | None | _Unset = UNSET,
     node_id: str | None = None,
     render_files: bool = True,
     allowed_ips: list[str] | None = None,
@@ -167,6 +174,7 @@ def modify_bgp_peer(
         private_key = str(row["wg_private_key"])
         public_key = str(row["wg_public_key"])
         current_listen_port = int(row["listen_port"])
+        effective_mtu = resolve_peer_mtu(mtu, current=row["mtu"])
         new_listen_port = current_listen_port if listen_port is None else listen_port
         try:
             validate_listen_port(new_listen_port, allow_zero=True)
@@ -199,6 +207,7 @@ def modify_bgp_peer(
                 endpoint=endpoint,
                 peer_lla=peer_lla,
                 listen_port=new_listen_port,
+                mtu=mtu,
                 allowed_ips=effective_allowed_ips,
                 net_backend=backend,
             )
@@ -215,6 +224,7 @@ def modify_bgp_peer(
                 ifname=ifname,
                 private_key=private_key,
                 listen_port=new_listen_port,
+                mtu=effective_mtu,
                 peer_public_key=peer_public_key,
                 endpoint=endpoint,
                 allowed_ips=effective_allowed_ips,
@@ -226,6 +236,7 @@ def modify_bgp_peer(
         return PeerResult(
             ifname=ifname,
             listen_port=new_listen_port,
+            mtu=effective_mtu,
             wg_public_key=public_key,
             local_lla=local_lla,
             generated_files=generated,

@@ -10,10 +10,10 @@ from typing import Annotated, Literal
 import anyio
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, WebSocket
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from dn42ctl.config import AppConfig
-from dn42ctl.constants import UNSET
+from dn42ctl.constants import MAX_PEER_MTU, MIN_PEER_MTU, UNSET
 from dn42ctl.db import Database
 from dn42ctl.db_managed import ManagedNodeStore
 from dn42ctl.services import (
@@ -681,11 +681,15 @@ def api_clear_rollback(node_id: str) -> dict:
 # --- Admin: BGP peer CRUD ---
 
 
+PeerMtu = Annotated[int, Field(strict=True, ge=MIN_PEER_MTU, le=MAX_PEER_MTU)]
+
+
 class BgpPeerModifyRequest(BaseModel):
     peer_public_key: str
     endpoint: str = ""
     peer_lla: str
     listen_port: int | None = None
+    mtu: PeerMtu | None = None
     allowed_ips: list[str] | None = None
 
     @field_validator("peer_public_key")
@@ -752,6 +756,7 @@ def api_create_bgp_peer(body: BgpPeerCreateRequest, node_id: str | None = Query(
             peer_lla=body.peer_lla,
             net_backend="networkd",
             listen_port=body.listen_port,
+            mtu=body.mtu,
             node_id=_resolve_target_node(node_id),
             render_files=False,
             allowed_ips=body.allowed_ips,
@@ -775,6 +780,7 @@ def api_modify_bgp_peer(peer_asn: int, body: BgpPeerModifyRequest, node_id: str 
             peer_lla=body.peer_lla,
             net_backend="networkd",
             listen_port=body.listen_port,
+            mtu=body.mtu if "mtu" in body.model_fields_set else UNSET,
             node_id=_resolve_target_node(node_id),
             render_files=False,
             allowed_ips=body.allowed_ips,
@@ -811,6 +817,7 @@ class _IbgpPeerValidators(BaseModel):
     babel_rxcost: int = 20
     babel_type: str = "tunnel"
     listen_port: int | None = None
+    mtu: PeerMtu | None = None
     allowed_ips: list[str] | None = None
     # 这条记录所代表的受管节点,用于地址传播。modify 时字段缺席 = 保留既有关联。
     remote_node_id: str | None = None
@@ -926,6 +933,7 @@ def api_create_ibgp_peer(body: IbgpPeerCreateRequest, node_id: str | None = Quer
             babel_rxcost=body.babel_rxcost,
             babel_type=body.babel_type,
             listen_port=body.listen_port,
+            mtu=body.mtu,
             node_id=_resolve_target_node(node_id),
             render_files=False,
             allowed_ips=body.allowed_ips,
@@ -953,6 +961,7 @@ def api_modify_ibgp_peer(name: str, body: IbgpPeerModifyRequest, node_id: str | 
             babel_rxcost=body.babel_rxcost,
             babel_type=body.babel_type,
             listen_port=body.listen_port,
+            mtu=body.mtu if "mtu" in body.model_fields_set else UNSET,
             node_id=_resolve_target_node(node_id),
             render_files=False,
             allowed_ips=body.allowed_ips,

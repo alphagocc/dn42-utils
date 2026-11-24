@@ -68,6 +68,11 @@ class TestBgpPayload:
             ("listen_port", -1),
             ("listen_port", 70000),
             ("listen_port", "51820"),
+            ("mtu", True),
+            ("mtu", "1400"),
+            ("mtu", 1400.5),
+            ("mtu", 1279),
+            ("mtu", 65536),
         ],
     )
     def test_rejects_bad_field(self, field: str, value: Any) -> None:

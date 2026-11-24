@@ -12,7 +12,7 @@
 - 启动/初始化时应自动执行迁移，保证旧库可直接升级。
 - 迁移是 `(version, step)` 列表，逐版本执行 + commit。`step` 可以是 **SQL 字符串**（使用 `executescript` 执行，SQL 必须**幂等**：`IF NOT EXISTS` / 条件 UPDATE），也可以是 **`Callable[[sqlite3.Connection], None]`**。
 - **`ALTER TABLE ... ADD COLUMN` 必须使用 callable 分支。** SQLite 没有 `ADD COLUMN IF NOT EXISTS`，而 `executescript` 在执行前**隐式 COMMIT**、语句不在调用方事务内：脚本中途失败会留下"前几列已提交、版本号没写入、`rollback()` 也对它们无效"的状态，重新运行会有 duplicate column，导致**库永久卡死**。callable 分支在连接的隐式事务内执行，与 `schema_migrations` 插入真正原子。用 `migrations.ensure_column()`（先查 `PRAGMA table_info` 再决定是否 ALTER）。
-- **版本号不连续是有意的。** v1 是合并后的建表脚本，v2–v7 已在 2026-05-31 的清理中并入 v1；v8 是 `nm` → `networkd` 的数据订正（编号跳到 8 是为了避开生产库里已应用的旧 v2）。**当前最大版本是 v13**（`is_self` 唯一索引），新迁移从 v14 开始。
+- **版本号不连续是有意的。** v1 是合并后的建表脚本，v2–v7 已在 2026-05-31 的清理中并入 v1；v8 是 `nm` → `networkd` 的数据订正（编号跳到 8 是为了避开生产库里已应用的旧 v2）。最新版本见 [MIGRATIONS](../../src/dn42ctl/migrations.py)。
 
 ## DB 与配置文件的写入顺序
 
@@ -88,6 +88,7 @@ DB 层的写方法长成 `try: execute(...) → 检查 rowcount → emit → com
 - `peer_public_key`、`endpoint`
 - `local_lla`、`peer_lla`
 - `listen_port`（允许为 0 表示未设置）
+- `mtu`（v15 新增，可空，单位为字节）
 - `allowed_ips_json`、`net_backend`
 - `created_at`、`updated_at`
 

@@ -5,7 +5,7 @@ import binascii
 import ipaddress
 import re
 
-from dn42ctl.constants import BABEL_VALID_TYPES, MAX_ASN, MAX_PORT, WG_KEY_BYTES
+from dn42ctl.constants import BABEL_VALID_TYPES, MAX_ASN, MAX_PEER_MTU, MAX_PORT, MIN_PEER_MTU, WG_KEY_BYTES
 
 
 class ValidationError(ValueError):
@@ -23,6 +23,14 @@ def validate_listen_port(value: int, *, allow_zero: bool = False) -> int:
     lo = 0 if allow_zero else 1
     if value < lo or value > MAX_PORT:
         raise ValidationError(f"ListenPort 超出范围 ({lo}-{MAX_PORT}): {value}")
+    return value
+
+
+def validate_mtu(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValidationError("MTU 必须是整数")
+    if not MIN_PEER_MTU <= value <= MAX_PEER_MTU:
+        raise ValidationError(f"MTU 超出范围 ({MIN_PEER_MTU}-{MAX_PEER_MTU}): {value}")
     return value
 
 

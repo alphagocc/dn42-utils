@@ -20,6 +20,7 @@ from dn42ctl.services.core import (
     peer_files_for_backend,
     pick_unused_port,
     regenerate_babel_conf,
+    resolve_peer_mtu,
     resolve_wg_keypair,
     sanitize_name,
     write_net_backend_files,
@@ -49,6 +50,7 @@ def create_ibgp_peer(
     babel_rxcost: int = 20,
     babel_type: str = "tunnel",
     listen_port: int | None = None,
+    mtu: int | None = None,
     wg_private_key: str | None = None,
     wg_public_key: str | None = None,
     local_lla: str | None = None,
@@ -65,6 +67,7 @@ def create_ibgp_peer(
     lets that node's address changes propagate here; None means it is not linked. See
     docs/architecture/node_addressing.md.
     """
+    mtu = resolve_peer_mtu(mtu, has_wg=has_wg)
     node_id = node_id or config.node_id
     db = open_db_and_ensure_node(db_path, node_id)
     try:
@@ -136,6 +139,7 @@ def create_ibgp_peer(
                     local_lla=local_lla_addr,
                     peer_lla=peer_lla or "",
                     listen_port=listen_port,
+                    mtu=mtu,
                     allowed_ips=effective_allowed_ips,
                     net_backend=backend,
                     babel_rxcost=babel_rxcost,
@@ -167,6 +171,7 @@ def create_ibgp_peer(
                     ifname=ifname,
                     private_key=private_key,
                     listen_port=listen_port,
+                    mtu=mtu,
                     peer_public_key=peer_public_key or "",
                     endpoint=endpoint or "",
                     allowed_ips=effective_allowed_ips,
@@ -181,6 +186,7 @@ def create_ibgp_peer(
         return PeerResult(
             ifname=ifname,
             listen_port=listen_port,
+            mtu=mtu,
             wg_public_key=public_key,
             local_lla=local_lla_addr,
             generated_files=generated,
@@ -272,6 +278,7 @@ def modify_ibgp_peer(
     babel_type: str,
     peer_ip: str,
     listen_port: int | None = None,
+    mtu: int | None | _Unset = UNSET,
     node_id: str | None = None,
     render_files: bool = True,
     allowed_ips: list[str] | None = None,
@@ -308,6 +315,7 @@ def modify_ibgp_peer(
         public_key = str(row["wg_public_key"])
         local_lla = str(row["local_lla"])
         current_listen_port = int(row["listen_port"])
+        effective_mtu = resolve_peer_mtu(mtu, current=row["mtu"])
         new_listen_port = current_listen_port if listen_port is None else listen_port
         try:
             validate_listen_port(new_listen_port, allow_zero=True)
@@ -339,6 +347,7 @@ def modify_ibgp_peer(
                 endpoint=endpoint,
                 peer_lla=peer_lla,
                 listen_port=new_listen_port,
+                mtu=mtu,
                 allowed_ips=effective_allowed_ips,
                 net_backend=backend,
                 babel_rxcost=babel_rxcost,
@@ -367,6 +376,7 @@ def modify_ibgp_peer(
                 ifname=ifname,
                 private_key=private_key,
                 listen_port=new_listen_port,
+                mtu=effective_mtu,
                 peer_public_key=peer_public_key,
                 endpoint=endpoint,
                 allowed_ips=effective_allowed_ips,
@@ -381,6 +391,7 @@ def modify_ibgp_peer(
         return PeerResult(
             ifname=ifname,
             listen_port=new_listen_port,
+            mtu=effective_mtu,
             wg_public_key=public_key,
             local_lla=local_lla,
             generated_files=generated,

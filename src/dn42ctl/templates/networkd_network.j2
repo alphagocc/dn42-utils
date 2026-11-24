@@ -1,6 +1,11 @@
 [Match]
 Name={{ ifname }}
 
+{% if mtu is not none -%}
+[Link]
+MTUBytes={{ mtu }}
+
+{% endif -%}
 [Network]
 DHCP=no
 IPv6AcceptRA=false

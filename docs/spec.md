@@ -9,7 +9,7 @@
 `dn42ctl` 是一个用于生成/维护 DN42 相关配置的 Python CLI 工具，核心目标：
 
 - 可复现环境：使用 `uv` 锁定依赖与运行环境。
-- CLI 功能：`init`、`genconf`、`bgp peer [add|modify|del]`、`ibgp peer [add|modify|del]`、`show`、`scan`、`serve`、`node`、`system`、`deploy`。
+- CLI 功能：`init`、`genconf`、`bgp peer [modify|del]`、`ibgp peer [modify|del]`、`show`、`scan`、`serve`、`node`、`system`、`deploy`。
 - 网络后端：peer WireGuard 配置仅支持 `systemd-networkd`；`dummy_backend` 仍支持 `networkd` 与 `nm`。
 - 强制约束：WireGuard 的 AllowedIPs **必须写入**，但**禁止自动修改路由表**。
 - 数据持久化：所有状态写入 SQLite，便于多端/多节点集中管理；以 `node_id` 区分节点。
@@ -45,6 +45,7 @@
 | [`architecture/database.md`](architecture/database.md) | 数据库 |
 | [`architecture/db_browse.md`](architecture/db_browse.md) | 数据库只读浏览（白名单与脱敏） |
 | [`architecture/network_backends.md`](architecture/network_backends.md) | 网络后端（networkd / NetworkManager） |
+| [`architecture/peer_mtu.md`](architecture/peer_mtu.md) | 按 peer 设置、修改和清除 WireGuard MTU |
 | [`architecture/babel.md`](architecture/babel.md) | Babel 配置生成（rxcost / interface type） |
 | [`architecture/bird_extra_conf.md`](architecture/bird_extra_conf.md) | Bird 自定义配置（extra.conf） |
 | [`architecture/rest_api.md`](architecture/rest_api.md) | REST API 路由表 |
@@ -66,8 +67,8 @@
 | --- | --- |
 | [`commands/init.md`](commands/init.md) | `init`（含 dn42-dummy 接口） |
 | [`commands/genconf.md`](commands/genconf.md) | `genconf` |
-| [`commands/bgp_peer.md`](commands/bgp_peer.md) | `bgp peer [add\|modify\|del]` |
-| [`commands/ibgp_peer.md`](commands/ibgp_peer.md) | `ibgp peer [add\|modify\|del]` |
+| [`commands/bgp_peer.md`](commands/bgp_peer.md) | `bgp peer [modify\|del]` |
+| [`commands/ibgp_peer.md`](commands/ibgp_peer.md) | `ibgp peer [modify\|del]` |
 | [`commands/show.md`](commands/show.md) | `show` |
 | [`commands/scan.md`](commands/scan.md) | `scan` |
 | [`commands/node.md`](commands/node.md) | `node`（admin + 节点同步） |

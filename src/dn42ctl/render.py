@@ -4,6 +4,8 @@ from pathlib import Path
 
 from jinja2 import Environment, PackageLoader, StrictUndefined
 
+from dn42ctl.validators import validate_mtu
+
 _JINJA_ENV = Environment(
     loader=PackageLoader("dn42ctl", "templates"),
     autoescape=False,
@@ -101,12 +103,13 @@ def render_networkd_netdev(
     )
 
 
-def render_networkd_network(*, ifname: str, local_lla: str, peer_lla: str) -> str:
+def render_networkd_network(*, ifname: str, local_lla: str, peer_lla: str, mtu: int | None = None) -> str:
     return _render_template(
         "networkd_network.j2",
         ifname=ifname,
         local_lla=local_lla,
         peer_lla=peer_lla,
+        mtu=validate_mtu(mtu) if mtu is not None else None,
     )
 
 

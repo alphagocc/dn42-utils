@@ -10,6 +10,7 @@ interface WgTunnel {
   name?: string;
   endpoint: string;
   listen_port: number;
+  mtu: number | null;
   net_backend: string;
 }
 
@@ -19,6 +20,7 @@ const columns: Column<WgTunnel>[] = [
   { label: "ASN / Name", get: (r) => r.peer_asn || r.name },
   { label: "Endpoint", get: (r) => r.endpoint || "—" },
   { label: "Port", get: (r) => r.listen_port },
+  { label: "MTU", get: (r) => r.mtu ?? "Auto" },
   { label: "Backend", get: (r) => r.net_backend },
 ];
 

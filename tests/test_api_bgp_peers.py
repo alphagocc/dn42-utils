@@ -40,6 +40,27 @@ class TestEmptyPeerLists:
         assert resp.json() == []
 
 
+@pytest.mark.parametrize(("kind", "key"), [("bgp", "4242420002"), ("ibgp", "leaf")])
+def test_peer_mtu_updates(admin_client: TestClient, mock_wg_keypair, kind: str, key: str) -> None:
+    route = f"/api/admin/{kind}/peers"
+    fields = {"peer_public_key": VALID_PUBKEY, "peer_lla": VALID_PEER_LLA}
+    if kind == "ibgp":
+        fields["peer_ip"] = "fd42::2"
+    identity = {"peer_asn": int(key)} if kind == "bgp" else {"name": key}
+    created = admin_client.post(route, json={**identity, **fields, "mtu": 1400}, headers=ADMIN_H)
+    assert created.status_code == 201, created.text
+    assert created.json()["mtu"] == 1400
+
+    for changes, expected in (({}, 1400), ({"mtu": 1280}, 1280), ({"mtu": None}, None)):
+        updated = admin_client.put(f"{route}/{key}", json={**fields, **changes}, headers=ADMIN_H)
+        assert updated.status_code == 200, updated.text
+        assert admin_client.get(route, headers=ADMIN_H).json()[0]["mtu"] == expected
+
+    invalid = admin_client.put(f"{route}/{key}", json={**fields, "mtu": 65536}, headers=ADMIN_H)
+    assert invalid.status_code == 422
+    assert admin_client.get(route, headers=ADMIN_H).json()[0]["mtu"] is None
+
+
 class TestBgpPeerRoutes:
     def test_list_requires_auth(self, admin_client: TestClient) -> None:
         resp = admin_client.get("/api/admin/bgp/peers")

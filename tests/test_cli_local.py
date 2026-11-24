@@ -80,7 +80,7 @@ def _peer_args(kind: str) -> list[str]:
 def test_peer_lifecycle_updates_persistent_state_and_files(
     local_cli: LocalCli, sample_config: AppConfig, kind: str, key: str, ifname: str
 ) -> None:
-    created = local_cli(_peer_args(kind))
+    created = local_cli([*_peer_args(kind), "--mtu", "1400"])
     assert created.exit_code == 0, created.output
     netdev = Path(sample_config.networkd_dir) / f"{ifname}.netdev"
     network = netdev.with_suffix(".network")
@@ -88,6 +88,7 @@ def test_peer_lifecycle_updates_persistent_state_and_files(
     assert "AllowedIPs=fe80::/64" in netdev.read_text()
     assert "AllowedIPs=fd42::/16" in netdev.read_text()
     assert f"Peer={VALID_PEER_LLA}" in network.read_text()
+    assert "[Link]\nMTUBytes=1400\n" in network.read_text()
 
     extra = ["--peer-ip", "2001:db8:2::99", "--rxcost", "256", "--type", "wired"] if kind == "ibgp" else []
     modified = local_cli(
@@ -117,6 +118,7 @@ def test_peer_lifecycle_updates_persistent_state_and_files(
     assert peer["endpoint"] == "new.example:51900"
     assert peer["peer_lla"] == "fe80::99"
     assert peer["listen_port"] == 31003
+    assert peer["mtu"] == 1400
     assert peer["allowed_ips"] == ["2001:db8::/32"]
     assert peer["live_wg"]["output"] == f"live {ifname}"
     assert "Endpoint=new.example:51900" in netdev.read_text()
@@ -126,6 +128,17 @@ def test_peer_lifecycle_updates_persistent_state_and_files(
         assert peer["babel_rxcost"] == 256
         assert peer["babel_type"] == "wired"
         assert "rxcost 256" in Path(sample_config.bird_babel_conf_path).read_text()
+
+    mtu_changed = local_cli([kind, "peer", "modify", key, "--mtu", "1360"])
+    assert mtu_changed.exit_code == 0, mtu_changed.output
+    edited_peer = json.loads(local_cli(["show", kind, "--json"]).output)[0]
+    assert edited_peer["mtu"] == 1360
+    assert edited_peer["endpoint"] == peer["endpoint"]
+    assert "MTUBytes=1360" in network.read_text()
+    cleared = local_cli([kind, "peer", "modify", key, "--clear-mtu"])
+    assert cleared.exit_code == 0, cleared.output
+    assert "MTUBytes" not in network.read_text()
+    assert json.loads(local_cli(["show", kind, "--json"]).output)[0]["mtu"] is None
 
     cancelled = local_cli([kind, "peer", "del", key], input="n\n")
     assert cancelled.exit_code == 0, cancelled.output
@@ -151,6 +164,8 @@ def test_interactive_bgp_creation_uses_the_advertised_keypair(local_cli: LocalCl
 
 
 def test_ibgp_without_wireguard_rejects_tunnel_modification(local_cli: LocalCli, sample_config: AppConfig) -> None:
+    invalid = local_cli(["ibgp", "peer", "--name", NAME, "--peer-ip", VALID_PEER_IP, "--no-wg", "--mtu", "1400"])
+    assert invalid.exit_code == 2, invalid.output
     result = local_cli(["ibgp", "peer", "--name", NAME, "--peer-ip", VALID_PEER_IP, "--no-wg"])
     assert result.exit_code == 0, result.output
     assert (Path(sample_config.bird_peers_dir) / "ibgp_leaf.conf").exists()

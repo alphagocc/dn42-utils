@@ -1,6 +1,6 @@
 # 命令：bgp peer
 
-## `dn42ctl bgp peer`（等价于 `dn42ctl bgp peer add`）
+## `dn42ctl bgp peer`
 
 用途：创建一个对外 BGP peer（wireguard 接口 + bird peers + 网络后端配置）。
 
@@ -8,6 +8,7 @@
 
 - 必填：`--asn`、`--pubkey`、`--peer-lla`。
 - 可选：
+  - `--mtu` 为本端 WireGuard 接口指定 MTU，已有 peer 可通过 `modify` 的 `--clear-mtu` 清除。详见[隧道 MTU](../architecture/peer_mtu.md)。
   - `--endpoint`：对端 Endpoint（IP:Port）。可为空，适用于对端在防火墙后的场景。
   - `--listen-port`
   - `0` 表示不设置（让系统自行选择端口，适用于仅出站/防火墙后场景）

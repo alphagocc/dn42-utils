@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 MAX_PORT = 65535
+MIN_PEER_MTU = 1280
+MAX_PEER_MTU = 65535
 # RFC 6793:AS 号是 32 位无符号数。没有上界的话超大值要到 sqlite 才炸成 OverflowError。
 MAX_ASN = 4294967295
 # WireGuard 的 X25519 公私钥都是 32 字节,base64 后 44 字符。

@@ -18,6 +18,10 @@ def _mock_wg(mock_wg_keypair):
 
 
 class TestCreateIbgpPeer:
+    def test_mtu_requires_wireguard(self, sample_config, db_path: Path) -> None:
+        with pytest.raises(Dn42CtlError, match="WireGuard"):
+            create_ibgp_peer(config=sample_config, db_path=db_path, name="n", peer_ip="fd42::2", has_wg=False, mtu=1400)
+
     @pytest.mark.usefixtures("_mock_wg")
     def test_create_with_wg_returns_peer_and_writes_files(self, sample_config, db_path: Path) -> None:
         result = create_ibgp_peer(

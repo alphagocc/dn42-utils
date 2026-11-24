@@ -11,7 +11,7 @@ iBGP 互联与 eBGP（`bgp peer`）在几处刻意不同，修改前请先理解
 
 > `rxcost` / `type` 如何写入 `babel.conf`，见 [`../architecture/babel.md`](../architecture/babel.md)。
 
-## `dn42ctl ibgp peer`（等价于 `dn42ctl ibgp peer add`）
+## `dn42ctl ibgp peer`
 
 用途：创建内网 iBGP peer。可选择是否同时创建 WireGuard 隧道。
 
@@ -20,6 +20,7 @@ iBGP 互联与 eBGP（`bgp peer`）在几处刻意不同，修改前请先理解
 - 必填：`--name`、`--peer-ip`（对端网内 IPv6 地址）。
 - WG 相关（`--no-wg` 未设置时必填）：`--pubkey`、`--peer-lla`、`--rxcost`。
 - 可选：
+  - 启用 WireGuard 时可加 `--mtu`。修改和清除设置的示例见[隧道 MTU](../architecture/peer_mtu.md)。
   - `--endpoint`：对端 Endpoint（IP:Port）。可为空，适用于对端在防火墙后的场景。
   - `--type`：Babel interface type，取值 `wired`/`wireless`/`tunnel`，默认 `tunnel`。高丢包链路建议使用 `wireless`。
   - `--listen-port`：

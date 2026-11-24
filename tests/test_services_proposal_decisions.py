@@ -156,6 +156,7 @@ class TestPeerProposalLifecycle:
     ) -> None:
         _register(db_path)
         payload = _bgp_add_payload() if kind == "bgp" else _ibgp_add_payload()
+        payload["peer"]["mtu"] = 1400
         if kind == "ibgp":
             payload["peer"].update(
                 {
@@ -173,6 +174,7 @@ class TestPeerProposalLifecycle:
             payload=payload,
         )
         accept_proposal(config=sample_config, db_path=db_path, proposal_id=add.id)
+        del payload["peer"]["mtu"]
         payload["peer"].update({"endpoint": "new.example:51900", "peer_lla": "fe80::99", "listen_port": 31003})
         if kind == "ibgp":
             payload["peer"].update({"peer_ip": "2001:db8:2::99", "babel_rxcost": 256, "babel_type": "wired"})
@@ -195,6 +197,7 @@ class TestPeerProposalLifecycle:
             assert peer["endpoint"] == "new.example:51900"
             assert peer["peer_lla"] == "fe80::99"
             assert peer["listen_port"] == 31003
+            assert peer["mtu"] == 1400
         finally:
             db.close()
         delete = submit_proposal(
@@ -368,7 +371,7 @@ class TestImportReport:
             node_id=NODE_A,
             kind="scan_result",
             payload={
-                "bgp_peers": [_bgp_add_payload()["peer"]],
+                "bgp_peers": [{**_bgp_add_payload()["peer"], "mtu": 1380}],
                 "ibgp_peers": [_ibgp_add_payload()["peer"]],
             },
         )
@@ -380,7 +383,8 @@ class TestImportReport:
         # not the central host's own self node.
         db = Database.open(db_path)
         try:
-            assert db.get_bgp_peer(NODE_A, 4242421234) is not None
+            bgp = db.get_bgp_peer(NODE_A, 4242421234)
+            assert bgp is not None and bgp["mtu"] == 1380
             assert db.get_bgp_peer(sample_config.node_id, 4242421234) is None
             assert db.get_ibgp_peer(NODE_A, "alpha") is not None
             assert db.get_ibgp_peer(sample_config.node_id, "alpha") is None

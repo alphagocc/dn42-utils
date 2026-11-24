@@ -135,6 +135,7 @@ def show_bgp_peers(
                     peer_lla=row["peer_lla"],
                     local_lla=str(row["local_lla"]),
                     listen_port=int(row["listen_port"]),
+                    mtu=row["mtu"],
                     allowed_ips=parse_allowed_ips_json(
                         str(row["allowed_ips_json"]) if row["allowed_ips_json"] else None
                     ),
@@ -206,6 +207,7 @@ def show_ibgp_peers(
                     peer_lla=row["peer_lla"],
                     local_lla=str(row["local_lla"]),
                     listen_port=int(row["listen_port"]),
+                    mtu=row["mtu"],
                     allowed_ips=parse_allowed_ips_json(
                         str(row["allowed_ips_json"]) if row["allowed_ips_json"] else None
                     ),
@@ -244,6 +246,7 @@ def show_wg_tunnels(
                 endpoint=p.endpoint,
                 allowed_ips=p.allowed_ips,
                 listen_port=p.listen_port,
+                mtu=p.mtu,
                 local_lla=p.local_lla,
                 peer_lla=p.peer_lla,
                 net_backend=p.net_backend,

@@ -4,6 +4,7 @@ import { Table, type Column } from "../../shared/components/Table";
 import { FormModal, ConfirmModal, type FieldDef } from "../../shared/components/Modal";
 import { useToast } from "../../shared/components/Toast";
 import { useNodeScope } from "../NodeContext";
+import { mtuField, parseMtu } from "../peerMtu";
 
 interface IbgpPeer {
   name: string;
@@ -17,6 +18,7 @@ interface IbgpPeer {
   peer_lla?: string;
   net_backend: string;
   listen_port?: number;
+  mtu: number | null;
   allowed_ips: string[];
   remote_node_id: string | null;
 }
@@ -51,6 +53,7 @@ export function Ibgp() {
     { label: "rxcost", get: (r) => r.babel_rxcost },
     { label: "Type", get: (r) => r.babel_type },
     { label: "WG", get: (r) => (r.has_wg ? "yes" : "no") },
+    { label: "MTU", get: (r) => r.has_wg ? (r.mtu ?? "Auto") : "—" },
   ];
 
   const load = useCallback(async () => {
@@ -88,6 +91,7 @@ export function Ibgp() {
     { name: "babel_rxcost", label: "Babel rxcost", type: "number", value: 0 },
     { name: "babel_type", label: "Babel type", type: "select", options: [{ value: "tunnel", label: "tunnel", selected: true }, { value: "wired", label: "wired" }, { value: "wireless", label: "wireless" }] },
     { name: "listen_port", label: "Listen port", type: "number" },
+    mtuField(),
   ];
 
   const editFields = (p: IbgpPeer): FieldDef[] => [
@@ -100,6 +104,7 @@ export function Ibgp() {
     { name: "babel_rxcost", label: "rxcost", type: "number", value: p.babel_rxcost },
     { name: "babel_type", label: "Babel type", type: "select", options: [{ value: "tunnel", label: "tunnel", selected: p.babel_type === "tunnel" }, { value: "wired", label: "wired", selected: p.babel_type === "wired" }, { value: "wireless", label: "wireless", selected: p.babel_type === "wireless" }] },
     { name: "listen_port", label: "Listen port", type: "number", value: p.listen_port },
+    mtuField(p.mtu),
   ];
 
   return (
@@ -142,6 +147,7 @@ export function Ibgp() {
               name: d.name,
               peer_ip: d.peer_ip,
               has_wg: !!d.has_wg,
+              mtu: parseMtu(d.mtu),
               babel_rxcost: Number(d.babel_rxcost || 0),
               babel_type: d.babel_type,
               // The select always submits; "" is how the UI says "not linked".
@@ -176,6 +182,8 @@ export function Ibgp() {
               babel_type: d.babel_type,
               remote_node_id: d.remote_node_id || null,
             };
+            const mtu = parseMtu(d.mtu);
+            if (mtu !== selected.mtu) body.mtu = mtu;
             if (d.listen_port) body.listen_port = Number(d.listen_port);
             const allowed = parseAllowedIps(d.allowed_ips || "");
             if (allowed) body.allowed_ips = allowed;

@@ -194,23 +194,9 @@ def _diff(path: Path, new_content: str) -> ApplyDiff:
     return ApplyDiff(path=path, action="update", diff=diff)
 
 
-def _render_bgp_peer_files(
-    peer: dict[str, Any], paths: ResolvedPaths, node_id: str
-) -> list[tuple[Path, str, FilePolicy]]:
-    """Return [(path, content, policy), ...] for this BGP peer."""
+def _render_wg_files(peer: dict[str, Any], paths: ResolvedPaths) -> list[tuple[Path, str, FilePolicy]]:
     ifname = peer["ifname"]
-    out: list[tuple[Path, str, FilePolicy]] = []
-
-    bird_path = paths.bird_peers_dir / f"{ifname}.conf"
-    out.append(
-        (
-            bird_path,
-            render_bird_bgp_peer_conf(ifname=ifname, peer_lla=peer["peer_lla"], peer_asn=int(peer["peer_asn"])),
-            BIRD,
-        )
-    )
-
-    out.append(
+    return [
         (
             paths.networkd_dir / f"{ifname}.netdev",
             render_networkd_netdev(
@@ -222,25 +208,33 @@ def _render_bgp_peer_files(
                 allowed_ips=peer["allowed_ips"],
             ),
             NETDEV,
-        )
-    )
-    out.append(
+        ),
         (
             paths.networkd_dir / f"{ifname}.network",
             render_networkd_network(
                 ifname=ifname,
                 local_lla=peer["local_lla"],
-                peer_lla=peer["peer_lla"],
+                peer_lla=peer.get("peer_lla") or "",
+                mtu=peer.get("mtu"),
             ),
             NETWORK,
-        )
-    )
-    return out
+        ),
+    ]
 
 
-def _render_ibgp_peer_files(
-    peer: dict[str, Any], paths: ResolvedPaths, node_id: str
-) -> list[tuple[Path, str, FilePolicy]]:
+def _render_bgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths) -> list[tuple[Path, str, FilePolicy]]:
+    ifname = peer["ifname"]
+    return [
+        (
+            paths.bird_peers_dir / f"{ifname}.conf",
+            render_bird_bgp_peer_conf(ifname=ifname, peer_lla=peer["peer_lla"], peer_asn=int(peer["peer_asn"])),
+            BIRD,
+        ),
+        *_render_wg_files(peer, paths),
+    ]
+
+
+def _render_ibgp_peer_files(peer: dict[str, Any], paths: ResolvedPaths) -> list[tuple[Path, str, FilePolicy]]:
     name = peer["name"]
     ifname = peer["ifname"]
     out: list[tuple[Path, str, FilePolicy]] = []
@@ -254,33 +248,8 @@ def _render_ibgp_peer_files(
                 BIRD,
             )
         )
-    if not peer["has_wg"]:
-        return out
-    out.append(
-        (
-            paths.networkd_dir / f"{ifname}.netdev",
-            render_networkd_netdev(
-                ifname=ifname,
-                private_key=peer["wg_private_key"],
-                listen_port=int(peer["listen_port"]),
-                peer_public_key=peer["peer_public_key"],
-                endpoint=peer.get("endpoint") or "",
-                allowed_ips=peer["allowed_ips"],
-            ),
-            NETDEV,
-        )
-    )
-    out.append(
-        (
-            paths.networkd_dir / f"{ifname}.network",
-            render_networkd_network(
-                ifname=ifname,
-                local_lla=peer["local_lla"],
-                peer_lla=peer.get("peer_lla") or "",
-            ),
-            NETWORK,
-        )
-    )
+    if peer["has_wg"]:
+        out.extend(_render_wg_files(peer, paths))
     return out
 
 
@@ -456,7 +425,6 @@ def apply(
         raise Dn42CtlError("本地缓存为空,先运行 dn42ctl node pull")
 
     payload = cached.payload
-    node_id = node_config.node_id
 
     try:
         app_config: AppConfig | None = load_config(config_path)
@@ -466,11 +434,14 @@ def apply(
     warnings: list[str] = []
 
     files: list[tuple[Path, str, FilePolicy]] = []
-    for peer in payload.get("bgp_peers", []):
-        files.extend(_render_bgp_peer_files(peer, paths, node_id))
-    for peer in payload.get("ibgp_peers", []):
-        files.extend(_render_ibgp_peer_files(peer, paths, node_id))
-    files.append(_render_babel(payload, paths))
+    try:
+        for peer in payload.get("bgp_peers", []):
+            files.extend(_render_bgp_peer_files(peer, paths))
+        for peer in payload.get("ibgp_peers", []):
+            files.extend(_render_ibgp_peer_files(peer, paths))
+        files.append(_render_babel(payload, paths))
+    except ValueError as exc:
+        raise Dn42CtlError(f"节点 {node_config.node_id} 的 peer 配置无效: {exc}") from exc
 
     # Backwards compatibility: for a node without a `node` block, the set of written
     # files is byte-for-byte what it was before this feature landed.

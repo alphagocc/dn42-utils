@@ -6,12 +6,13 @@ import uuid
 from collections.abc import Callable
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Annotated, Any, TypeVar
 
 import typer
 
 from dn42ctl.cli_errors import EXIT_FAILURE, EXIT_USAGE, cli_errors
 from dn42ctl.config import save_config
+from dn42ctl.constants import MAX_PEER_MTU, MIN_PEER_MTU, UNSET, _Unset
 from dn42ctl.context import AppContext
 from dn42ctl.paths import (
     DEFAULT_BIRD_BABEL_CONF_PATH,
@@ -63,6 +64,7 @@ app = typer.Typer(add_completion=False)
 
 
 _ValidatedT = TypeVar("_ValidatedT")
+PeerMtuOption = Annotated[int | None, typer.Option(min=MIN_PEER_MTU, max=MAX_PEER_MTU, help="WireGuard 接口 MTU")]
 
 
 def _cli_validate(fn: Callable[..., _ValidatedT], *args: Any, **kwargs: Any) -> _ValidatedT:
@@ -148,6 +150,20 @@ def _confirm_overwrite_if_exists(path: Path) -> bool:
     return True
 
 
+def _mtu_edit(mtu: int | None, clear_mtu: bool) -> int | None | _Unset:
+    if clear_mtu and mtu is not None:
+        raise typer.BadParameter("--mtu 与 --clear-mtu 不能同时指定")
+    if clear_mtu:
+        return None
+    return UNSET if mtu is None else mtu
+
+
+def _peer_edit_value(value: _ValidatedT | None, label: str, current: _ValidatedT, *, prompt: bool) -> _ValidatedT:
+    if value is not None:
+        return value
+    return typer.prompt(label, default=current) if prompt else current
+
+
 def _print_wg_tunnels(tunnels: list["WgTunnelView"]) -> None:
     if not tunnels:
         typer.echo("(空) 未找到任何 WireGuard 隧道")
@@ -159,6 +175,7 @@ def _print_wg_tunnels(tunnels: list["WgTunnelView"]) -> None:
         typer.echo(f"  endpoint: {t.endpoint or ''}")
         typer.echo(f"  local_lla: {t.local_lla}  peer_lla: {t.peer_lla or ''}")
         typer.echo(f"  allowed_ips: {', '.join(t.allowed_ips)}")
+        typer.echo(f"  mtu: {t.mtu or 'auto'}")
         _print_file_statuses([asdict(f) for f in t.files])
         if t.live_wg is not None:
             typer.echo(f"  live(wg): {'OK' if t.live_wg.ok else 'UNAVAILABLE'}")
@@ -170,6 +187,7 @@ def _print_bgp_peers(peers: list["BgpPeerView"]) -> None:
         return
     for p in peers:
         typer.echo(f"AS{p.peer_asn} ifname={p.ifname} backend={p.net_backend} port={p.listen_port}")
+        typer.echo(f"  mtu: {p.mtu or 'auto'}")
         typer.echo(f"  peer_lla: {p.peer_lla or ''}")
         typer.echo(f"  endpoint: {p.endpoint or ''}")
         typer.echo(f"  peer_pubkey: {p.peer_public_key or ''}")
@@ -191,6 +209,7 @@ def _print_ibgp_peers(peers: list["IbgpPeerView"]) -> None:
         typer.echo(f"{p.name} proto={proto} ifname={p.ifname} [{wg_tag}] backend={p.net_backend} port={p.listen_port}")
         typer.echo(f"  peer_ip: {p.peer_ip or ''}")
         if p.has_wg:
+            typer.echo(f"  mtu: {p.mtu or 'auto'}")
             typer.echo(f"  babel_rxcost: {p.babel_rxcost}")
             typer.echo(f"  babel_type: {p.babel_type}")
             typer.echo(f"  peer_lla: {p.peer_lla or ''}")
@@ -489,6 +508,7 @@ def cmd_bgp_peer(
         "--allowed-ips",
         help="WireGuard AllowedIPs (逗号分隔的 IPv6 CIDR，如 fd00::/8,fe80::/64；留空则使用默认值)",
     ),
+    mtu: PeerMtuOption = None,
 ) -> None:
     if ctx.invoked_subcommand is not None:
         return
@@ -524,6 +544,7 @@ def cmd_bgp_peer(
 
     res = create_bgp_peer(
         config=config,
+        mtu=mtu,
         db_path=appctx.db_path,
         peer_asn=peer_asn,
         peer_public_key=peer_public_key,
@@ -564,30 +585,28 @@ def cmd_bgp_peer_modify(
         "--allowed-ips",
         help="WireGuard AllowedIPs (逗号分隔的 IPv6 CIDR；留空则保持不变)",
     ),
+    mtu: PeerMtuOption = None,
+    clear_mtu: bool = typer.Option(False, "--clear-mtu", help="移除显式 MTU 设置"),
 ) -> None:
     appctx: AppContext = ctx.obj
     config = appctx.require_config()
 
+    mtu_edit = _mtu_edit(mtu, clear_mtu)
+    prompt = mtu_edit is UNSET
     db = appctx.open_db()
     row = db.get_bgp_peer(config.node_id, peer_asn)
     if row is None:
         typer.echo("错误: 该 peer 不存在", err=True)
         raise typer.Exit(EXIT_USAGE)
 
-    if peer_public_key is None:
-        peer_public_key = typer.prompt("Peer 公钥", default=str(row["peer_public_key"] or ""))
-    if endpoint is None:
-        endpoint = typer.prompt("Peer Endpoint", default=str(row["endpoint"] or ""))
-    if peer_lla is None:
-        peer_lla = typer.prompt("Peer LLA", default=str(row["peer_lla"] or ""))
+    peer_public_key = _peer_edit_value(peer_public_key, "Peer 公钥", str(row["peer_public_key"] or ""), prompt=prompt)
+    endpoint = _peer_edit_value(endpoint, "Peer Endpoint", str(row["endpoint"] or ""), prompt=prompt)
+    peer_lla = _peer_edit_value(peer_lla, "Peer LLA", str(row["peer_lla"] or ""), prompt=prompt)
 
     current_allowed_ips = parse_allowed_ips_json(row["allowed_ips_json"])
-    if allowed_ips_str is None:
-        allowed_ips_str = typer.prompt("AllowedIPs (逗号分隔)", default=",".join(current_allowed_ips))
-
-    assert peer_public_key is not None
-    assert endpoint is not None
-    assert peer_lla is not None
+    allowed_ips_str = _peer_edit_value(
+        allowed_ips_str, "AllowedIPs (逗号分隔)", ",".join(current_allowed_ips), prompt=prompt
+    )
 
     parsed_allowed_ips: list[str] | None = None
     peer_public_key = _cli_validate(validate_pubkey, peer_public_key)
@@ -602,6 +621,7 @@ def cmd_bgp_peer_modify(
 
     res = modify_bgp_peer(
         config=config,
+        mtu=mtu_edit,
         db_path=appctx.db_path,
         peer_asn=peer_asn,
         peer_public_key=peer_public_key,
@@ -673,6 +693,7 @@ def cmd_ibgp_peer(
         "--allowed-ips",
         help="WireGuard AllowedIPs (逗号分隔的 IPv6 CIDR；留空则使用默认值)",
     ),
+    mtu: PeerMtuOption = None,
 ) -> None:
     if ctx.invoked_subcommand is not None:
         return
@@ -695,6 +716,8 @@ def cmd_ibgp_peer(
         parsed_allowed_ips = _cli_validate(validate_allowed_ips, allowed_ips_str)
 
     if no_wg:
+        if mtu is not None:
+            raise typer.BadParameter("--mtu 需要 WireGuard 隧道，不能与 --no-wg 同时指定")
         assert peer_ip is not None
         res = create_ibgp_peer(
             config=config,
@@ -746,6 +769,7 @@ def cmd_ibgp_peer(
         name=name,
         peer_ip=peer_ip,
         has_wg=True,
+        mtu=mtu,
         peer_public_key=peer_public_key,
         endpoint=endpoint,
         peer_lla=peer_lla,
@@ -789,10 +813,14 @@ def cmd_ibgp_peer_modify(
         "--allowed-ips",
         help="WireGuard AllowedIPs (逗号分隔的 IPv6 CIDR；留空则保持不变)",
     ),
+    mtu: PeerMtuOption = None,
+    clear_mtu: bool = typer.Option(False, "--clear-mtu", help="移除显式 MTU 设置"),
 ) -> None:
     appctx: AppContext = ctx.obj
     config = appctx.require_config()
 
+    mtu_edit = _mtu_edit(mtu, clear_mtu)
+    prompt = mtu_edit is UNSET
     db = appctx.open_db()
     try:
         peer_name = sanitize_name(name)
@@ -810,29 +838,19 @@ def cmd_ibgp_peer_modify(
         typer.echo("错误: 该 iBGP peer 未启用 WireGuard，不支持修改 WG 相关参数", err=True)
         raise typer.Exit(EXIT_USAGE)
 
-    if peer_public_key is None:
-        peer_public_key = typer.prompt("Peer 公钥", default=str(row["peer_public_key"] or ""))
-    if endpoint is None:
-        endpoint = typer.prompt("Peer Endpoint", default=str(row["endpoint"] or ""))
-    if peer_lla is None:
-        peer_lla = typer.prompt("Peer LLA", default=str(row["peer_lla"] or ""))
-    if peer_ip is None:
-        peer_ip = typer.prompt("对端网内 IPv6", default=str(row["peer_ip"] or ""))
-    if babel_rxcost is None:
-        babel_rxcost = typer.prompt("Babel rxcost", type=int, default=int(row["babel_rxcost"]))
-    if babel_type is None:
-        babel_type = typer.prompt("Babel type (wired/wireless/tunnel)", default=str(row["babel_type"] or "tunnel"))
+    peer_public_key = _peer_edit_value(peer_public_key, "Peer 公钥", str(row["peer_public_key"] or ""), prompt=prompt)
+    endpoint = _peer_edit_value(endpoint, "Peer Endpoint", str(row["endpoint"] or ""), prompt=prompt)
+    peer_lla = _peer_edit_value(peer_lla, "Peer LLA", str(row["peer_lla"] or ""), prompt=prompt)
+    peer_ip = _peer_edit_value(peer_ip, "对端网内 IPv6", str(row["peer_ip"] or ""), prompt=prompt)
+    babel_rxcost = _peer_edit_value(babel_rxcost, "Babel rxcost", int(row["babel_rxcost"]), prompt=prompt)
+    babel_type = _peer_edit_value(
+        babel_type, "Babel type (wired/wireless/tunnel)", str(row["babel_type"] or "tunnel"), prompt=prompt
+    )
 
     current_allowed_ips = parse_allowed_ips_json(row["allowed_ips_json"])
-    if allowed_ips_str is None:
-        allowed_ips_str = typer.prompt("AllowedIPs (逗号分隔)", default=",".join(current_allowed_ips))
-
-    assert peer_public_key is not None
-    assert endpoint is not None
-    assert peer_lla is not None
-    assert peer_ip is not None
-    assert babel_rxcost is not None
-    assert babel_type is not None
+    allowed_ips_str = _peer_edit_value(
+        allowed_ips_str, "AllowedIPs (逗号分隔)", ",".join(current_allowed_ips), prompt=prompt
+    )
 
     parsed_allowed_ips: list[str] | None = None
     peer_public_key = _cli_validate(validate_pubkey, peer_public_key)
@@ -854,6 +872,7 @@ def cmd_ibgp_peer_modify(
 
     res = modify_ibgp_peer(
         config=config,
+        mtu=mtu_edit,
         db_path=appctx.db_path,
         name=peer_name,
         peer_public_key=peer_public_key,
@@ -1300,7 +1319,6 @@ def cmd_node_set_address(
     未指定的字段保持不变；--clear-* 表示取消中心管理、交还节点本地。
     """
     appctx: AppContext = ctx.obj
-    from dn42ctl.constants import UNSET
     from dn42ctl.services.node_address import set_node_addresses
 
     def _pick(value: str | None, clear: bool, flag: str):  # noqa: ANN202

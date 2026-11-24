@@ -5,6 +5,7 @@ import { FormModal, type FieldDef } from "../../shared/components/Modal";
 import { ConfirmModal } from "../../shared/components/Modal";
 import { useToast } from "../../shared/components/Toast";
 import { useNodeScope } from "../NodeContext";
+import { mtuField, parseMtu } from "../peerMtu";
 
 interface BgpPeer {
   peer_asn: number;
@@ -12,6 +13,7 @@ interface BgpPeer {
   endpoint: string;
   peer_lla: string;
   listen_port: number;
+  mtu: number | null;
   net_backend: string;
   peer_public_key: string;
   allowed_ips: string[];
@@ -23,6 +25,7 @@ const columns: Column<BgpPeer>[] = [
   { label: "Endpoint", get: (r) => r.endpoint || "—" },
   { label: "Peer LLA", get: (r) => r.peer_lla },
   { label: "Port", get: (r) => r.listen_port },
+  { label: "MTU", get: (r) => r.mtu ?? "Auto" },
   { label: "AllowedIPs", get: (r) => (r.allowed_ips || []).join(", ") },
   { label: "Backend", get: (r) => r.net_backend },
 ];
@@ -61,6 +64,7 @@ export function Bgp() {
     { name: "peer_lla", label: "Peer LLA (IPv6)", required: true },
     { name: "allowed_ips", label: "AllowedIPs (comma separated, blank=default)" },
     { name: "listen_port", label: "Listen port (blank=auto)", type: "number" },
+    mtuField(),
   ];
 
   const editFields = (p: BgpPeer): FieldDef[] => [
@@ -69,6 +73,7 @@ export function Bgp() {
     { name: "peer_lla", label: "Peer LLA", value: p.peer_lla, required: true },
     { name: "allowed_ips", label: "AllowedIPs (comma separated)", value: (p.allowed_ips || []).join(", ") },
     { name: "listen_port", label: "Listen port", type: "number", value: p.listen_port },
+    mtuField(p.mtu),
   ];
 
   return (
@@ -109,6 +114,7 @@ export function Bgp() {
           onSubmit={async (d) => {
             const body: Record<string, unknown> = {
               peer_asn: Number(d.peer_asn),
+              mtu: parseMtu(d.mtu),
               peer_public_key: d.peer_public_key,
               endpoint: d.endpoint || "",
               peer_lla: d.peer_lla,
@@ -135,6 +141,8 @@ export function Bgp() {
               endpoint: d.endpoint || "",
               peer_lla: d.peer_lla,
             };
+            const mtu = parseMtu(d.mtu);
+            if (mtu !== selected.mtu) body.mtu = mtu;
             if (d.listen_port) body.listen_port = Number(d.listen_port);
             const allowed = parseAllowedIps(d.allowed_ips || "");
             if (allowed) body.allowed_ips = allowed;

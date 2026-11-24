@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -64,6 +64,7 @@ class _PeerRecordBase:
     listen_port: int
     allowed_ips: list[str]
     net_backend: str
+    mtu: int | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -186,9 +187,9 @@ class Database:
                     wg_private_key, wg_public_key,
                     peer_public_key, endpoint,
                     local_lla, peer_lla, listen_port,
-                    allowed_ips_json, net_backend,
+                    allowed_ips_json, net_backend, mtu,
                     created_at, updated_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """.strip(),
                 (
                     record.node_id,
@@ -203,6 +204,7 @@ class Database:
                     record.listen_port,
                     json.dumps(record.allowed_ips, ensure_ascii=False),
                     record.net_backend,
+                    record.mtu,
                     now,
                     now,
                 ),
@@ -227,6 +229,7 @@ class Database:
         listen_port: int,
         allowed_ips: list[str],
         net_backend: str,
+        mtu: int | None | _Unset = UNSET,
     ) -> None:
         now = _now_iso()
         try:
@@ -234,7 +237,7 @@ class Database:
                 """
                 UPDATE bgp_peers
                 SET peer_public_key=?, endpoint=?, peer_lla=?,
-                    listen_port=?,
+                    listen_port=?, mtu=CASE WHEN ? THEN mtu ELSE ? END,
                     allowed_ips_json=?, net_backend=?, updated_at=?
                 WHERE node_id=? AND peer_asn=?
                 """.strip(),
@@ -243,6 +246,8 @@ class Database:
                     endpoint,
                     peer_lla,
                     listen_port,
+                    isinstance(mtu, _Unset),
+                    None if isinstance(mtu, _Unset) else mtu,
                     json.dumps(allowed_ips, ensure_ascii=False),
                     net_backend,
                     now,
@@ -355,11 +360,11 @@ class Database:
                     wg_private_key, wg_public_key,
                     peer_public_key, endpoint,
                     local_lla, peer_lla, listen_port,
-                    allowed_ips_json, net_backend,
+                    allowed_ips_json, net_backend, mtu,
                     babel_rxcost, peer_ip, has_wg,
                     babel_type, remote_node_id,
                     created_at, updated_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """.strip(),
                 (
                     record.node_id,
@@ -374,6 +379,7 @@ class Database:
                     record.listen_port,
                     json.dumps(record.allowed_ips, ensure_ascii=False),
                     record.net_backend,
+                    record.mtu,
                     record.babel_rxcost,
                     record.peer_ip,
                     1 if record.has_wg else 0,
@@ -406,6 +412,7 @@ class Database:
         babel_rxcost: int,
         peer_ip: str | None,
         babel_type: str,
+        mtu: int | None | _Unset = UNSET,
         remote_node_id: str | None | _Unset = UNSET,
     ) -> None:
         now = _now_iso()
@@ -421,7 +428,7 @@ class Database:
                 f"""
                 UPDATE ibgp_peers
                 SET peer_public_key=?, endpoint=?, peer_lla=?,
-                    listen_port=?, allowed_ips_json=?, net_backend=?,
+                    listen_port=?, mtu=CASE WHEN ? THEN mtu ELSE ? END, allowed_ips_json=?, net_backend=?,
                     babel_rxcost=?, peer_ip=?, babel_type=?,{extra_set} updated_at=?
                 WHERE node_id=? AND name=?
                 """.strip(),  # noqa: S608 (extra_set 是本方法的字面量,不含外部输入)
@@ -430,6 +437,8 @@ class Database:
                     endpoint,
                     peer_lla,
                     listen_port,
+                    isinstance(mtu, _Unset),
+                    None if isinstance(mtu, _Unset) else mtu,
                     json.dumps(allowed_ips, ensure_ascii=False),
                     net_backend,
                     babel_rxcost,

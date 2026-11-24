@@ -19,6 +19,7 @@ from dn42ctl.services.core import (
     open_db_and_ensure_node,
     sanitize_name,
 )
+from dn42ctl.validators import validate_mtu
 from dn42ctl.wg import WireGuardError, pubkey_from_private
 
 _BIRD_INCLUDE_RE = re.compile(
@@ -160,6 +161,19 @@ def _strip_inline_comment(line: str) -> str:
     return line
 
 
+def _read_mtu_setting(settings: dict[str, object], value: str) -> None:
+    if not value:
+        settings.pop("mtu", None)
+        return
+    suffix = value[-1]
+    scale = {"K": 1024, "M": 1024**2, "G": 1024**3}.get(suffix)
+    try:
+        size = int(value) if scale is None else int(value[:-1]) * scale
+        settings["mtu"] = validate_mtu(size)
+    except ValueError as exc:
+        raise Dn42CtlError(f"不支持的 MTUBytes: {value}") from exc
+
+
 def _parse_networkd_netdev(text: str) -> dict[str, object]:
     section = ""
     allowed_ips: list[str] = []
@@ -180,7 +194,9 @@ def _parse_networkd_netdev(text: str) -> dict[str, object]:
         key = key.strip()
         val = val.strip()
 
-        if section == "WireGuard":
+        if section == "NetDev" and key == "MTUBytes":
+            _read_mtu_setting(out, val)
+        elif section == "WireGuard":
             if key == "PrivateKey":
                 out["private_key"] = val
             elif key == "ListenPort":
@@ -225,7 +241,9 @@ def _parse_networkd_network(text: str) -> dict[str, object]:
         key, val = line.split("=", 1)
         key = key.strip()
         val = val.strip()
-        if section == "Address":
+        if section == "Link" and key == "MTUBytes":
+            _read_mtu_setting(out, val)
+        elif section == "Address":
             if key == "Address":
                 out["local_lla"] = val.split("/", 1)[0]
             elif key == "Peer":
@@ -406,6 +424,7 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
                 continue
 
             raw_port = data.get("listen_port")
+            mtu = data.get("mtu")
             listen_port: int = 0
             if isinstance(raw_port, int):
                 listen_port = raw_port
@@ -492,6 +511,7 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
                             local_lla=local_lla,
                             peer_lla=peer_lla,
                             listen_port=listen_port,
+                            mtu=mtu if isinstance(mtu, int) else None,
                             allowed_ips=allowed_ips_list,
                             net_backend=backend,
                         )
@@ -574,6 +594,7 @@ def scan_local_configs(*, config: AppConfig, db_path: Path) -> ScanResult:
                             local_lla=local_lla,
                             peer_lla=peer_lla,
                             listen_port=listen_port,
+                            mtu=mtu if isinstance(mtu, int) else None,
                             allowed_ips=allowed_ips_list,
                             net_backend=backend,
                             babel_rxcost=scan_rxcost,
