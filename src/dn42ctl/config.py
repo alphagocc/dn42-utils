@@ -77,7 +77,7 @@ def load_config(path: Path) -> AppConfig:
     except FileNotFoundError as exc:
         raise ConfigError(f"Config not found: {path}") from exc
     except Exception as exc:  # noqa: BLE001
-        raise ConfigError(f"Failed to read config: {path}") from exc
+        raise ConfigError(f"配置文件读取失败: {path}") from exc
 
     if not isinstance(raw, dict):
         raise ConfigError(f"Invalid config format: {path}")
